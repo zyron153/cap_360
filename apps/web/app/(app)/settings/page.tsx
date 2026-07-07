@@ -680,21 +680,6 @@ const INTEGRATIONS_DEF = [
       { key: "entityCode",  label: "Código Entidade", placeholder: "CV-CLINIC-0001"              },
     ] as FieldDef[],
   },
-  {
-    key: "efatura",
-    name: "E-Fatura CV",
-    desc: "Submissão eletrónica de faturas (AT Cabo Verde)",
-    icon: Receipt, color: "text-sky-600", bg: "bg-sky-50",
-    defaultStatus: "disconnected" as IntgStatus,
-    fields: [
-      { key: "enabled",         label: "Ativar integração",  placeholder: "", type: "toggle"   },
-      { key: "sandbox",         label: "Modo sandbox (testes)", placeholder: "", type: "toggle" },
-      { key: "nifContribuinte", label: "NIF Contribuinte",   placeholder: "200456789"           },
-      { key: "nomeEmpresa",     label: "Nome da Empresa",    placeholder: "Clínica Mais Saúde"  },
-      { key: "apiKey",          label: "API Key",            placeholder: "••••••••", type: "password" },
-      { key: "endpoint",        label: "Endpoint (produção)", placeholder: "https://mw.efatura.cv", type: "url", hint: "Deixe em branco para usar o URL padrão" },
-    ] as FieldDef[],
-  },
 ] as const;
 
 type IntgKey = typeof INTEGRATIONS_DEF[number]["key"];
@@ -709,6 +694,129 @@ function loadIntgStatus(): Record<IntgKey, IntgStatus> {
 function loadIntgConfig(): Record<string, Record<string, string>> {
   try { const r = localStorage.getItem(LS_INTG_CONFIG); if (r) return JSON.parse(r); } catch {}
   return {};
+}
+
+function EFaturaSection() {
+  const { addMessage } = useMessage();
+  const queryClient = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+  const [vals, setVals] = useState({
+    enabled: false, sandbox: true,
+    nifContribuinte: "", nomeEmpresa: "", apiKey: "", endpoint: "",
+  });
+
+  const { data: allSettings } = useQuery<Record<string, Record<string, string>>>({
+    queryKey: ["settings-all"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    const saved = allSettings?.["integration_efatura"];
+    if (!saved || !Object.keys(saved).length) return;
+    setVals({
+      enabled: saved.enabled === "true",
+      sandbox: saved.sandbox !== "false",
+      nifContribuinte: saved.nifContribuinte ?? "",
+      nomeEmpresa: saved.nomeEmpresa ?? "",
+      apiKey: saved.apiKey ?? "",
+      endpoint: saved.endpoint ?? "",
+    });
+  }, [allSettings]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/settings/integration/efatura", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: vals.enabled ? "true" : "false",
+          sandbox: vals.sandbox ? "true" : "false",
+          nifContribuinte: vals.nifContribuinte,
+          nomeEmpresa: vals.nomeEmpresa,
+          apiKey: vals.apiKey,
+          endpoint: vals.endpoint,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      queryClient.invalidateQueries({ queryKey: ["settings-all"] });
+      addMessage("Success", "Configuração E-Fatura guardada.");
+    } catch {
+      addMessage("Error", "Erro ao guardar configuração E-Fatura.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className={`${CARD} mt-6`}>
+      <div className="px-6 py-5 border-b border-dim-100 flex items-center gap-3">
+        <div className="w-9 h-9 bg-sky-50 rounded-[10px] flex items-center justify-center shrink-0">
+          <Receipt className="text-sky-600" style={{ width: 18, height: 18 }} />
+        </div>
+        <div>
+          <p className="text-[14px] font-semibold text-dim-900">E-Fatura CV</p>
+          <p className="text-[11px] text-dim-400">Submissão eletrónica de faturas — AT Cabo Verde</p>
+        </div>
+      </div>
+
+      <div className="px-6 py-5 flex flex-col gap-4">
+        <div className="flex items-center justify-between py-1">
+          <div>
+            <p className="text-[13px] font-semibold text-dim-800">Ativar integração</p>
+            <p className="text-[11px] text-dim-400">Submete automaticamente cada fatura emitida</p>
+          </div>
+          <Toggle checked={vals.enabled} onChange={v => setVals(p => ({ ...p, enabled: v }))} />
+        </div>
+        <div className="flex items-center justify-between py-1 border-t border-dim-100">
+          <div>
+            <p className="text-[13px] font-semibold text-dim-800">Modo sandbox</p>
+            <p className="text-[11px] text-dim-400">Usar ambiente de testes (sandbox.mw.efatura.cv)</p>
+          </div>
+          <Toggle checked={vals.sandbox} onChange={v => setVals(p => ({ ...p, sandbox: v }))} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 pt-1 border-t border-dim-100">
+          <Field label="NIF Contribuinte">
+            <input type="text" value={vals.nifContribuinte} placeholder="200456789"
+              onChange={e => setVals(p => ({ ...p, nifContribuinte: e.target.value }))}
+              className={inputCls} />
+          </Field>
+          <Field label="Nome da Empresa">
+            <input type="text" value={vals.nomeEmpresa} placeholder="Clínica Mais Saúde"
+              onChange={e => setVals(p => ({ ...p, nomeEmpresa: e.target.value }))}
+              className={inputCls} />
+          </Field>
+          <Field label="API Key">
+            <div className="relative">
+              <input type={showKey ? "text" : "password"} value={vals.apiKey} placeholder="••••••••"
+                onChange={e => setVals(p => ({ ...p, apiKey: e.target.value }))}
+                className={`${inputCls} pr-9`} autoComplete="off" />
+              <button type="button" onClick={() => setShowKey(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-dim-400 hover:text-dim-700 transition-colors">
+                {showKey ? <EyeOff style={{ width: 13, height: 13 }} /> : <Eye style={{ width: 13, height: 13 }} />}
+              </button>
+            </div>
+          </Field>
+          <Field label="Endpoint produção">
+            <input type="url" value={vals.endpoint} placeholder="https://mw.efatura.cv"
+              onChange={e => setVals(p => ({ ...p, endpoint: e.target.value }))}
+              className={inputCls} />
+            <p className="text-[10px] text-dim-400 mt-1 flex items-center gap-1">
+              <ExternalLink style={{ width: 9, height: 9 }} />
+              Deixe em branco para usar o sandbox em testes
+            </p>
+          </Field>
+        </div>
+      </div>
+
+      <div className="px-6 py-4 border-t border-dim-100">
+        <SaveButton saving={saving} onClick={handleSave} />
+      </div>
+    </div>
+  );
 }
 
 function IntegrationsTab() {
@@ -855,6 +963,8 @@ function IntegrationsTab() {
           onClose={() => setConfiguring(null)}
         />
       )}
+
+      <EFaturaSection />
     </>
   );
 }
