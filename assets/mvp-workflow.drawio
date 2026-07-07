@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="MVP Workflow">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1654" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="2" value="Clinica Mais Saude 360 — Fluxo de Funcionalidades MVP" style="text;html=1;strokeColor=none;fillColor=#0F9191;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=1;fontColor=#ffffff;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="960" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="3" value="1. Configuração Inicial" style="swimlane;startSize=40;fillColor=#e8eef4;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;fontColor=#1a3a5c;" vertex="1" parent="1">
+          <mxGeometry x="20" y="100" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="4" value="Parametrizações&#xa;Tipos de serviço, exames, especialidades" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="3">
+          <mxGeometry x="15" y="50" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="5" value="Equipa &amp; Colaboradores&#xa;Staff, funções, horários semanais" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="3">
+          <mxGeometry x="245" y="50" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="6" value="Gestão de Acesso&#xa;Perfis e permissões por módulo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="3">
+          <mxGeometry x="475" y="50" width="210" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="7" value="Integrações&#xa;WhatsApp · SMTP · Cloudflare R2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="3">
+          <mxGeometry x="705" y="50" width="240" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="31" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#555555;strokeWidth=2;" edge="1" source="3" target="8" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="8" value="2. Registo de Pacientes" style="swimlane;startSize=40;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;fontColor=#2d5a27;" vertex="1" parent="1">
+          <mxGeometry x="20" y="260" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="9" value="Registo de Paciente&#xa;Nome, NIF, data de nascimento, contacto" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="8">
+          <mxGeometry x="15" y="50" width="445" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="10" value="Plano de Saúde&#xa;Familiar · Corporativo · Particular" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="8">
+          <mxGeometry x="480" y="50" width="465" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="32" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#555555;strokeWidth=2;" edge="1" source="8" target="11" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="11" value="3. Agendamento" style="swimlane;startSize=40;fillColor=#e0f4f4;strokeColor=#0F9191;fontStyle=1;fontSize=12;fontColor=#0a5c5c;" vertex="1" parent="1">
+          <mxGeometry x="20" y="420" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="12" value="Criar Consulta&#xa;Paciente, serviço, médico, sala, data/hora" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0F9191;fontSize=11;" vertex="1" parent="11">
+          <mxGeometry x="15" y="50" width="290" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="13" value="Notificação Automática&#xa;Confirmação via WhatsApp" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0F9191;fontSize=11;" vertex="1" parent="11">
+          <mxGeometry x="330" y="50" width="290" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="14" value="Estado da Consulta&#xa;Pendente → Confirmada" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#0F9191;fontSize=11;" vertex="1" parent="11">
+          <mxGeometry x="645" y="50" width="300" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="33" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#555555;strokeWidth=2;" edge="1" source="11" target="15" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="15" value="4. Dia da Consulta" style="swimlane;startSize=40;fillColor=#fef4e0;strokeColor=#d6b656;fontStyle=1;fontSize=12;fontColor=#5a4200;" vertex="1" parent="1">
+          <mxGeometry x="20" y="580" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="16" value="Dashboard&#xa;Timeline em tempo real · Check-in: Confirmada → Presente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="15">
+          <mxGeometry x="15" y="50" width="445" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="17" value="Registos Clínicos&#xa;Consulta · Prescrição · Procedimento" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="15">
+          <mxGeometry x="480" y="50" width="465" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="34" value="Se necessário" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=2;dashed=1;fontStyle=2;fontSize=10;" edge="1" source="15" target="18" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="18" value="5. Exames &amp; Resultados (Opcional)" style="swimlane;startSize=40;fillColor=#f0eaf8;strokeColor=#9673a6;fontStyle=1;fontSize=12;fontColor=#5a3d78;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="740" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="19" value="Pedido de Exame&#xa;Tipo, categoria, urgente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="18">
+          <mxGeometry x="15" y="50" width="445" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="20" value="Rastreio de Estado&#xa;Pendente → Em Laboratório → Concluído → Entregue" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="18">
+          <mxGeometry x="480" y="50" width="465" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="35" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#555555;strokeWidth=2;" edge="1" source="18" target="21" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="21" value="6. Faturação" style="swimlane;startSize=40;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=12;fontColor=#5a3500;" vertex="1" parent="1">
+          <mxGeometry x="20" y="900" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="22" value="Criar Fatura&#xa;Serviço, paciente, valor em CVE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="21">
+          <mxGeometry x="15" y="50" width="290" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="23" value="Registar Pagamento&#xa;Numerário · Transferência · Vinti4 · Plano" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="21">
+          <mxGeometry x="330" y="50" width="290" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="24" value="Recibo PDF&#xa;Download via Cloudflare R2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="21">
+          <mxGeometry x="645" y="50" width="300" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="36" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#555555;strokeWidth=2;" edge="1" source="21" target="25" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="25" value="7. Gestão &amp; Análise" style="swimlane;startSize=40;fillColor=#e8e8f8;strokeColor=#7060a8;fontStyle=1;fontSize=12;fontColor=#3a2d7a;" vertex="1" parent="1">
+          <mxGeometry x="20" y="1060" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="26" value="Dashboard KPIs&#xa;Consultas, ocupação, receita, faltas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7060a8;fontSize=11;" vertex="1" parent="25">
+          <mxGeometry x="15" y="50" width="445" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="27" value="Analytics&#xa;Tendências mensais · Top serviços · Horas pico" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#7060a8;fontSize=11;" vertex="1" parent="25">
+          <mxGeometry x="480" y="50" width="465" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="37" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#555555;strokeWidth=2;" edge="1" source="25" target="28" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="28" value="8. Comunicação &amp; Visitas (Em Desenvolvimento)" style="swimlane;startSize=40;fillColor=#fce8f4;strokeColor=#b85490;fontStyle=1;fontSize=12;fontColor=#7a1a5a;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="1220" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="29" value="Visitas Domiciliárias&#xa;Agendamento, prioridade, zona, staff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85490;fontSize=11;" vertex="1" parent="28">
+          <mxGeometry x="15" y="50" width="445" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="30" value="WhatsApp Hub&#xa;Mensagens e conversas por paciente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85490;fontSize=11;" vertex="1" parent="28">
+          <mxGeometry x="480" y="50" width="465" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
