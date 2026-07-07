@@ -7,8 +7,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import Link from "next/link";
-import { ArrowLeft, Download, CheckCircle2, Clock, AlertCircle } from "lucide-react";
-import { RecordPaymentSchema, type RecordPaymentDto, type Invoice } from "@cms/types";
+import { ArrowLeft, Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield } from "lucide-react";
+import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type EFaturaSubmission } from "@cms/types";
 
 async function fetchInvoice(id: string) {
   const res = await fetch(`/api/invoices/${id}`);
@@ -33,6 +33,112 @@ async function getReceiptUrl(id: string) {
   const res = await fetch(`/api/invoices/${id}/receipt`);
   if (!res.ok) throw new Error("Erro ao obter recibo");
   return res.json() as Promise<{ url: string }>;
+}
+
+async function fetchEFaturaStatus(id: string) {
+  const res = await fetch(`/api/invoices/${id}/efatura`);
+  if (!res.ok) return null;
+  return res.json() as Promise<EFaturaSubmission>;
+}
+
+async function retryEFatura(id: string) {
+  const res = await fetch(`/api/invoices/${id}/efatura/retry`, { method: "POST" });
+  if (!res.ok) throw new Error("Erro ao retentar submissão");
+  return res.json();
+}
+
+const EFATURA_META: Record<string, { label: string; cls: string; dot: string }> = {
+  pending:    { label: "Pendente",    cls: "bg-dim-100 text-dim-500",                                       dot: "bg-dim-400"    },
+  submitting: { label: "A enviar…",  cls: "bg-brand-50 text-brand-700 ring-1 ring-brand-200/80",            dot: "bg-brand-500"  },
+  accepted:   { label: "Aceite",     cls: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80",      dot: "bg-emerald-500"},
+  rejected:   { label: "Rejeitada",  cls: "bg-red-50 text-red-600 ring-1 ring-red-200/80",                  dot: "bg-red-500"    },
+  cancelled:  { label: "Cancelada",  cls: "bg-dim-100 text-dim-400",                                        dot: "bg-dim-300"    },
+  error:      { label: "Erro",       cls: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80",             dot: "bg-amber-500"  },
+};
+
+function EFaturaPanel({ invoiceId }: { invoiceId: string }) {
+  const qc = useQueryClient();
+  const { data: submission, isLoading } = useQuery({
+    queryKey: ["efatura", invoiceId],
+    queryFn: () => fetchEFaturaStatus(invoiceId),
+    refetchInterval: (q) =>
+      q.state.data?.status === "submitting" || q.state.data?.status === "pending"
+        ? 4_000
+        : false,
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: () => retryEFatura(invoiceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["efatura", invoiceId] });
+    },
+  });
+
+  if (isLoading) return null;
+  if (!submission) return null;
+
+  const meta = EFATURA_META[submission.status] ?? EFATURA_META.pending;
+  const canRetry = submission.status === "error" || submission.status === "rejected";
+
+  return (
+    <div className="px-6 py-5 border-t border-dim-100 bg-dim-50/30">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Shield className="w-3.5 h-3.5 text-dim-500" />
+          <h3 className="font-display text-[13px] font-semibold text-dim-900">E-Factura</h3>
+        </div>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.cls}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+          {meta.label}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        {submission.atcud && (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-dim-500">ATCUD</span>
+            <span className="font-mono text-[11px] text-dim-900 font-semibold">{submission.atcud}</span>
+          </div>
+        )}
+        {submission.efaturaRef && (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-dim-500">Referência</span>
+            <span className="font-mono text-[11px] text-dim-900">{submission.efaturaRef}</span>
+          </div>
+        )}
+        {submission.submittedAt && (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-dim-500">Enviado em</span>
+            <span className="font-mono text-[11px] text-dim-600">
+              {format(new Date(submission.submittedAt), "d MMM yyyy HH:mm", { locale: pt })}
+            </span>
+          </div>
+        )}
+        {submission.errorMessage && (
+          <p className="text-[11px] text-red-600 mt-1 p-2 bg-red-50 rounded-[8px]">
+            {submission.errorMessage}
+          </p>
+        )}
+        {submission.retryCount > 0 && (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-dim-500">Tentativas</span>
+            <span className="font-mono text-[11px] text-dim-500">{submission.retryCount}</span>
+          </div>
+        )}
+      </div>
+
+      {canRetry && (
+        <button
+          onClick={() => retryMutation.mutate()}
+          disabled={retryMutation.isPending}
+          className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-semibold text-brand-700 hover:text-brand-900 disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw className={`w-3 h-3 ${retryMutation.isPending ? "animate-spin" : ""}`} />
+          {retryMutation.isPending ? "A retentar…" : "Retentar submissão"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 const STATUS_META: Record<string, { label: string; cls: string; icon: typeof CheckCircle2 }> = {
@@ -235,6 +341,9 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         )}
+
+        {/* E-Factura status panel */}
+        <EFaturaPanel invoiceId={id} />
 
         {/* Record payment form */}
         {!["paid", "cancelled"].includes(invoice.status) && (

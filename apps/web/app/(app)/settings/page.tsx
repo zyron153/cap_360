@@ -680,6 +680,21 @@ const INTEGRATIONS_DEF = [
       { key: "entityCode",  label: "Código Entidade", placeholder: "CV-CLINIC-0001"              },
     ] as FieldDef[],
   },
+  {
+    key: "efatura",
+    name: "E-Fatura CV",
+    desc: "Submissão eletrónica de faturas (AT Cabo Verde)",
+    icon: Receipt, color: "text-sky-600", bg: "bg-sky-50",
+    defaultStatus: "disconnected" as IntgStatus,
+    fields: [
+      { key: "enabled",         label: "Ativar integração",  placeholder: "", type: "toggle"   },
+      { key: "sandbox",         label: "Modo sandbox (testes)", placeholder: "", type: "toggle" },
+      { key: "nifContribuinte", label: "NIF Contribuinte",   placeholder: "200456789"           },
+      { key: "nomeEmpresa",     label: "Nome da Empresa",    placeholder: "Clínica Mais Saúde"  },
+      { key: "apiKey",          label: "API Key",            placeholder: "••••••••", type: "password" },
+      { key: "endpoint",        label: "Endpoint (produção)", placeholder: "https://mw.efatura.cv", type: "url", hint: "Deixe em branco para usar o URL padrão" },
+    ] as FieldDef[],
+  },
 ] as const;
 
 type IntgKey = typeof INTEGRATIONS_DEF[number]["key"];
@@ -866,26 +881,37 @@ function IntegrationConfigModal({
       <div className="px-6 py-5 flex flex-col gap-4">
         {intg.fields.map(f => {
           const isPassword = f.type === "password";
+          const isToggle = f.type === "toggle";
           const revealed = showPw[f.key];
           return (
             <div key={f.key}>
               <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">{f.label}</label>
-              <div className="relative">
-                <input
-                  type={isPassword && !revealed ? "password" : f.type === "url" ? "url" : "text"}
-                  value={vals[f.key] ?? ""}
-                  onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))}
-                  placeholder={f.placeholder}
-                  className={`${inputCls} ${isPassword ? "pr-9" : ""}`}
-                  autoComplete="off"
-                />
-                {isPassword && (
-                  <button type="button" onClick={() => setShowPw(s => ({ ...s, [f.key]: !s[f.key] }))}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-dim-400 hover:text-dim-700 transition-colors">
-                    {revealed ? <EyeOff style={{ width: 13, height: 13 }} /> : <Eye style={{ width: 13, height: 13 }} />}
-                  </button>
-                )}
-              </div>
+              {isToggle ? (
+                <div className="flex items-center gap-3 py-1">
+                  <Toggle
+                    checked={vals[f.key] === "true"}
+                    onChange={v => setVals(prev => ({ ...prev, [f.key]: v ? "true" : "false" }))}
+                  />
+                  <span className="text-[12px] text-dim-500">{vals[f.key] === "true" ? "Ativo" : "Inativo"}</span>
+                </div>
+              ) : (
+                <div className="relative">
+                  <input
+                    type={isPassword && !revealed ? "password" : f.type === "url" ? "url" : "text"}
+                    value={vals[f.key] ?? ""}
+                    onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                    className={`${inputCls} ${isPassword ? "pr-9" : ""}`}
+                    autoComplete="off"
+                  />
+                  {isPassword && (
+                    <button type="button" onClick={() => setShowPw(s => ({ ...s, [f.key]: !s[f.key] }))}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-dim-400 hover:text-dim-700 transition-colors">
+                      {revealed ? <EyeOff style={{ width: 13, height: 13 }} /> : <Eye style={{ width: 13, height: 13 }} />}
+                    </button>
+                  )}
+                </div>
+              )}
               {f.hint && <p className="text-[10px] text-dim-400 mt-1 flex items-center gap-1"><ExternalLink style={{ width: 9, height: 9 }} />{f.hint}</p>}
             </div>
           );

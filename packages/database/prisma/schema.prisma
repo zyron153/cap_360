@@ -52,6 +52,15 @@ enum InvoiceStatus {
   cancelled
 }
 
+enum EFaturaStatus {
+  pending
+  submitting
+  accepted
+  rejected
+  cancelled
+  error
+}
+
 enum PaymentMethod {
   cash
   bank_transfer
@@ -384,10 +393,11 @@ model Invoice {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  patient     Patient      @relation(fields: [patientId], references: [id])
-  appointment Appointment? @relation(fields: [appointmentId], references: [id])
-  items       InvoiceItem[]
-  payments    Payment[]
+  patient           Patient            @relation(fields: [patientId], references: [id])
+  appointment       Appointment?       @relation(fields: [appointmentId], references: [id])
+  items             InvoiceItem[]
+  payments          Payment[]
+  efaturaSubmission EFaturaSubmission?
 
   @@index([patientId])
   @@index([status])
@@ -426,6 +436,28 @@ model Payment {
 
   @@index([invoiceId])
   @@map("payments")
+}
+
+// ─── E-Factura ───────────────────────────────────────────────────────────────
+
+model EFaturaSubmission {
+  id           String        @id @default(uuid())
+  invoiceId    String        @unique
+  status       EFaturaStatus @default(pending)
+  atcud        String?       @db.VarChar(100)
+  efaturaRef   String?       @db.VarChar(100)
+  errorCode    String?       @db.VarChar(50)
+  errorMessage String?       @db.VarChar(500)
+  retryCount   Int           @default(0)
+  submittedAt  DateTime?
+  acceptedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@map("efatura_submissions")
 }
 
 // ─── Exams (Phase 1 stub, fully used in M5) ──────────────────────────────────

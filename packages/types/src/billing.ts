@@ -83,6 +83,40 @@ export interface Invoice {
   payments?: Payment[];
 }
 
+export const EFaturaStatus = {
+  PENDING: "pending",
+  SUBMITTING: "submitting",
+  ACCEPTED: "accepted",
+  REJECTED: "rejected",
+  CANCELLED: "cancelled",
+  ERROR: "error",
+} as const;
+export type EFaturaStatus = (typeof EFaturaStatus)[keyof typeof EFaturaStatus];
+
+export interface EFaturaSubmission {
+  id: string;
+  invoiceId: string;
+  status: EFaturaStatus;
+  atcud: string | null;
+  efaturaRef: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  retryCount: number;
+  submittedAt: string | null;
+  acceptedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EFaturaConfig {
+  enabled: boolean;
+  sandbox: boolean;
+  endpoint: string;
+  nifContribuinte: string;
+  apiKey: string;
+  nomeEmpresa: string;
+}
+
 export const InvoiceListQuerySchema = z.object({
   patientId: z.string().uuid().optional(),
   status: z

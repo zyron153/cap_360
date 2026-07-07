@@ -6,6 +6,8 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
 } from "@nestjs/common";
 import { BillingService } from "./billing.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -54,5 +56,16 @@ export class BillingController {
     @Body(new ZodValidationPipe(RecordPaymentSchema)) dto: RecordPaymentDto
   ) {
     return this.service.recordPayment(id, dto);
+  }
+
+  @Get(":id/efatura")
+  getEFaturaStatus(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.getEFaturaStatus(id);
+  }
+
+  @Post(":id/efatura/retry")
+  @HttpCode(HttpStatus.ACCEPTED)
+  retryEFatura(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.retryEFatura(id);
   }
 }

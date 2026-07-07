@@ -5,8 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { Plus, Receipt, ChevronLeft, ChevronRight, TrendingUp, AlertCircle, Clock } from "lucide-react";
-import type { Invoice, PaginatedResponse } from "@cms/types";
+import { Plus, Receipt, ChevronLeft, ChevronRight, TrendingUp, AlertCircle, Clock, Shield } from "lucide-react";
+import type { Invoice, PaginatedResponse, EFaturaStatus } from "@cms/types";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 
@@ -51,12 +51,31 @@ const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rg
 
 const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)]";
 
+const EFATURA_DOT: Record<string, string> = {
+  pending:    "bg-dim-300",
+  submitting: "bg-brand-400 animate-pulse",
+  accepted:   "bg-emerald-500",
+  rejected:   "bg-red-500",
+  error:      "bg-amber-500",
+  cancelled:  "bg-dim-300",
+};
+
+function EFaturaBadge({ status, atcud }: { status: EFaturaStatus; atcud: string | null }) {
+  const dot = EFATURA_DOT[status] ?? "bg-dim-300";
+  return (
+    <span title={atcud ? `ATCUD: ${atcud}` : status} className="inline-flex items-center gap-1">
+      <Shield className="w-3 h-3 text-dim-400" />
+      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+    </span>
+  );
+}
+
 const BLANK_FORM = { patientId: "", patient: "", service: "", amount: "", notes: "" };
 
 function SkeletonRow() {
   return (
     <tr className="animate-pulse">
-      {[100, 140, 80, 80, 80, 70, 50].map((w, i) => (
+      {[100, 140, 80, 80, 80, 70, 30, 50].map((w, i) => (
         <td key={i} className="px-5 py-3.5 border-b border-dim-100">
           <div className="h-3 bg-dim-100 rounded inline-block" style={{ width: w }} />
         </td>
@@ -185,7 +204,7 @@ export default function BillingPage() {
           <table className="w-full border-collapse">
             <thead>
               <tr>
-                {["Nº Fatura", "Paciente", "Data", "Total", "Em Dívida", "Estado", ""].map((h) => (
+                {["Nº Fatura", "Paciente", "Data", "Total", "Em Dívida", "Estado", "e-Fatura", ""].map((h) => (
                   <th
                     key={h}
                     className="text-left text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 px-5 py-2.5 border-b border-dim-100 bg-dim-50"
@@ -266,6 +285,14 @@ export default function BillingPage() {
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_META[inv.status]?.cls ?? "bg-dim-100 text-dim-600"}`}>
                           {STATUS_META[inv.status]?.label ?? inv.status}
                         </span>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        {(inv as Invoice & { efaturaSubmission?: { status: EFaturaStatus; atcud: string | null } }).efaturaSubmission && (
+                          <EFaturaBadge
+                            status={(inv as Invoice & { efaturaSubmission?: { status: EFaturaStatus; atcud: string | null } }).efaturaSubmission!.status}
+                            atcud={(inv as Invoice & { efaturaSubmission?: { status: EFaturaStatus; atcud: string | null } }).efaturaSubmission!.atcud}
+                          />
+                        )}
                       </td>
                       <td className="px-5 py-3.5 border-b border-dim-100">
                         <Link

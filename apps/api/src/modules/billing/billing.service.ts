@@ -3,8 +3,11 @@ import {
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
+import { InjectQueue } from "@nestjs/bull";
+import { Queue } from "bull";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
+import { PrismaService } from "../../prisma/prisma.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cms/database";
 import {
@@ -18,6 +21,8 @@ export class BillingService {
   constructor(
     private readonly repo: BillingRepository,
     private readonly r2: R2Service,
+    private readonly prisma: PrismaService,
+    @InjectQueue("efatura") private readonly efaturaQueue: Queue,
   ) {}
 
   async create(dto: CreateInvoiceDto) {
@@ -38,7 +43,7 @@ export class BillingService {
 
     const invoiceNumber = await this.repo.nextInvoiceNumber();
 
-    return this.repo.create({
+    const invoice = await this.repo.create({
       invoiceNumber,
       patient: { connect: { id: dto.patientId } },
       ...(dto.appointmentId
@@ -52,6 +57,18 @@ export class BillingService {
       dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       items: { create: itemsData },
     });
+
+    // Create pending submission record then enqueue (fire-and-forget)
+    await this.prisma.eFaturaSubmission.create({
+      data: { invoiceId: invoice.id, status: "pending" },
+    });
+    await this.efaturaQueue.add(
+      "submit",
+      { invoiceId: invoice.id },
+      { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
+    );
+
+    return invoice;
   }
 
   async findById(id: string) {
@@ -84,6 +101,7 @@ export class BillingService {
         take: limit,
         include: {
           patient: { select: { id: true, fullName: true } },
+          efaturaSubmission: { select: { status: true, atcud: true } },
         },
         orderBy: { createdAt: "desc" },
       }),
@@ -91,6 +109,33 @@ export class BillingService {
     ]);
 
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async getEFaturaStatus(invoiceId: string) {
+    const submission = await this.prisma.eFaturaSubmission.findUnique({
+      where: { invoiceId },
+    });
+    if (!submission) throw new NotFoundException("No E-Factura submission for this invoice");
+    return submission;
+  }
+
+  async retryEFatura(invoiceId: string) {
+    const invoice = await this.repo.findByIdLite(invoiceId);
+    if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
+
+    await this.prisma.eFaturaSubmission.upsert({
+      where: { invoiceId },
+      create: { invoiceId, status: "pending" },
+      update: { status: "pending", errorCode: null, errorMessage: null },
+    });
+
+    await this.efaturaQueue.add(
+      "submit",
+      { invoiceId },
+      { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
+    );
+
+    return { queued: true };
   }
 
   async recordPayment(invoiceId: string, dto: RecordPaymentDto) {
