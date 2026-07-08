@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Plus, CalendarDays, List, Clock, User, Stethoscope, DoorOpen, FileText } from "lucide-react";
@@ -10,6 +11,7 @@ import { io } from "socket.io-client";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
+import { usePermissions } from "../hooks/use-permissions";
 
 const CalendarView = dynamic(() => import("./_CalendarView"), {
   ssr: false,
@@ -105,6 +107,8 @@ const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text
 const BLANK_APPT = { patientId: "", serviceId: "", staffId: "", apptDate: "", apptTime: "", notes: "" };
 
 export default function AppointmentsPage() {
+  const { isLoading: permLoading, can, canDo } = usePermissions();
+  const router = useRouter();
   const [view, setView] = useState<"calendar" | "list">("calendar");
   const [newOpen, setNewOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -112,6 +116,10 @@ export default function AppointmentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
+
+  useEffect(() => {
+    if (!permLoading && !can("appointments")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
 
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
@@ -298,13 +306,15 @@ export default function AppointmentsPage() {
             </button>
           </div>
 
-          <button
-            onClick={() => setNewOpen(true)}
-            className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Nova Marcação
-          </button>
+          {canDo("appointments", "create") && (
+            <button
+              onClick={() => setNewOpen(true)}
+              className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nova Marcação
+            </button>
+          )}
         </div>
       </div>
 

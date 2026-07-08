@@ -15,7 +15,9 @@ const PAGE_TITLES: Record<string, string> = {
   "/staff":        "Equipa & Turnos",
   "/visits":       "Visitas Domiciliárias",
   "/analytics":    "Analytics",
-  "/settings":     "Configurações",
+  "/settings":       "Configurações",
+  "/access":         "Gestão de Acesso",
+  "/parametrizacoes":"Parametrizações",
 };
 
 const DAYS   = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];

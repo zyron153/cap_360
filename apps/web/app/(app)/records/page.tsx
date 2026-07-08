@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { ClipboardList, FileText, Pill, Stethoscope, StickyNote, Plus, ChevronRight } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Modal } from "@/components/ui/modal";
 
 type ClinicalRecord = {
@@ -65,6 +67,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export default function RecordsPage() {
+  const { isLoading: permLoading, can } = usePermissions();
+  const router = useRouter();
+  useEffect(() => {
+    if (!permLoading && !can("records")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
   const [records, setRecords] = useState<ClinicalRecord[]>(RECORDS_INITIAL);
   const [typeFilter, setTypeFilter] = useState("all");
   const [newOpen, setNewOpen] = useState(false);

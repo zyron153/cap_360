@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { Shield, Users, TrendingUp, AlertTriangle, Plus, ChevronRight } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Modal } from "@/components/ui/modal";
 import { useMessage } from "@/components/ui/message-handler";
 
@@ -75,6 +77,11 @@ const FALLBACK_PLAN_TYPES = [
 ];
 
 export default function HealthPlansPage() {
+  const { isLoading: permLoading, can } = usePermissions();
+  const router = useRouter();
+  useEffect(() => {
+    if (!permLoading && !can("health_plans")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
   const [newOpen, setNewOpen]             = useState(false);

@@ -5,9 +5,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
+import { usePermissions } from "../hooks/use-permissions";
 import { CreatePatientSchema, type CreatePatientDto } from "@cms/types";
 import type { Patient, PaginatedResponse } from "@cms/types";
 
@@ -433,11 +435,17 @@ const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rg
 // ── Page ───────────────────────────────────────────────────────
 
 export default function PatientsPage() {
+  const { isLoading: permLoading, can, canDo } = usePermissions();
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [planFilter, setPlanFilter] = useState("all");
   const [newPatientOpen, setNewPatientOpen] = useState(false);
   const [planPatient, setPlanPatient] = useState<Patient | null>(null);
+
+  useEffect(() => {
+    if (!permLoading && !can("patients")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["patients", search, planFilter, page],
@@ -459,13 +467,15 @@ export default function PatientsPage() {
               {isLoading ? "A carregar…" : error ? "Erro ao carregar pacientes" : `${data?.total ?? 0} pacientes registados`}
             </p>
           </div>
-          <button
-            onClick={() => setNewPatientOpen(true)}
-            className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Novo Paciente
-          </button>
+          {canDo("patients", "create") && (
+            <button
+              onClick={() => setNewPatientOpen(true)}
+              className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Novo Paciente
+            </button>
+          )}
         </div>
 
         {/* Search + filter */}

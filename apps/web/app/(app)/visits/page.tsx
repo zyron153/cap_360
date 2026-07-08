@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { usePermissions } from "../hooks/use-permissions";
 import { Home, Clock, CheckCircle, MapPin, Plus, ChevronRight, AlertTriangle } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 
@@ -73,6 +75,11 @@ const FALLBACK_VISIT_TYPES = [
 ];
 
 export default function VisitsPage() {
+  const { isLoading: permLoading, can } = usePermissions();
+  const router = useRouter();
+  useEffect(() => {
+    if (!permLoading && !can("visits")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
   const [visits, setVisits] = useState<Visit[]>(VISITS_INITIAL);
   const [newOpen, setNewOpen] = useState(false);
   const [viewingVisit, setViewingVisit] = useState<Visit | null>(null);

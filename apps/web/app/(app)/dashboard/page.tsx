@@ -216,6 +216,7 @@ export default function DashboardPage() {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 7)
     .map(([name, count], i) => ({
+      name,
       label: name.length > 5 ? name.slice(0, 5) + "." : name,
       pct: Math.round((count / maxSvc) * 100),
       cls: BAR_COLORS[i] ?? "bg-brand-400",
@@ -565,7 +566,7 @@ export default function DashboardPage() {
             ) : (
               <div className="flex items-end gap-1.5 h-20">
                 {serviceBars.map(b => (
-                  <div key={b.label} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
+                  <div key={b.name} className="flex-1 flex flex-col items-center gap-1 h-full justify-end">
                     <div className={`w-full ${b.cls} rounded-t hover:opacity-80 transition-opacity`} style={{ height: `${b.pct}%`, minHeight: 4 }}/>
                     <span className="font-mono text-[9px] text-dim-400">{b.label}</span>
                   </div>

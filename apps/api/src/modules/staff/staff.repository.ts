@@ -36,6 +36,13 @@ export class StaffRepository {
     });
   }
 
+  findByKeycloakId(keycloakId: string) {
+    return this.prisma.staff.findFirst({
+      where: { keycloakId, deletedAt: null },
+      select: STAFF_SELECT,
+    });
+  }
+
   update(id: string, dto: UpdateStaffDto) {
     const avail = dto.availability;
     return this.prisma.staff.update({

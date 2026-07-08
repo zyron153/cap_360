@@ -20,6 +20,12 @@ export class StaffService {
     return this.repo.create(dto);
   }
 
+  async findMe(keycloakId: string) {
+    const staff = await this.repo.findByKeycloakId(keycloakId);
+    // Fallback for dev hardcoded sub that has no real staff record
+    return staff ?? { id: null, fullName: "Dev Admin", email: "admin@dev", role: "admin", jobTitle: null, specialtyCode: null, phone: null, availability: [] };
+  }
+
   async update(id: string, dto: UpdateStaffDto) {
     const staff = await this.repo.findById(id);
     if (!staff) throw new NotFoundException(`Staff ${id} not found`);

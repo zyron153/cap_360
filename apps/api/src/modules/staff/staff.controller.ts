@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe, Req } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
@@ -8,6 +8,11 @@ import { CreateStaffSchema, CreateStaffDto, UpdateStaffSchema, UpdateStaffDto } 
 @Roles("admin", "receptionist", "doctor", "nurse")
 export class StaffController {
   constructor(private readonly service: StaffService) {}
+
+  @Get("me")
+  findMe(@Req() req: { user: { sub: string } }) {
+    return this.service.findMe(req.user.sub);
+  }
 
   @Get()
   findAll() {

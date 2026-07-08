@@ -1,4 +1,8 @@
+"use client";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { TrendingUp, Users, Calendar, Banknote } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 
 /* ── Static mock data ─────────────────────────────────────── */
 
@@ -83,6 +87,11 @@ const segments = planSegments();
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
 
 export default function AnalyticsPage() {
+  const { isLoading: permLoading, can } = usePermissions();
+  const router = useRouter();
+  useEffect(() => {
+    if (!permLoading && !can("analytics")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
   const peakMax = Math.max(...PEAK_HOURS.map((h) => h.count));
   const svcMax  = Math.max(...SERVICES.map((s) => s.count));
   const totalAppts = MONTHLY_APPTS.reduce((a, b) => a + b, 0);

@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Plus, Receipt, ChevronLeft, ChevronRight, TrendingUp, AlertCircle, Clock, Shield } from "lucide-react";
 import type { Invoice, PaginatedResponse, EFaturaStatus } from "@cms/types";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
+import { usePermissions } from "../hooks/use-permissions";
 
 async function fetchInvoices(page: number, status?: string) {
   const params = new URLSearchParams({ page: String(page), limit: "20" });
@@ -87,12 +89,18 @@ function SkeletonRow() {
 type LocalInvoice = { id: string; invoiceNumber: string; patient: { fullName: string }; total: number; amountPaid: number; status: "draft"; issuedAt: string | null };
 
 export default function BillingPage() {
+  const { isLoading: permLoading, can, canDo } = usePermissions();
+  const router = useRouter();
   const { addMessage } = useMessage();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [form, setForm] = useState(BLANK_FORM);
   const [localInvoices, setLocalInvoices] = useState<LocalInvoice[]>([]);
+
+  useEffect(() => {
+    if (!permLoading && !can("billing")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
 
   function set(k: keyof typeof BLANK_FORM, v: string) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -151,13 +159,15 @@ export default function BillingPage() {
             {isLoading ? "A carregar…" : error ? "Erro ao carregar faturas" : `${data?.total ?? 0} faturas`}
           </p>
         </div>
-        <button
-          onClick={() => setNewOpen(true)}
-          className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Nova Fatura
-        </button>
+        {canDo("billing", "create") && (
+          <button
+            onClick={() => setNewOpen(true)}
+            className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Nova Fatura
+          </button>
+        )}
       </div>
 
       {/* KPI cards */}

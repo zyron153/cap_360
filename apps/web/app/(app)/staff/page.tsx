@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { usePermissions } from "../hooks/use-permissions";
 import { Users2, Stethoscope, UserCheck, Clock, Phone, Mail, ChevronRight, Plus } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
@@ -291,6 +293,11 @@ function toFormValues(m: StaffMember): FormValues {
 }
 
 export default function StaffPage() {
+  const { isLoading: permLoading, can } = usePermissions();
+  const router = useRouter();
+  useEffect(() => {
+    if (!permLoading && !can("staff")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
   const { addMessage } = useMessage();
   const queryClient = useQueryClient();
   const [newOpen, setNewOpen] = useState(false);

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { FileSearch, Clock, CheckCircle, Upload, FlaskConical, Plus, ChevronRight } from "lucide-react";
+import { usePermissions } from "../hooks/use-permissions";
 import { Modal } from "@/components/ui/modal";
 
 type Exam = {
@@ -86,6 +88,11 @@ const FALLBACK_CATEGORIES = [
 ];
 
 export default function ExamsPage() {
+  const { isLoading: permLoading, can } = usePermissions();
+  const router = useRouter();
+  useEffect(() => {
+    if (!permLoading && !can("exams")) router.replace("/dashboard");
+  }, [permLoading, can, router]);
   const [exams, setExams] = useState<Exam[]>(EXAMS_INITIAL);
   const [newOpen, setNewOpen] = useState(false);
   const [viewingExam, setViewingExam] = useState<Exam | null>(null);
