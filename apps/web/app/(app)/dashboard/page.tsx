@@ -116,6 +116,7 @@ export default function DashboardPage() {
   const [patientForm, setPatientForm]   = useState({ fullName: "", dateOfBirth: "", phone: "", email: "", gender: "female" });
   const [patConsent, setPatConsent]     = useState(false);
   const [patSubmitting, setPatSubmitting] = useState(false);
+  const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
 
@@ -124,7 +125,9 @@ export default function DashboardPage() {
   const monthStart = format(new Date(NOW.getFullYear(), NOW.getMonth(), 1), "yyyy-MM-dd");
   const monthEnd   = format(new Date(NOW.getFullYear(), NOW.getMonth() + 1, 0), "yyyy-MM-dd");
   const todayLabel = format(NOW, "EEEE, dd MMM", { locale: pt });
-  const monthLabel = format(NOW, "MMMM yyyy", { locale: pt });
+  const calMonthStart = format(calMonth, "yyyy-MM-dd");
+  const calMonthEnd   = format(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0), "yyyy-MM-dd");
+  const monthLabel    = format(calMonth, "MMMM yyyy", { locale: pt });
 
   /* ── Queries ── */
   const { data: todayAppts = [], isLoading: todayLoading } = useQuery<TodayAppt[]>({
@@ -136,6 +139,12 @@ export default function DashboardPage() {
   const { data: monthAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", monthStart, monthEnd],
     queryFn:  () => fetch(`/api/appointments?from=${monthStart}&to=${monthEnd}`).then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const { data: calAppts = [] } = useQuery<MonthAppt[]>({
+    queryKey: ["appointments", "calendar", calMonthStart, calMonthEnd],
+    queryFn:  () => fetch(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`).then(r => r.json()),
     staleTime: 60_000,
   });
 
@@ -191,13 +200,14 @@ export default function DashboardPage() {
   const onlinePct = monthAppts.length > 0 ? Math.round((webCount / monthAppts.length) * 100) : 0;
 
   // Calendar dots
-  const apptDays = new Set(monthAppts.map(a => new Date(a.scheduledAt).getDate()));
-  const firstDOW = new Date(NOW.getFullYear(), NOW.getMonth(), 1).getDay();
-  const lastDay  = new Date(NOW.getFullYear(), NOW.getMonth() + 1, 0).getDate();
+  const apptDays = new Set(calAppts.map(a => new Date(a.scheduledAt).getDate()));
+  const firstDOW = calMonth.getDay();
+  const lastDay  = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0).getDate();
+  const isCurrentMonth = calMonth.getFullYear() === NOW.getFullYear() && calMonth.getMonth() === NOW.getMonth();
   const calDays  = [
     ...Array.from({ length: firstDOW }, () => ({ d: 0, muted: true, appt: false, today: false })),
     ...Array.from({ length: lastDay }, (_, i) => ({
-      d: i + 1, muted: false, appt: apptDays.has(i + 1), today: i + 1 === NOW.getDate(),
+      d: i + 1, muted: false, appt: apptDays.has(i + 1), today: isCurrentMonth && i + 1 === NOW.getDate(),
     })),
   ];
 
@@ -424,8 +434,8 @@ export default function DashboardPage() {
                 <span className="capitalize">{monthLabel}</span>
               </div>
               <div className="flex gap-1">
-                <button className="w-6 h-6 rounded flex items-center justify-center text-dim-400 hover:bg-dim-100 transition-colors"><ChevronLeft className="w-3 h-3"/></button>
-                <button className="w-6 h-6 rounded flex items-center justify-center text-dim-400 hover:bg-dim-100 transition-colors"><ChevronRight className="w-3 h-3"/></button>
+                <button onClick={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))} className="w-6 h-6 rounded flex items-center justify-center text-dim-400 hover:bg-dim-100 transition-colors"><ChevronLeft className="w-3 h-3"/></button>
+                <button onClick={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))} className="w-6 h-6 rounded flex items-center justify-center text-dim-400 hover:bg-dim-100 transition-colors"><ChevronRight className="w-3 h-3"/></button>
               </div>
             </div>
             <div className="px-5 py-4">
