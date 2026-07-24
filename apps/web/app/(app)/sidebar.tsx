@@ -102,7 +102,7 @@ export function Sidebar() {
             </svg>
           </div>
           <div className="leading-tight">
-            <strong className="font-display font-semibold text-[15px] text-white block">Mais Saúde 360</strong>
+            <strong className="font-display font-semibold text-[15px] text-white block">Clínica 360</strong>
             <span className="text-[10px] text-dim-400 tracking-[0.06em] uppercase font-medium">Healthcare ERP/CRM</span>
           </div>
         </div>
