@@ -1,8 +1,10 @@
 import { Test } from "@nestjs/testing";
 import { NotFoundException, BadRequestException } from "@nestjs/common";
+import { getQueueToken } from "@nestjs/bull";
 import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
+import { PrismaService } from "../../prisma/prisma.service";
 
 const repo = {
   nextInvoiceNumber: jest.fn(),
@@ -18,6 +20,14 @@ const repo = {
   findServiceById: jest.fn(),
 };
 const r2 = { isConfigured: jest.fn(), upload: jest.fn(), signedUrl: jest.fn() };
+const prisma = {
+  eFaturaSubmission: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    upsert: jest.fn(),
+  },
+};
+const efaturaQueue = { add: jest.fn() };
 
 const INVOICE = {
   id: "inv-1",
@@ -35,6 +45,8 @@ describe("BillingService", () => {
         BillingService,
         { provide: BillingRepository, useValue: repo },
         { provide: R2Service, useValue: r2 },
+        { provide: PrismaService, useValue: prisma },
+        { provide: getQueueToken("efatura"), useValue: efaturaQueue },
       ],
     }).compile();
     service = mod.get(BillingService);
@@ -129,6 +141,59 @@ describe("BillingService", () => {
           status: "draft",
         })
       );
+    });
+  });
+
+  describe("getEFaturaStatus", () => {
+    it("returns the submission record for a known invoice", async () => {
+      const sub = { invoiceId: "inv-1", status: "accepted", atcud: "ABCDE-1" };
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue(sub);
+      expect(await service.getEFaturaStatus("inv-1")).toEqual(sub);
+    });
+
+    it("throws NotFoundException when no submission exists", async () => {
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
+      await expect(service.getEFaturaStatus("inv-x")).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("retryEFatura", () => {
+    beforeEach(() => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      prisma.eFaturaSubmission.upsert.mockResolvedValue({});
+      efaturaQueue.add.mockResolvedValue({});
+    });
+
+    it("resets submission to 'pending' and clears error fields", async () => {
+      await service.retryEFatura("inv-1");
+      expect(prisma.eFaturaSubmission.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            status: "pending",
+            errorCode: null,
+            errorMessage: null,
+          }),
+        })
+      );
+    });
+
+    it("enqueues a submit job with 3 attempts", async () => {
+      await service.retryEFatura("inv-1");
+      expect(efaturaQueue.add).toHaveBeenCalledWith(
+        "submit",
+        { invoiceId: "inv-1" },
+        expect.objectContaining({ attempts: 3 })
+      );
+    });
+
+    it("returns { queued: true }", async () => {
+      expect(await service.retryEFatura("inv-1")).toEqual({ queued: true });
+    });
+
+    it("throws NotFoundException for an unknown invoice", async () => {
+      repo.findByIdLite.mockResolvedValue(null);
+      await expect(service.retryEFatura("inv-x")).rejects.toThrow(NotFoundException);
+      expect(efaturaQueue.add).not.toHaveBeenCalled();
     });
   });
 });

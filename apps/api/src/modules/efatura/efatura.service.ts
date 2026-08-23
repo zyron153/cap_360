@@ -18,7 +18,7 @@ export class EFaturaService {
     });
     if (!row) return null;
     const cfg = row.value as unknown as EFaturaConfig;
-    if (!cfg.enabled || !cfg.apiKey || !cfg.nifContribuinte) return null;
+    if (!cfg.enabled || !cfg.apiKey || !cfg.nifContribuinte || !cfg.nomeEmpresa) return null;
     return cfg;
   }
 

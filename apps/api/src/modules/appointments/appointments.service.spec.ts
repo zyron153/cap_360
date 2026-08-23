@@ -5,6 +5,7 @@ import { AppointmentsService } from "./appointments.service";
 import { AppointmentsRepository } from "./appointments.repository";
 import { AppointmentsGateway } from "./appointments.gateway";
 import { BillingService } from "../billing/billing.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { REDIS_CLIENT } from "../../common/redis/redis.module";
 
 const repo = {
@@ -22,6 +23,7 @@ const gateway = { emitAppointmentCreated: jest.fn(), emitAppointmentUpdated: jes
 const redis = { set: jest.fn(), del: jest.fn() };
 const queue = { add: jest.fn(), getJob: jest.fn() };
 const billingMock = { createDraft: jest.fn() };
+const notifMock = { notifyConfirm: jest.fn(), notifyCancel: jest.fn(), isReminderEnabled: jest.fn() };
 
 const STAFF_ID = "staff-1";
 const TEST_DATE = "2026-07-01";
@@ -36,6 +38,7 @@ describe("AppointmentsService", () => {
         { provide: AppointmentsRepository, useValue: repo },
         { provide: AppointmentsGateway, useValue: gateway },
         { provide: BillingService, useValue: billingMock },
+        { provide: NotificationsService, useValue: notifMock },
         { provide: getQueueToken("reminders"), useValue: queue },
         { provide: REDIS_CLIENT, useValue: redis },
       ],

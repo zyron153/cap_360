@@ -46,6 +46,10 @@ export class EFaturaProcessor {
 
     if (!invoice) {
       this.logger.error(`Invoice ${invoiceId} not found`);
+      await this.prisma.eFaturaSubmission.update({
+        where: { invoiceId },
+        data: { status: "error", errorMessage: "Invoice not found" },
+      });
       return;
     }
 
@@ -68,7 +72,7 @@ export class EFaturaProcessor {
       await this.prisma.eFaturaSubmission.update({
         where: { invoiceId },
         data: {
-          status: result.status === "accepted" ? "accepted" : "rejected",
+          status: result.status === "accepted" ? "accepted" : result.status === "pending" ? "pending" : "rejected",
           atcud: result.atcud,
           efaturaRef: result.referencia,
           errorCode: result.errorCode ?? null,
