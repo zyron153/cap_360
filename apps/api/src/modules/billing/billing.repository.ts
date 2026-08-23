@@ -34,7 +34,7 @@ export class BillingRepository {
       include: {
         items: { include: { service: { select: { name: true } } } },
         payments: true,
-        patient: { select: { id: true, fullName: true, phone: true } },
+        patient: { select: { id: true, fullName: true, phone: true, nif: true } },
       },
     });
   }
