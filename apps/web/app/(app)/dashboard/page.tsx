@@ -117,6 +117,7 @@ export default function DashboardPage() {
   const [patConsent, setPatConsent]     = useState(false);
   const [patSubmitting, setPatSubmitting] = useState(false);
   const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [selectedDay, setSelectedDay] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
 
@@ -128,6 +129,7 @@ export default function DashboardPage() {
   const calMonthStart = format(calMonth, "yyyy-MM-dd");
   const calMonthEnd   = format(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0), "yyyy-MM-dd");
   const monthLabel    = format(calMonth, "MMMM yyyy", { locale: pt });
+  const selectedLabel = format(new Date(selectedDay + "T00:00:00"), "EEEE, dd MMM", { locale: pt });
 
   /* ── Queries ── */
   const { data: todayAppts = [], isLoading: todayLoading } = useQuery<TodayAppt[]>({
@@ -146,6 +148,12 @@ export default function DashboardPage() {
     queryKey: ["appointments", "calendar", calMonthStart, calMonthEnd],
     queryFn:  () => fetch(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`).then(r => r.json()),
     staleTime: 60_000,
+  });
+
+  const { data: selectedAppts = [], isLoading: selectedLoading } = useQuery<TodayAppt[]>({
+    queryKey: ["appointments", "calendar", selectedDay, selectedDay],
+    queryFn:  () => fetch(`/api/appointments?from=${selectedDay}&to=${selectedDay}`).then(r => r.json()),
+    staleTime: 30_000,
   });
 
   const { data: patientsList } = useQuery<{ data: RecentPatient[] }>({
@@ -204,10 +212,15 @@ export default function DashboardPage() {
   const firstDOW = calMonth.getDay();
   const lastDay  = new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0).getDate();
   const isCurrentMonth = calMonth.getFullYear() === NOW.getFullYear() && calMonth.getMonth() === NOW.getMonth();
+  const selDate  = new Date(selectedDay + "T00:00:00");
+  const selectedIsThisMonth = selDate.getFullYear() === calMonth.getFullYear() && selDate.getMonth() === calMonth.getMonth();
+  const selectedDayNum = selectedIsThisMonth ? selDate.getDate() : 0;
   const calDays  = [
-    ...Array.from({ length: firstDOW }, () => ({ d: 0, muted: true, appt: false, today: false })),
+    ...Array.from({ length: firstDOW }, () => ({ d: 0, muted: true, appt: false, today: false, selected: false })),
     ...Array.from({ length: lastDay }, (_, i) => ({
-      d: i + 1, muted: false, appt: apptDays.has(i + 1), today: isCurrentMonth && i + 1 === NOW.getDate(),
+      d: i + 1, muted: false, appt: apptDays.has(i + 1),
+      today: isCurrentMonth && i + 1 === NOW.getDate(),
+      selected: i + 1 === selectedDayNum,
     })),
   ];
 
@@ -372,14 +385,14 @@ export default function DashboardPage() {
               <div className="w-[26px] h-[26px] bg-brand-50 rounded-md flex items-center justify-center">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="1.5" width="12" height="11" rx="1.5" stroke="#0D8080" strokeWidth="1.3" fill="none"/><path d="M4 0.5V2.5M10 0.5V2.5M1 5H13" stroke="#0D8080" strokeWidth="1.3" strokeLinecap="round"/></svg>
               </div>
-              Agenda de Hoje — <span className="capitalize ml-1">{todayLabel}</span>
+              Agenda de — <span className="capitalize ml-1">{selectedLabel}</span>
             </div>
             <button onClick={() => setApptOpen(true)} className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-brand-700 text-white hover:bg-brand-800 transition-colors">
               <Plus className="w-2.5 h-2.5" /> Nova Consulta
             </button>
           </div>
           <div className="px-5 pb-4">
-            {todayLoading ? (
+            {selectedLoading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <div key={i} className="flex items-stretch gap-3 py-2 border-b border-dim-100 last:border-b-0 animate-pulse">
                   <div className="w-[46px] shrink-0 space-y-1 pt-0.5"><div className="h-3 bg-dim-100 rounded w-10"/><div className="h-2 bg-dim-100 rounded w-8"/></div>
@@ -387,10 +400,10 @@ export default function DashboardPage() {
                   <div className="flex-1 h-12 bg-dim-50 rounded-[10px]"/>
                 </div>
               ))
-            ) : todayAppts.length === 0 ? (
-              <div className="py-10 text-center text-[13px] text-dim-400">Sem consultas agendadas para hoje.</div>
+            ) : selectedAppts.length === 0 ? (
+              <div className="py-10 text-center text-[13px] text-dim-400">Sem consultas agendadas para este dia.</div>
             ) : (
-              todayAppts.map((appt) => {
+              selectedAppts.map((appt) => {
                 const st = APPT_STATUS[appt.status] ?? APPT_STATUS.pending;
                 return (
                   <div key={appt.id} className="flex items-stretch gap-3 py-2 border-b border-dim-100 last:border-b-0">
@@ -443,12 +456,19 @@ export default function DashboardPage() {
                 {["D","S","T","Q","Q","S","S"].map((d, i) => (
                   <div key={i} className="text-center text-[9px] font-bold text-dim-400 tracking-[0.06em] pb-1.5">{d}</div>
                 ))}
-                {calDays.map(({ d, muted, appt, today }, i) => (
-                  <div key={i} className={`aspect-square flex items-center justify-center font-mono text-[11px] rounded relative cursor-pointer transition-colors ${
-                    today ? "bg-brand-700 text-white font-bold" : muted ? "text-dim-300" : "text-dim-700 hover:bg-dim-100"
-                  }`}>
+                {calDays.map(({ d, muted, appt, today, selected }, i) => (
+                  <div
+                    key={i}
+                    onClick={() => !muted && d > 0 && setSelectedDay(format(new Date(calMonth.getFullYear(), calMonth.getMonth(), d), "yyyy-MM-dd"))}
+                    className={`aspect-square flex items-center justify-center font-mono text-[11px] rounded relative transition-colors ${
+                      muted ? "text-dim-300 cursor-default" :
+                      today ? "bg-brand-700 text-white font-bold cursor-pointer" :
+                      selected ? "bg-brand-100 text-brand-700 font-semibold ring-1 ring-brand-300 cursor-pointer" :
+                      "text-dim-700 hover:bg-dim-100 cursor-pointer"
+                    }`}
+                  >
                     {d > 0 ? d : ""}
-                    {appt && <span className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${today ? "bg-brand-200" : "bg-brand-400"}`}/>}
+                    {appt && <span className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${today ? "bg-brand-200" : selected ? "bg-brand-400" : "bg-brand-400"}`}/>}
                   </div>
                 ))}
               </div>
