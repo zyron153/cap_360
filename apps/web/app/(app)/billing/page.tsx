@@ -81,7 +81,12 @@ function EFaturaBadge({ status, atcud }: { status: EFaturaStatus; atcud: string 
   );
 }
 
-const BLANK_FORM = { patientId: "", patient: "", serviceId: "", description: "", amount: "", notes: "" };
+const BLANK_FORM = { patientId: "", patient: "", serviceParamId: "", amount: "", notes: "", customPrice: false };
+
+function suggestServiceCode(name: string) {
+  const diacritics = new RegExp("[\\u0300-\\u036f]", "g");
+  return name.toUpperCase().normalize("NFD").replace(diacritics, "").replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30);
+}
 
 function SkeletonRow() {
   return (
@@ -262,12 +267,33 @@ export default function BillingPage() {
 
   const createInvoiceMutation = useMutation({
     mutationFn: async () => {
+      const entry = tipoServicoList.find(p => String(p.id) === form.serviceParamId);
+      if (!entry) throw new Error("Selecione um serviço");
+
+      let serviceId = entry.codigo && servicesList.some(s => s.id === entry.codigo) ? entry.codigo : null;
+
+      // Draft service with no configured price yet — create it now with the manually entered
+      // price, then backfill the parametrização entry's link (same pattern as Gestão de Serviços).
+      if (!serviceId) {
+        const svcRes = await fetch("/api/services", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: entry.valor, code: suggestServiceCode(entry.valor), price: Number(form.amount) }),
+        });
+        if (!svcRes.ok) { const e = await svcRes.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao criar serviço"); }
+        const newService = await svcRes.json();
+        serviceId = newService.id;
+        await fetch(`/api/parametrizacao/${entry.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ codigo: serviceId }),
+        });
+      }
+
       const res = await fetch("/api/invoices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId: form.patientId,
-          items: [{ serviceId: form.serviceId, description: form.description, unitPrice: Number(form.amount) }],
+          items: [{ serviceId, description: entry.valor, unitPrice: Number(form.amount) }],
           notes: form.notes || undefined,
         }),
       });
@@ -277,6 +303,10 @@ export default function BillingPage() {
     onSuccess: (invoice) => {
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
       queryClient.invalidateQueries({ queryKey: ["billing-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["parametrizacao", "TIPO_SERVICO"] });
+      queryClient.invalidateQueries({ queryKey: ["parametrizacao-admin", "TIPO_SERVICO"] });
+      queryClient.invalidateQueries({ queryKey: ["services-list"] });
+      queryClient.invalidateQueries({ queryKey: ["services-admin"] });
       setForm(BLANK_FORM);
       setNewOpen(false);
       setPreviewInvoiceId(invoice.id);
@@ -310,6 +340,16 @@ export default function BillingPage() {
     queryFn: () => fetch("/api/services").then(r => r.json()),
     staleTime: 60_000,
   });
+
+  const { data: tipoServicoList = [] } = useQuery<{ id: number; valor: string; codigo: string | null }[]>({
+    queryKey: ["parametrizacao", "TIPO_SERVICO"],
+    queryFn: () => fetch("/api/parametrizacao/TIPO_SERVICO").then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const selectedServiceEntry = tipoServicoList.find(p => String(p.id) === form.serviceParamId);
+  const linkedService = selectedServiceEntry?.codigo ? servicesList.find(s => s.id === selectedServiceEntry.codigo) : undefined;
+  const priceLocked = !!linkedService && !form.customPrice;
 
   return (
     <>
@@ -515,22 +555,43 @@ export default function BillingPage() {
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Serviço *</label>
           <select
-            value={form.serviceId}
+            value={form.serviceParamId}
             onChange={(e) => {
-              const s = servicesList.find((sv) => sv.id === e.target.value);
-              setForm((f) => ({ ...f, serviceId: e.target.value, description: s?.name ?? "", amount: s ? String(s.price) : f.amount }));
+              const paramId = e.target.value;
+              const entry = tipoServicoList.find((p) => String(p.id) === paramId);
+              const svc = entry?.codigo ? servicesList.find((s) => s.id === entry.codigo) : undefined;
+              setForm((f) => ({ ...f, serviceParamId: paramId, amount: svc ? String(svc.price) : "", customPrice: !svc }));
             }}
             className={inputCls}
           >
             <option value="">Selecionar serviço…</option>
-            {servicesList.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
+            {tipoServicoList.map((p) => {
+              const hasPrice = !!p.codigo && servicesList.some((s) => s.id === p.codigo);
+              return <option key={p.id} value={p.id}>{p.valor}{hasPrice ? "" : " (sem preço definido)"}</option>;
+            })}
           </select>
         </div>
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Valor Total (CVE) *</label>
-          <input type="number" value={form.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" className={inputCls} />
+          <input
+            type="number"
+            value={form.amount}
+            disabled={priceLocked}
+            onChange={(e) => set("amount", e.target.value)}
+            placeholder="0"
+            className={`${inputCls} ${priceLocked ? "bg-dim-50 text-dim-500 cursor-not-allowed" : ""}`}
+          />
+          {linkedService && (
+            <label className="flex items-center gap-1.5 mt-1.5 text-[11px] text-dim-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={form.customPrice}
+                onChange={(e) => setForm((f) => ({ ...f, customPrice: e.target.checked, amount: e.target.checked ? f.amount : String(linkedService.price) }))}
+                className="w-3 h-3 rounded border-dim-300 accent-brand-600"
+              />
+              Outro valor
+            </label>
+          )}
         </div>
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
@@ -540,7 +601,7 @@ export default function BillingPage() {
       <div className="px-6 py-4 border-t border-dim-100 flex items-center gap-3">
         <button
           onClick={() => createInvoiceMutation.mutate()}
-          disabled={createInvoiceMutation.isPending || !form.patientId || !form.serviceId || !(Number(form.amount) > 0)}
+          disabled={createInvoiceMutation.isPending || !form.patientId || !form.serviceParamId || !(Number(form.amount) > 0)}
           className="bg-brand-700 hover:bg-brand-800 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors disabled:opacity-50"
         >
           {createInvoiceMutation.isPending ? "A criar…" : "Criar Fatura"}
