@@ -232,10 +232,10 @@
     }
   ],
   "smtpServer": {},
-  "eventsEnabled": true,
+  "eventsEnabled": false,
   "eventsExpiration": 604800,
-  "adminEventsEnabled": true,
-  "adminEventsDetailsEnabled": true,
+  "adminEventsEnabled": false,
+  "adminEventsDetailsEnabled": false,
   "internationalizationEnabled": true,
   "supportedLocales": ["pt", "en"],
   "defaultLocale": "pt"
