@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
-import { PrismaClient } from "@cms/database";
+import { PrismaClient } from "@cap/database";
 import { RequestContext } from "../common/context/request-context";
 
 const SLOW_QUERY_MS = 100;

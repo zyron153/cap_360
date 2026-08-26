@@ -1,5 +1,5 @@
 {
-  "name": "@cms/web",
+  "name": "@cap/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cms/types": "workspace:*",
+    "@cap/types": "workspace:*",
     "@fullcalendar/core": "^6.1.15",
     "@fullcalendar/daygrid": "^6.1.15",
     "@fullcalendar/interaction": "^6.1.15",
@@ -41,7 +41,7 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "@cms/config": "workspace:*",
+    "@cap/config": "workspace:*",
     "@playwright/test": "^1.61.0",
     "@types/node": "^22.10.5",
     "@types/react": "^19.0.2",

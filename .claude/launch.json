@@ -4,13 +4,13 @@
     {
       "name": "web-dev",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@cms/web", "dev"],
+      "runtimeArgs": ["--filter", "@cap/web", "dev"],
       "port": 3000
     },
     {
       "name": "api-dev",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@cms/api", "dev"],
+      "runtimeArgs": ["--filter", "@cap/api", "dev"],
       "port": 4001
     }
   ]

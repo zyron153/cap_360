@@ -21,7 +21,7 @@ import {
   CreateHealthPlanProductDto,
   UpdateHealthPlanProductDto,
   CreateHealthPlanDto,
-} from "@cms/types";
+} from "@cap/types";
 
 @Controller("health-plans")
 @Roles("admin", "receptionist", "corporate_hr")

@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Stethoscope, AlertCircle } from "lucide-react";
-import type { PublicInvitationInfo } from "@cms/types";
+import type { PublicInvitationInfo } from "@cap/types";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin", doctor: "Médico/a", nurse: "Enfermeiro/a",
@@ -76,7 +76,7 @@ function ActivateCard() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-slate-900">Ativar Conta</h1>
-                <p className="text-sm text-slate-500 mt-0.5">Clínica Mais Saúde 360</p>
+                <p className="text-sm text-slate-500 mt-0.5">CAP 360</p>
               </div>
             </div>
 

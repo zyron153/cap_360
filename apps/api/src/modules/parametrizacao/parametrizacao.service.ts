@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { CreateParametrizacaoDto, UpdateParametrizacaoDto } from "@cms/types";
+import { CreateParametrizacaoDto, UpdateParametrizacaoDto } from "@cap/types";
 import { ParametrizacaoRepository } from "./parametrizacao.repository";
 
 @Injectable()

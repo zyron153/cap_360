@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import type { Patient } from "@cms/types";
+import type { Patient } from "@cap/types";
 import { useMessage } from "../../../../../components/ui/message-handler";
 
 type FormState = {

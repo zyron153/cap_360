@@ -215,7 +215,7 @@ describe("BillingService", () => {
       amountPaid: "1500",
       status: "paid",
     };
-    const CLINIC = { name: "Clínica Teste", nif: "999888777", address: "Rua Teste", phone: "+238 999 0000", email: "teste@maissaudecv.com" };
+    const CLINIC = { name: "Clínica Teste", nif: "999888777", address: "Rua Teste", phone: "+238 999 0000", email: "teste@cap.cv" };
 
     beforeEach(() => {
       repo.findById.mockResolvedValue(FULL_INVOICE);

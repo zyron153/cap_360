@@ -212,7 +212,7 @@ function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving, jobTi
         </FieldRow>
 
         <FieldRow label="Email" required error={errs.email}>
-          <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="nome@maissaudecv.com" className={inputCls} />
+          <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="nome@cap.cv" className={inputCls} />
         </FieldRow>
 
         <div className="col-span-2">

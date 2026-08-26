@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
-import { CreateParametrizacaoDto, UpdateParametrizacaoDto } from "@cms/types";
+import { CreateParametrizacaoDto, UpdateParametrizacaoDto } from "@cap/types";
 
 @Injectable()
 export class ParametrizacaoRepository {

@@ -3,7 +3,7 @@ import withBundleAnalyzer from "@next/bundle-analyzer";
 
 const nextConfig: NextConfig = {
   transpilePackages: [
-    "@cms/types",
+    "@cap/types",
     "@fullcalendar/core",
     "@fullcalendar/react",
     "@fullcalendar/daygrid",

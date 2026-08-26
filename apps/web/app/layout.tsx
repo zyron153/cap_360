@@ -24,8 +24,8 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Clínica Mais Saúde 360",
-  description: "Sistema de gestão da Clínica Mais Saúde",
+  title: "CAP 360",
+  description: "Sistema de gestão da CAP",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

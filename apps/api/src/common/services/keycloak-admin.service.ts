@@ -11,7 +11,7 @@ interface NewKeycloakUser {
 @Injectable()
 export class KeycloakAdminService {
   private readonly baseUrl = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
-  private readonly realm = process.env.KEYCLOAK_REALM ?? "maissaude";
+  private readonly realm = process.env.KEYCLOAK_REALM ?? "cap";
   private cachedToken: { value: string; expiresAt: number } | null = null;
 
   // client_credentials grant against the confidential "api" client (serviceAccountsEnabled in the realm)

@@ -10,7 +10,7 @@ const CFG: EFaturaConfig = {
   endpoint: "https://mw.efatura.cv",
   nifContribuinte: "123456789",
   apiKey: "tok-abc",
-  nomeEmpresa: "Clínica Mais Saúde",
+  nomeEmpresa: "CAP",
 };
 
 const DB_INVOICE = {

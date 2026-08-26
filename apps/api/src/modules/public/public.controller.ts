@@ -9,7 +9,7 @@ import {
   PublicBookingSchema,
   ActivateInvitationDto,
   ActivateInvitationSchema,
-} from "@cms/types";
+} from "@cap/types";
 import { PublicService } from "./public.service";
 
 @Public()

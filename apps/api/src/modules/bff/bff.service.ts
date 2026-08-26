@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { TimelineEvent } from "@cms/types";
+import type { TimelineEvent } from "@cap/types";
 
 @Injectable()
 export class BffService {

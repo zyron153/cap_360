@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { SlidersHorizontal, Plus, Pencil, Trash2, Check, X, Stethoscope, Info } from "lucide-react";
-import type { ServiceEntry, ParametrizacaoEntry } from "@cms/types";
+import type { ServiceEntry, ParametrizacaoEntry } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
 
 /* ── Types ───────────────────────────────────────────────── */

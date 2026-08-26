@@ -17,7 +17,7 @@ import {
   CreditCard,
   Plus,
 } from "lucide-react";
-import type { Patient, TimelineEvent } from "@cms/types";
+import type { Patient, TimelineEvent } from "@cap/types";
 
 interface PatientScreenResponse {
   patient: Patient & { healthPlan?: { planNumber: string; product: { name: string } } | null };

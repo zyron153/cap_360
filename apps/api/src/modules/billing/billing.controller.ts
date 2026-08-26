@@ -19,7 +19,7 @@ import {
   CreateInvoiceDto,
   RecordPaymentDto,
   InvoiceListQuery,
-} from "@cms/types";
+} from "@cap/types";
 
 @Controller("invoices")
 @Roles("admin", "receptionist")

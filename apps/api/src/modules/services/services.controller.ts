@@ -17,7 +17,7 @@ import {
   CreateServiceDto,
   UpdateServiceSchema,
   UpdateServiceDto,
-} from "@cms/types";
+} from "@cap/types";
 
 @Controller("services")
 @Roles("admin", "receptionist", "doctor", "nurse")

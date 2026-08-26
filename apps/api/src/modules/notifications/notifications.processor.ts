@@ -73,7 +73,7 @@ export class NotificationsProcessor {
     await this.sendWhatsApp(
       wa,
       appt.patient.phone,
-      `Olá ${appt.patient.fullName}! A sua consulta de ${appt.service.name} está confirmada para ${date} às ${time}. Obrigado por escolher a Clínica Mais Saúde.`,
+      `Olá ${appt.patient.fullName}! A sua consulta de ${appt.service.name} está confirmada para ${date} às ${time}. Obrigado por escolher a CAP.`,
     );
   }
 
@@ -113,7 +113,7 @@ export class NotificationsProcessor {
     await this.sendWhatsApp(
       wa,
       appt.patient.phone,
-      `Lembrete: tem uma consulta de ${appt.service.name} amanhã às ${time} na Clínica Mais Saúde. Por favor confirme a sua presença respondendo SIM.`,
+      `Lembrete: tem uma consulta de ${appt.service.name} amanhã às ${time} na CAP. Por favor confirme a sua presença respondendo SIM.`,
     );
   }
 
@@ -158,7 +158,7 @@ export class NotificationsProcessor {
     const activateUrl = `${process.env.WEB_URL ?? "http://localhost:3000"}/activate?token=${token}`;
 
     const html = `<div style="font-family:sans-serif;max-width:480px">
-      <h2>Bem-vindo(a) à Clínica Mais Saúde</h2>
+      <h2>Bem-vindo(a) à CAP</h2>
       <p>Olá ${fullName},</p>
       <p>Foi convidado(a) a juntar-se à plataforma de gestão da clínica. Clique no botão abaixo para ativar a sua conta e definir a sua palavra-passe.</p>
       <p style="margin:24px 0"><a href="${activateUrl}" style="background:#0D8080;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Ativar Conta</a></p>
@@ -166,7 +166,7 @@ export class NotificationsProcessor {
     </div>`;
 
     await this.createTransport(smtp).sendMail({
-      from: this.from(smtp), to: email, subject: "Convite — Clínica Mais Saúde", html,
+      from: this.from(smtp), to: email, subject: "Convite — CAP", html,
     });
   }
 

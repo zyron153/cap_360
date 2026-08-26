@@ -25,7 +25,7 @@ export class DocumentsService {
     const token = Buffer.from(`${payload}:${signature}`).toString("base64url");
 
     // Phase 1: return a token-based URL; Phase 2 replaces with R2 presigned URL
-    const baseUrl = process.env.R2_PUBLIC_URL ?? "https://files.maissaudecv.com";
+    const baseUrl = process.env.R2_PUBLIC_URL ?? "https://files.cap.cv";
     return {
       url: `${baseUrl}/download/${token}`,
       expiresAt: new Date(expiresAt * 1000).toISOString(),

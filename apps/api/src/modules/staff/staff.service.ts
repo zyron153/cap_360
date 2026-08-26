@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, GoneException } from "@nestjs/common";
 import { randomBytes } from "crypto";
-import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto } from "@cms/types";
+import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto } from "@cap/types";
 import { StaffRepository } from "./staff.repository";
 import { KeycloakAdminService } from "../../common/services/keycloak-admin.service";
 import { NotificationsService } from "../notifications/notifications.service";

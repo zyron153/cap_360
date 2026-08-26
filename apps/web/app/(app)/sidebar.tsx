@@ -108,7 +108,7 @@ export function Sidebar() {
             </svg>
           </div>
           <div className="leading-tight">
-            <strong className="font-display font-semibold text-[15px] text-white block">Clínica 360</strong>
+            <strong className="font-display font-semibold text-[15px] text-white block">CAP 360</strong>
             <span className="text-[10px] text-dim-400 tracking-[0.06em] uppercase font-medium">Healthcare ERP/CRM</span>
           </div>
         </div>
@@ -117,7 +117,7 @@ export function Sidebar() {
       {/* Clinic badge */}
       <div className="mx-3 mt-3 bg-white/[0.04] border border-white/[0.07] rounded-[10px] px-3 py-2.5">
         <small className="block text-[10px] text-dim-500 uppercase tracking-[0.06em] font-semibold mb-0.5">Clínica</small>
-        <p className="text-[12px] text-dim-300 font-medium">{clinicName || "Clínica Mais Saúde"}</p>
+        <p className="text-[12px] text-dim-300 font-medium">{clinicName || "CAP"}</p>
       </div>
 
       {/* Navigation */}

@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const state = randomBytes(16).toString("base64url");
 
   const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL ?? "http://localhost:8080";
-  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "maissaude";
+  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "cap";
   const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? "web";
 
   const authUrl = new URL(`${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth`);

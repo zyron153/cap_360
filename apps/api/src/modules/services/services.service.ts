@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from "@nestjs/common";
 import { ServicesRepository } from "./services.repository";
-import { CreateServiceDto, UpdateServiceDto } from "@cms/types";
+import { CreateServiceDto, UpdateServiceDto } from "@cap/types";
 
 @Injectable()
 export class ServicesService {

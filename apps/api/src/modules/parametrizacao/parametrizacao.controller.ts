@@ -4,7 +4,7 @@ import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import {
   CreateParametrizacaoSchema, CreateParametrizacaoDto,
   UpdateParametrizacaoSchema, UpdateParametrizacaoDto,
-} from "@cms/types";
+} from "@cap/types";
 import { ParametrizacaoService } from "./parametrizacao.service";
 
 @Controller("parametrizacao")

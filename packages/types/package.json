@@ -1,5 +1,5 @@
 {
-  "name": "@cms/types",
+  "name": "@cap/types",
   "version": "0.1.0",
   "private": true,
   "main": "./dist/index.js",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@cms/config": "workspace:*",
+    "@cap/config": "workspace:*",
     "typescript": "^5.7.3",
     "zod": "^3.24.1"
   },

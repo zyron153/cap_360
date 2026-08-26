@@ -8,7 +8,7 @@ interface R2Config { accountId: string; accessKeyId: string; secretAccessKey: st
 @Injectable()
 export class R2Service {
   private s3: S3Client | null = null;
-  private bucket = process.env.R2_BUCKET_NAME ?? "maissaude-files";
+  private bucket = process.env.R2_BUCKET_NAME ?? "cap-files";
 
   constructor(private readonly prisma: PrismaService) {
     // env-var bootstrap: if all three vars are present and non-placeholder, init now

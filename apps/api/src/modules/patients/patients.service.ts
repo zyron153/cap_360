@@ -10,7 +10,7 @@ import {
   CreatePatientNoteDto,
   PatientSearchQuery,
   TimelineEvent,
-} from "@cms/types";
+} from "@cap/types";
 
 @Injectable()
 export class PatientsService {

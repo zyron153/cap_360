@@ -1,6 +1,6 @@
 {
-  "realm": "maissaude",
-  "displayName": "Clínica Mais Saúde 360",
+  "realm": "cap",
+  "displayName": "CAP 360",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,
@@ -33,7 +33,7 @@
   "clients": [
     {
       "clientId": "api",
-      "name": "Mais Saúde API",
+      "name": "CAP API",
       "description": "NestJS backend — confidential client for service account",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
@@ -67,7 +67,7 @@
     },
     {
       "clientId": "web",
-      "name": "Mais Saúde Web",
+      "name": "CAP Web",
       "description": "Next.js staff portal — public client",
       "enabled": true,
       "publicClient": true,
@@ -79,14 +79,14 @@
       "redirectUris": [
         "http://localhost:3000/*",
         "http://localhost:3001/*",
-        "https://app.maissaudecv.com/*",
-        "https://staging.maissaudecv.com/*"
+        "https://app.cap.cv/*",
+        "https://staging.cap.cv/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://app.maissaudecv.com",
-        "https://staging.maissaudecv.com"
+        "https://app.cap.cv",
+        "https://staging.cap.cv"
       ],
       "protocol": "openid-connect",
       "attributes": {
@@ -125,7 +125,7 @@
     },
     {
       "clientId": "mobile",
-      "name": "Mais Saúde Mobile",
+      "name": "CAP Mobile",
       "description": "React Native Expo app — public client",
       "enabled": true,
       "publicClient": true,
@@ -134,7 +134,7 @@
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
-        "maissaude://callback",
+        "cap://callback",
         "exp://localhost:8081/*"
       ],
       "webOrigins": [],
@@ -156,7 +156,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000001",
       "username": "admin",
-      "email": "admin@maissaudecv.com",
+      "email": "capjacobvicente@gmail.com",
       "firstName": "Admin",
       "lastName": "Sistema",
       "enabled": true,
@@ -167,7 +167,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000002",
       "username": "dr.silva",
-      "email": "dr.silva@maissaudecv.com",
+      "email": "dr.silva@cap.cv",
       "firstName": "Carlos",
       "lastName": "Silva",
       "enabled": true,
@@ -178,7 +178,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000003",
       "username": "dr.costa",
-      "email": "dr.costa@maissaudecv.com",
+      "email": "dr.costa@cap.cv",
       "firstName": "Ana",
       "lastName": "Costa",
       "enabled": true,
@@ -189,7 +189,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000004",
       "username": "enfermeira.maria",
-      "email": "maria.nurse@maissaudecv.com",
+      "email": "maria.nurse@cap.cv",
       "firstName": "Maria",
       "lastName": "Andrade",
       "enabled": true,
@@ -200,7 +200,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000005",
       "username": "recepcao.ana",
-      "email": "ana.recepcao@maissaudecv.com",
+      "email": "ana.recepcao@cap.cv",
       "firstName": "Ana",
       "lastName": "Lopes",
       "enabled": true,
@@ -211,7 +211,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000006",
       "username": "recepcao.joao",
-      "email": "joao.recepcao@maissaudecv.com",
+      "email": "joao.recepcao@cap.cv",
       "firstName": "João",
       "lastName": "Monteiro",
       "enabled": true,
@@ -222,7 +222,7 @@
     {
       "id": "a0000000-0000-0000-0000-000000000007",
       "username": "lab.pedro",
-      "email": "pedro.lab@maissaudecv.com",
+      "email": "pedro.lab@cap.cv",
       "firstName": "Pedro",
       "lastName": "Ferreira",
       "enabled": true,

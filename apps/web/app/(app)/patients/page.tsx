@@ -10,8 +10,8 @@ import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle } from "luci
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
-import { CreatePatientSchema, type CreatePatientDto } from "@cms/types";
-import type { Patient, PaginatedResponse } from "@cms/types";
+import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
+import type { Patient, PaginatedResponse } from "@cap/types";
 
 // ── API ────────────────────────────────────────────────────────
 

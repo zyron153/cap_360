@@ -1,5 +1,5 @@
 {
-  "extends": "@cms/config/tsconfig",
+  "extends": "@cap/config/tsconfig",
   "compilerOptions": {
     "module": "CommonJS",
     "moduleResolution": "Node",

@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   }
 
   const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL ?? "http://localhost:8080";
-  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "maissaude";
+  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "cap";
   const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? "web";
 
   const tokenRes = await fetch(`${keycloakUrl}/realms/${realm}/protocol/openid-connect/token`, {

@@ -3,7 +3,7 @@ import { AppointmentsService } from "../appointments/appointments.service";
 import { PatientsService } from "../patients/patients.service";
 import { ServicesService } from "../services/services.service";
 import { StaffService } from "../staff/staff.service";
-import { AvailabilityQuery, PublicBookingDto, ActivateInvitationDto } from "@cms/types";
+import { AvailabilityQuery, PublicBookingDto, ActivateInvitationDto } from "@cap/types";
 
 @Injectable()
 export class PublicService {

@@ -10,7 +10,7 @@ import {
   FlaskConical, Receipt, ClipboardList, UserCog,
   Home, BarChart2, Settings2, SlidersHorizontal,
 } from "lucide-react";
-import type { StaffInvitationEntry } from "@cms/types";
+import type { StaffInvitationEntry } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
 import { CARD, inputCls, Field } from "../../../components/settings/shared";
@@ -36,13 +36,13 @@ type ApiStaff = {
 /* ── Defaults (used when DB has no saved settings yet) ───── */
 
 const DEFAULT_CLINIC: ClinicSettings = {
-  name:    "Clínica Mais Saúde",
-  address: "Achada Santo António, Praia, Santiago",
+  name:    "CAP",
+  address: "Palmarejo, Praia",
   country: "Cabo Verde",
-  phone:   "+238 261 00 00",
-  email:   "geral@maissaude.cv",
-  website: "www.maissaude.cv",
-  nif:     "200 456 789",
+  phone:   "+238 9743583",
+  email:   "capjacobvicente@gmail.com",
+  website: "www.cap.cv",
+  nif:     "289959195",
   hours: [
     { day: "Segunda-feira", open: "08:00", close: "18:00", active: true  },
     { day: "Terça-feira",   open: "08:00", close: "18:00", active: true  },
@@ -316,7 +316,7 @@ function UserFormFields({
         </Field>
       </div>
       <Field label="Email *">
-        <input type="email" className={inputCls} value={form.email} onChange={e => set("email", e.target.value)} placeholder="nome@maissaude.cv" />
+        <input type="email" className={inputCls} value={form.email} onChange={e => set("email", e.target.value)} placeholder="nome@cap.cv" />
         {errs.email && <p className="text-[11px] text-red-600 mt-1">{errs.email}</p>}
       </Field>
       <Field label="Perfil">
@@ -662,8 +662,8 @@ const INTEGRATIONS_DEF = [
     icon: Shield, color: "text-brand-600", bg: "bg-brand-50",
     defaultStatus: "connected" as IntgStatus,
     fields: [
-      { key: "serverUrl",     label: "Server URL",     placeholder: "https://auth.maissaude.cv",  type: "url"      },
-      { key: "realm",         label: "Realm",          placeholder: "maissaude"                                    },
+      { key: "serverUrl",     label: "Server URL",     placeholder: "https://auth.cap.cv",  type: "url"      },
+      { key: "realm",         label: "Realm",          placeholder: "cap"                                    },
       { key: "clientId",      label: "Client ID",      placeholder: "cms-api"                                      },
       { key: "clientSecret",  label: "Client Secret",  placeholder: "••••••••",                   type: "password" },
     ] as FieldDef[],
@@ -678,7 +678,7 @@ const INTEGRATIONS_DEF = [
       { key: "phoneNumberId", label: "Phone Number ID",       placeholder: "123456789012345"                                      },
       { key: "accessToken",   label: "Access Token",          placeholder: "EAAxxxxx…",             type: "password"               },
       { key: "webhookToken",  label: "Webhook Verify Token",  placeholder: "token_secreto",         type: "password"               },
-      { key: "webhookUrl",    label: "Webhook URL (receber)", placeholder: "https://api.maissaude.cv/v1/whatsapp/webhook", hint: "Configure este URL no Meta Business Manager" },
+      { key: "webhookUrl",    label: "Webhook URL (receber)", placeholder: "https://api.cap.cv/v1/whatsapp/webhook", hint: "Configure este URL no Meta Business Manager" },
     ] as FieldDef[],
   },
   {
@@ -692,7 +692,7 @@ const INTEGRATIONS_DEF = [
       { key: "accessKeyId",  label: "Access Key ID",    placeholder: "R2_ACCESS_KEY"             },
       { key: "secretKey",    label: "Secret Access Key",placeholder: "••••••••", type: "password" },
       { key: "bucketName",   label: "Bucket",           placeholder: "cms-exames"                },
-      { key: "publicUrl",    label: "URL Pública",      placeholder: "https://r2.maissaude.cv"   },
+      { key: "publicUrl",    label: "URL Pública",      placeholder: "https://r2.cap.cv"   },
     ] as FieldDef[],
   },
   {
@@ -704,9 +704,9 @@ const INTEGRATIONS_DEF = [
     fields: [
       { key: "host",     label: "Host SMTP",      placeholder: "smtp.mailgun.org"          },
       { key: "port",     label: "Porta",          placeholder: "587"                        },
-      { key: "username", label: "Utilizador",     placeholder: "noreply@maissaude.cv"      },
+      { key: "username", label: "Utilizador",     placeholder: "noreply@cap.cv"      },
       { key: "password", label: "Palavra-passe",  placeholder: "••••••••", type: "password" },
-      { key: "fromName", label: "Nome do remetente", placeholder: "Clínica Mais Saúde"     },
+      { key: "fromName", label: "Nome do remetente", placeholder: "CAP"     },
     ] as FieldDef[],
   },
   {

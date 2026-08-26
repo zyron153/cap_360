@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Fixed Keycloak UUIDs — must match infra/keycloak/maissaude-realm.json user `id` fields
+// Fixed Keycloak UUIDs — must match infra/keycloak/cap-realm.json user `id` fields
 const KEYCLOAK_IDS = {
   admin:        "a0000000-0000-0000-0000-000000000001",
   drSilva:      "a0000000-0000-0000-0000-000000000002",
@@ -191,7 +191,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.drSilva,
           fullName: "Dr. Carlos Silva",
-          email: "dr.silva@maissaudecv.com",
+          email: "dr.silva@cap.cv",
           role: "doctor",
           specialtyCode: "CLINICA-GERAL",
           phone: "+2389912345",
@@ -203,7 +203,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.drCosta,
           fullName: "Dra. Ana Costa",
-          email: "dr.costa@maissaudecv.com",
+          email: "dr.costa@cap.cv",
           role: "doctor",
           specialtyCode: "PEDIATRIA",
           phone: "+2389923456",
@@ -215,7 +215,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.nurseAndrade,
           fullName: "Maria Andrade",
-          email: "maria.nurse@maissaudecv.com",
+          email: "maria.nurse@cap.cv",
           role: "nurse",
           phone: "+2389934567",
         },
@@ -226,7 +226,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.recepAna,
           fullName: "Ana Lopes",
-          email: "ana.recepcao@maissaudecv.com",
+          email: "ana.recepcao@cap.cv",
           role: "receptionist",
           phone: "+2389945678",
         },
@@ -237,7 +237,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.recepJoao,
           fullName: "João Monteiro",
-          email: "joao.recepcao@maissaudecv.com",
+          email: "joao.recepcao@cap.cv",
           role: "receptionist",
           phone: "+2389956789",
         },
@@ -248,7 +248,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.labPedro,
           fullName: "Pedro Ferreira",
-          email: "pedro.lab@maissaudecv.com",
+          email: "pedro.lab@cap.cv",
           role: "lab_tech",
           phone: "+2389967890",
         },
@@ -259,7 +259,7 @@ async function main() {
         create: {
           keycloakId: KEYCLOAK_IDS.admin,
           fullName: "Administrador Sistema",
-          email: "admin@maissaudecv.com",
+          email: "capjacobvicente@gmail.com",
           role: "admin",
         },
       }),

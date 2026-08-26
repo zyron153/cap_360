@@ -23,10 +23,10 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1075.0
         version: 3.1075.0
-      '@cms/database':
+      '@cap/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@cms/types':
+      '@cap/types':
         specifier: workspace:*
         version: link:../../packages/types
       '@nestjs/bull':
@@ -102,7 +102,7 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@cms/config':
+      '@cap/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@nestjs/cli':
@@ -156,7 +156,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@cms/types':
+      '@cap/types':
         specifier: workspace:*
         version: link:../../packages/types
       '@fullcalendar/core':
@@ -244,7 +244,7 @@ importers:
         specifier: ^5.0.3
         version: 5.0.14(@types/react@19.2.17)(react@19.2.7)
     devDependencies:
-      '@cms/config':
+      '@cap/config':
         specifier: workspace:*
         version: link:../../packages/config
       '@playwright/test':
@@ -287,7 +287,7 @@ importers:
         specifier: ^6.0.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
-      '@cms/config':
+      '@cap/config':
         specifier: workspace:*
         version: link:../config
       prisma:
@@ -306,7 +306,7 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@cms/config':
+      '@cap/config':
         specifier: workspace:*
         version: link:../config
       typescript:

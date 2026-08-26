@@ -2,7 +2,7 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Req }
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto } from "@cms/types";
+import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto } from "@cap/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")

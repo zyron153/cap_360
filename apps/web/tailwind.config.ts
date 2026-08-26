@@ -1,5 +1,5 @@
 import type { Config } from "tailwindcss";
-import sharedPreset from "@cms/config/tailwind";
+import sharedPreset from "@cap/config/tailwind";
 
 const config: Config = {
   presets: [sharedPreset],

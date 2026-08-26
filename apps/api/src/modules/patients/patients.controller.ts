@@ -25,7 +25,7 @@ import {
   UpdatePatientDto,
   CreatePatientNoteDto,
   PatientSearchQuery,
-} from "@cms/types";
+} from "@cap/types";
 
 @Controller("patients")
 @Roles("admin", "receptionist", "doctor", "nurse")

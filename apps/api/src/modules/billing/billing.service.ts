@@ -9,12 +9,12 @@ import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { generateReceiptPdf } from "./receipt.pdf";
-import { InvoiceStatus } from "@cms/database";
+import { InvoiceStatus } from "@cap/database";
 import {
   CreateInvoiceDto,
   RecordPaymentDto,
   InvoiceListQuery,
-} from "@cms/types";
+} from "@cap/types";
 
 @Injectable()
 export class BillingService {
@@ -209,7 +209,7 @@ export class BillingService {
     const row = await this.prisma.setting.findUnique({ where: { key: "clinic" } });
     const clinic = row?.value as { name?: string; nif?: string; address?: string; phone?: string; email?: string } | undefined;
     return {
-      name: clinic?.name || "Clínica Mais Saúde",
+      name: clinic?.name || "CAP",
       nif: clinic?.nif || "—",
       address: clinic?.address || "Cabo Verde",
       phone: clinic?.phone || "—",
@@ -222,7 +222,7 @@ export class BillingService {
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
 
     if (!this.r2.isConfigured()) {
-      return { url: `https://files.maissaudecv.com/receipts/${invoice.invoiceNumber}.pdf` };
+      return { url: `https://files.cap.cv/receipts/${invoice.invoiceNumber}.pdf` };
     }
 
     if (invoice.pdfR2Key) {

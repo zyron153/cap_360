@@ -19,7 +19,7 @@ import {
   UpdateCompanySchema,
   CreateCompanyDto,
   UpdateCompanyDto,
-} from "@cms/types";
+} from "@cap/types";
 
 @Controller("companies")
 @Roles("admin", "corporate_hr")

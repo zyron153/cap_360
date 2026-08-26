@@ -215,7 +215,7 @@ export function PerfPanel() {
           {/* Footer */}
           <div className="px-3 py-1.5 bg-slate-950 border-t border-slate-800">
             <span className="text-[9px] text-slate-600">
-              ANALYZE=true pnpm --filter @cms/web build
+              ANALYZE=true pnpm --filter @cap/web build
             </span>
           </div>
         </div>

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Plus, Receipt, ChevronLeft, ChevronRight, TrendingUp, AlertCircle, Clock, Shield } from "lucide-react";
-import type { Invoice, PaginatedResponse, EFaturaStatus, EFaturaSubmission } from "@cms/types";
+import type { Invoice, PaginatedResponse, EFaturaStatus, EFaturaSubmission } from "@cap/types";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
@@ -162,7 +162,7 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
           {/* Clinic vs. document header */}
           <div className="flex items-start justify-between pb-4 border-b border-dim-100">
             <div>
-              <p className="font-display font-bold text-[16px] text-dim-900">{clinic?.nome || "Clínica Mais Saúde"}</p>
+              <p className="font-display font-bold text-[16px] text-dim-900">{clinic?.nome || "CAP"}</p>
               <p className="font-mono text-[11px] text-dim-500 mt-0.5">NIF: {clinic?.nif || "—"}</p>
             </div>
             <div className="text-right">

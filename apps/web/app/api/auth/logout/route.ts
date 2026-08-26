@@ -5,7 +5,7 @@ export async function GET(req: NextRequest) {
   const idToken = req.cookies.get("id_token")?.value;
 
   const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL ?? "http://localhost:8080";
-  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "maissaude";
+  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "cap";
 
   const logoutUrl = new URL(`${keycloakUrl}/realms/${realm}/protocol/openid-connect/logout`);
   logoutUrl.searchParams.set("post_logout_redirect_uri", `${origin}/login`);

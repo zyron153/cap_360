@@ -24,7 +24,7 @@ import {
   AvailabilityQuery,
   AppointmentCalendarQuery,
   JoinWaitlistDto,
-} from "@cms/types";
+} from "@cap/types";
 
 @Controller("appointments")
 @Roles("admin", "receptionist", "doctor", "nurse")

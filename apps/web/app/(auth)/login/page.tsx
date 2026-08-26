@@ -31,7 +31,7 @@ function LoginCard() {
                 <Stethoscope className="w-7 h-7 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-900">Clínica Mais Saúde</h1>
+                <h1 className="text-xl font-bold text-slate-900">CAP</h1>
                 <p className="text-sm text-slate-500 mt-0.5">Sistema de Gestão 360</p>
               </div>
             </div>

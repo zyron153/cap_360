@@ -22,7 +22,7 @@ import {
   JoinWaitlistDto,
   TimeSlot,
   AppointmentCalendarQuery,
-} from "@cms/types";
+} from "@cap/types";
 
 const SLOT_MINUTES = 30;
 const SLOT_LOCK_TTL_MS = 30_000;

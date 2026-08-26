@@ -6,7 +6,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, UserPlus } from "lucide-react";
-import { CreatePatientSchema, type CreatePatientDto } from "@cms/types";
+import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
 import { useMessage } from "../../../../components/ui/message-handler";
 
 async function createPatient(data: CreatePatientDto) {

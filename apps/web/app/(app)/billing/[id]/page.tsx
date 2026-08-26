@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import Link from "next/link";
 import { ArrowLeft, Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield } from "lucide-react";
-import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type EFaturaSubmission } from "@cms/types";
+import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type EFaturaSubmission } from "@cap/types";
 
 async function fetchInvoice(id: string) {
   const res = await fetch(`/api/invoices/${id}`);

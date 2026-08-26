@@ -9,11 +9,11 @@ const CFG: EFaturaConfig = {
   endpoint: "https://mw.efatura.cv",
   nifContribuinte: "123456789",
   apiKey: "tok-abc",
-  nomeEmpresa: "Clínica Mais Saúde",
+  nomeEmpresa: "CAP",
 };
 
 const EFATURA_ROW = { enabled: true, sandbox: false, endpoint: "https://mw.efatura.cv", apiKey: "tok-abc" };
-const CLINIC_ROW = { name: "Clínica Mais Saúde", nif: "123456789" };
+const CLINIC_ROW = { name: "CAP", nif: "123456789" };
 
 const prisma = { setting: { findUnique: jest.fn() } };
 

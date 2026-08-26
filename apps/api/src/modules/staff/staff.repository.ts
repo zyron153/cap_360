@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { StaffRole } from "@cms/database";
+import { StaffRole } from "@cap/database";
 import { PrismaService } from "../../prisma/prisma.service";
-import { CreateStaffDto, UpdateStaffDto, InviteStaffDto } from "@cms/types";
+import { CreateStaffDto, UpdateStaffDto, InviteStaffDto } from "@cap/types";
 
 const INVITATION_SELECT = {
   id: true, email: true, fullName: true, role: true,

@@ -1,5 +1,5 @@
 {
-  "name": "@cms/api",
+  "name": "@cap/api",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -15,8 +15,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
     "@aws-sdk/s3-request-presigner": "^3.1075.0",
-    "@cms/database": "workspace:*",
-    "@cms/types": "workspace:*",
+    "@cap/database": "workspace:*",
+    "@cap/types": "workspace:*",
     "@nestjs/bull": "^10.2.3",
     "@nestjs/common": "^10.4.15",
     "@nestjs/config": "^3.3.0",
@@ -43,7 +43,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cms/config": "workspace:*",
+    "@cap/config": "workspace:*",
     "@nestjs/cli": "^11.0.24",
     "@nestjs/schematics": "^10.2.3",
     "@nestjs/testing": "^10.4.15",

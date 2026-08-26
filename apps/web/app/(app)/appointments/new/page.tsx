@@ -8,7 +8,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import Link from "next/link";
 import { ArrowLeft, CalendarPlus, Clock } from "lucide-react";
-import { CreateAppointmentSchema, type CreateAppointmentDto, type TimeSlot } from "@cms/types";
+import { CreateAppointmentSchema, type CreateAppointmentDto, type TimeSlot } from "@cap/types";
 import { useMessage } from "../../../../components/ui/message-handler";
 import { validateScheduledAt, isWeekday } from "../../../../lib/validate-schedule";
 

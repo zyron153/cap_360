@@ -1,11 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@cms/database";
+import { Prisma } from "@cap/database";
 import { HealthPlansRepository } from "./health-plans.repository";
 import {
   CreateHealthPlanProductDto,
   UpdateHealthPlanProductDto,
   CreateHealthPlanDto,
-} from "@cms/types";
+} from "@cap/types";
 
 @Injectable()
 export class HealthPlansService {

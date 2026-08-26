@@ -28,7 +28,7 @@ export class JwtAuthGuard {
       const request = context.switchToHttp().getRequest();
       request.user = {
         sub: "00000000-0000-0000-0000-000000000001",
-        email: "admin@maissaudecv.com",
+        email: "capjacobvicente@gmail.com",
         preferred_username: "dev_admin",
         realm_access: { roles: ["admin"] },
       };
