@@ -19,3 +19,34 @@ export type CreateStaffDto = z.infer<typeof CreateStaffSchema>;
 
 export const UpdateStaffSchema = CreateStaffSchema.partial();
 export type UpdateStaffDto = z.infer<typeof UpdateStaffSchema>;
+
+// ─── Invitations ───────────────────────────────────────────────────────────
+
+export const InviteStaffSchema = CreateStaffSchema;
+export type InviteStaffDto = z.infer<typeof InviteStaffSchema>;
+
+// Mirrors the Keycloak realm's passwordPolicy: length(10) and upperCase(1) and digits(1)
+export const ActivateInvitationSchema = z.object({
+  fullName: z.string().min(2).max(150),
+  password: z.string().min(10).max(72).regex(/[A-Z]/, "password must contain an uppercase letter").regex(/\d/, "password must contain a digit"),
+});
+export type ActivateInvitationDto = z.infer<typeof ActivateInvitationSchema>;
+
+export interface StaffInvitationEntry {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  jobTitle: string | null;
+  phone: string | null;
+  specialtyCode: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface PublicInvitationInfo {
+  fullName: string;
+  email: string;
+  role: string;
+  expired: boolean;
+}

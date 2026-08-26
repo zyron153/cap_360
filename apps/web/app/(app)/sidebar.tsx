@@ -1,12 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, CalendarDays, Users, MessageCircle,
   Shield, FileSearch, Receipt, ClipboardList,
   Users2, Home, BarChart2, Settings, SlidersHorizontal,
-  ChevronRight, ShieldCheck, ChevronDown,
+  ShieldCheck, ChevronDown, LogOut,
 } from "lucide-react";
 import { usePermissions } from "./hooks/use-permissions";
 import { HREF_TO_PAGE } from "../../lib/access-control";
@@ -58,6 +59,11 @@ export function Sidebar() {
   const router = useRouter();
   const { can, isLoading, role, me } = usePermissions();
   const [previewRole, setPreviewRole] = useState("");
+  const { data: clinicName } = useQuery({
+    queryKey: ["settings-clinic-name"],
+    queryFn: () => fetch("/api/settings").then(r => r.json()).then((all: Record<string, { name?: string }>) => all.clinic?.name),
+    staleTime: 120_000,
+  });
 
   useEffect(() => {
     setPreviewRole(localStorage.getItem("cms:preview-role") ?? "");
@@ -111,7 +117,7 @@ export function Sidebar() {
       {/* Clinic badge */}
       <div className="mx-3 mt-3 bg-white/[0.04] border border-white/[0.07] rounded-[10px] px-3 py-2.5">
         <small className="block text-[10px] text-dim-500 uppercase tracking-[0.06em] font-semibold mb-0.5">Clínica</small>
-        <p className="text-[12px] text-dim-300 font-medium">Mais Saúde CV — Palmarejo</p>
+        <p className="text-[12px] text-dim-300 font-medium">{clinicName || "Clínica Mais Saúde"}</p>
       </div>
 
       {/* Navigation */}
@@ -185,7 +191,7 @@ export function Sidebar() {
         </div>
 
         {/* User info */}
-        <div className="flex items-center gap-2.5 p-2 rounded-[10px] cursor-pointer hover:bg-white/[0.05] transition-colors">
+        <div className="flex items-center gap-2.5 p-2 rounded-[10px] hover:bg-white/[0.05] transition-colors">
           <div className="w-8 h-8 rounded-full bg-brand-700 flex items-center justify-center font-semibold text-[12px] text-brand-100 shrink-0">
             {initials || "A"}
           </div>
@@ -193,7 +199,9 @@ export function Sidebar() {
             <strong className="block text-[12px] text-dim-200 font-medium truncate">{me?.fullName ?? "Dev Admin"}</strong>
             <span className="text-[10px] text-dim-500">{ROLE_LABELS[displayRole] ?? displayRole}</span>
           </div>
-          <ChevronRight className="w-3.5 h-3.5 text-dim-500 ml-auto shrink-0" />
+          <a href="/api/auth/logout" title="Terminar sessão" className="ml-auto shrink-0 text-dim-500 hover:text-red-400 transition-colors">
+            <LogOut className="w-3.5 h-3.5" />
+          </a>
         </div>
       </div>
     </aside>

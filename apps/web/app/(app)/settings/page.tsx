@@ -10,8 +10,11 @@ import {
   FlaskConical, Receipt, ClipboardList, UserCog,
   Home, BarChart2, Settings2, SlidersHorizontal,
 } from "lucide-react";
+import type { StaffInvitationEntry } from "@cms/types";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
+import { CARD, inputCls, Field } from "../../../components/settings/shared";
+import { AccessTab } from "../../../components/settings/AccessTab";
 
 /* ── Types ───────────────────────────────────────────────── */
 
@@ -62,18 +65,6 @@ const NOTIF_DEFS = [
 ];
 
 /* ── UI primitives ───────────────────────────────────────── */
-
-const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
-const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300 font-sans placeholder:text-dim-400";
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">{label}</label>
-      {children}
-    </div>
-  );
-}
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -388,17 +379,18 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
   }
 
   const mutation = useMutation({
-    mutationFn: (body: object) => fetch("/api/staff", {
+    mutationFn: (body: object) => fetch("/api/staff/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(async r => {
-      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao criar utilizador"); }
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao enviar convite"); }
       return r.json();
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["bff-staff"] });
-      addMessage("Success", "Utilizador criado com sucesso!");
+      queryClient.invalidateQueries({ queryKey: ["staff-invitations"] });
+      addMessage("Success", "Convite enviado! O colaborador vai receber um email para ativar a conta.");
       setForm(BLANK_USER);
       onClose();
     },
@@ -422,12 +414,12 @@ function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void })
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Novo Utilizador" description="Adicionar colaborador ao sistema" size="lg">
+    <Modal open={open} onClose={onClose} title="Novo Utilizador" description="Enviar convite de acesso ao sistema" size="lg">
       <form onSubmit={submit}>
         <UserFormFields form={form} errs={errs} profileOptions={profileOptions} set={set} toggleDay={toggleDay} />
         <div className="px-6 py-4 border-t border-dim-100 bg-dim-50/60 flex items-center gap-3">
           <button type="submit" disabled={mutation.isPending} className="bg-brand-700 hover:bg-brand-800 disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors shadow-[0_1px_2px_rgba(0,0,0,.08)]">
-            {mutation.isPending ? "A criar…" : "Criar Utilizador"}
+            {mutation.isPending ? "A enviar…" : "Enviar Convite"}
           </button>
           <button type="button" onClick={onClose} className="border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 font-medium px-5 py-2.5 rounded-[10px] text-[13px] transition-colors">Cancelar</button>
         </div>
@@ -509,6 +501,8 @@ function EditUserModal({ staff, onClose }: { staff: ApiStaff; onClose: () => voi
 }
 
 function UsersTab() {
+  const { addMessage } = useMessage();
+  const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<ApiStaff | null>(null);
   const { data: staff = [], isLoading } = useQuery<ApiStaff[]>({
@@ -516,6 +510,20 @@ function UsersTab() {
     queryFn: () => fetch("/api/bff/staff").then(r => r.json()),
     staleTime: 60_000,
   });
+  const { data: invitations = [] } = useQuery<StaffInvitationEntry[]>({
+    queryKey: ["staff-invitations"],
+    queryFn: () => fetch("/api/staff/invitations").then(r => r.json()),
+    staleTime: 30_000,
+  });
+
+  const cancelInviteMut = useMutation({
+    mutationFn: (id: string) => fetch(`/api/staff/invitations/${id}`, { method: "DELETE" })
+      .then(r => { if (!r.ok) throw new Error("Erro ao cancelar convite"); return r.json(); }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["staff-invitations"] }); addMessage("Success", "Convite cancelado."); },
+    onError: (e: Error) => addMessage("Error", e.message),
+  });
+
+  const totalRows = staff.length + invitations.length;
 
   return (
     <>
@@ -523,7 +531,9 @@ function UsersTab() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-dim-100">
           <div>
             <h3 className="font-display text-[14px] font-semibold text-dim-900">Utilizadores do Sistema</h3>
-            <p className="text-[11px] text-dim-400 mt-0.5">{staff.length} colaboradores registados</p>
+            <p className="text-[11px] text-dim-400 mt-0.5">
+              {staff.length} colaboradores registados{invitations.length > 0 ? ` · ${invitations.length} convite(s) pendente(s)` : ""}
+            </p>
           </div>
           <button
             onClick={() => setAddOpen(true)}
@@ -552,42 +562,84 @@ function UsersTab() {
                   ))}
                 </tr>
               ))
-            ) : staff.map(u => {
-              const initials = u.fullName.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase();
-              const todayDow = new Date().getDay();
-              const onDuty = u.availability.some(a => a.dayOfWeek === todayDow);
-              return (
-                <tr key={u.id} className="hover:bg-dim-50 transition-colors group">
-                  <td className="px-5 py-3.5 border-b border-dim-100">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 font-semibold text-[10px] flex items-center justify-center shrink-0">{initials}</div>
-                      <span className="text-[13px] font-medium text-dim-900">{u.fullName}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 border-b border-dim-100">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLOR[u.role] ?? "bg-dim-100 text-dim-600"}`}>
-                      {ROLE_LABEL[u.role] ?? u.role}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{u.email}</td>
-                  <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{u.phone ?? "—"}</td>
-                  <td className="px-5 py-3.5 border-b border-dim-100">
-                    <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${onDuty ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80" : "bg-dim-100 text-dim-400"}`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${onDuty ? "bg-emerald-500" : "bg-dim-300"}`} />
-                      {onDuty ? "Em serviço" : "Fora"}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 border-b border-dim-100 text-right">
-                    <button
-                      onClick={() => setEditing(u)}
-                      className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-all"
-                    >
-                      Editar
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            ) : totalRows === 0 ? (
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-[13px] text-dim-400">Nenhum utilizador registado.</td></tr>
+            ) : (
+              <>
+                {invitations.map(inv => {
+                  const initials = inv.fullName.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase();
+                  const expired = new Date(inv.expiresAt).getTime() < Date.now();
+                  return (
+                    <tr key={`inv-${inv.id}`} className="hover:bg-dim-50 transition-colors group opacity-70">
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-dim-100 text-dim-500 font-semibold text-[10px] flex items-center justify-center shrink-0 border border-dashed border-dim-300">{initials}</div>
+                          <span className="text-[13px] font-medium text-dim-700">{inv.fullName}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLOR[inv.role] ?? "bg-dim-100 text-dim-600"}`}>
+                          {ROLE_LABEL[inv.role] ?? inv.role}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{inv.email}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{inv.phone ?? "—"}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${expired ? "bg-red-50 text-red-600 ring-1 ring-red-200/80" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80"}`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${expired ? "bg-red-400" : "bg-amber-400 animate-pulse"}`} />
+                          {expired ? "Convite Expirado" : "Convite Pendente"}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 text-right">
+                        <button
+                          onClick={() => cancelInviteMut.mutate(inv.id)}
+                          disabled={cancelInviteMut.isPending}
+                          className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold border border-dim-200 text-dim-500 rounded-[8px] hover:border-red-300 hover:text-red-600 transition-all"
+                        >
+                          Cancelar Convite
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {staff.map(u => {
+                  const initials = u.fullName.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase();
+                  const todayDow = new Date().getDay();
+                  const onDuty = u.availability.some(a => a.dayOfWeek === todayDow);
+                  return (
+                    <tr key={u.id} className="hover:bg-dim-50 transition-colors group">
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 font-semibold text-[10px] flex items-center justify-center shrink-0">{initials}</div>
+                          <span className="text-[13px] font-medium text-dim-900">{u.fullName}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLOR[u.role] ?? "bg-dim-100 text-dim-600"}`}>
+                          {ROLE_LABEL[u.role] ?? u.role}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{u.email}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{u.phone ?? "—"}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100">
+                        <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${onDuty ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80" : "bg-dim-100 text-dim-400"}`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${onDuty ? "bg-emerald-500" : "bg-dim-300"}`} />
+                          {onDuty ? "Em serviço" : "Fora"}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 text-right">
+                        <button
+                          onClick={() => setEditing(u)}
+                          className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-all"
+                        >
+                          Editar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </>
+            )}
           </tbody>
         </table>
       </div>
@@ -703,7 +755,7 @@ function EFaturaSection() {
   const [showKey, setShowKey] = useState(false);
   const [vals, setVals] = useState({
     enabled: false, sandbox: true,
-    nifContribuinte: "", nomeEmpresa: "", apiKey: "", endpoint: "",
+    apiKey: "", endpoint: "",
   });
 
   const { data: allSettings } = useQuery<Record<string, Record<string, string>>>({
@@ -712,14 +764,16 @@ function EFaturaSection() {
     staleTime: 60_000,
   });
 
+  // nif/nome are no longer stored here — Configurações → Clínica is the single source
+  const clinic = allSettings?.["clinic"] as unknown as { name?: string; nif?: string } | undefined;
+  const clinicReady = !!clinic?.name && !!clinic?.nif;
+
   useEffect(() => {
     const saved = allSettings?.["integration_efatura"];
     if (!saved || !Object.keys(saved).length) return;
     setVals({
       enabled: saved.enabled === "true",
       sandbox: saved.sandbox !== "false",
-      nifContribuinte: saved.nifContribuinte ?? "",
-      nomeEmpresa: saved.nomeEmpresa ?? "",
       apiKey: saved.apiKey ?? "",
       endpoint: saved.endpoint ?? "",
     });
@@ -734,8 +788,6 @@ function EFaturaSection() {
         body: JSON.stringify({
           enabled: vals.enabled ? "true" : "false",
           sandbox: vals.sandbox ? "true" : "false",
-          nifContribuinte: vals.nifContribuinte,
-          nomeEmpresa: vals.nomeEmpresa,
           apiKey: vals.apiKey,
           endpoint: vals.endpoint,
         }),
@@ -778,17 +830,23 @@ function EFaturaSection() {
           <Toggle checked={vals.sandbox} onChange={v => setVals(p => ({ ...p, sandbox: v }))} />
         </div>
 
+        <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-[10px] border ${clinicReady ? "bg-dim-50 border-dim-100" : "bg-amber-50 border-amber-200"}`}>
+          {clinicReady ? (
+            <p className="text-[12px] text-dim-600">
+              NIF e nome usados na fatura: <strong className="text-dim-800">{clinic!.name}</strong> · <span className="font-mono">{clinic!.nif}</span>
+              <span className="text-dim-400"> — definidos em </span>
+              <button type="button" onClick={() => document.querySelector<HTMLButtonElement>('[data-settings-tab="clinic"]')?.click()} className="text-brand-600 hover:text-brand-800 font-semibold underline underline-offset-2">Clínica</button>
+            </p>
+          ) : (
+            <p className="text-[12px] text-amber-700">
+              NIF e nome da clínica ainda não estão configurados — vá a{" "}
+              <button type="button" onClick={() => document.querySelector<HTMLButtonElement>('[data-settings-tab="clinic"]')?.click()} className="font-semibold underline underline-offset-2">Clínica → Informação da Clínica</button>{" "}
+              antes de ativar a integração.
+            </p>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-x-6 gap-y-4 pt-1 border-t border-dim-100">
-          <Field label="NIF Contribuinte">
-            <input type="text" value={vals.nifContribuinte} placeholder="200456789"
-              onChange={e => setVals(p => ({ ...p, nifContribuinte: e.target.value }))}
-              className={inputCls} />
-          </Field>
-          <Field label="Nome da Empresa">
-            <input type="text" value={vals.nomeEmpresa} placeholder="Clínica Mais Saúde"
-              onChange={e => setVals(p => ({ ...p, nomeEmpresa: e.target.value }))}
-              className={inputCls} />
-          </Field>
           <Field label="API Key">
             <div className="relative">
               <input type={showKey ? "text" : "password"} value={vals.apiKey} placeholder="••••••••"
@@ -1139,332 +1197,6 @@ function SecurityTab() {
   );
 }
 
-/* ── Access Control Tab ──────────────────────────────────── */
-
-/* ── Gestão de Acesso ─────────────────────────────────────── */
-
-const ACCESS_PAGES = [
-  { key: "dashboard",    label: "Dashboard",            icon: LayoutDashboard   },
-  { key: "appointments", label: "Agendamentos",          icon: CalendarDays      },
-  { key: "patients",     label: "Pacientes CRM",         icon: UserRound         },
-  { key: "health_plans", label: "Planos de Saúde",       icon: HeartPulse        },
-  { key: "exams",        label: "Exames & Resultados",   icon: FlaskConical      },
-  { key: "billing",      label: "Faturação",             icon: Receipt           },
-  { key: "records",      label: "Registos Clínicos",     icon: ClipboardList     },
-  { key: "staff",        label: "Equipa & Turnos",       icon: UserCog           },
-  { key: "visits",       label: "Visitas Domiciliárias", icon: Home              },
-  { key: "analytics",    label: "Analytics",             icon: BarChart2         },
-  { key: "settings",     label: "Configurações",         icon: Settings2         },
-  { key: "params",       label: "Parametrizações",       icon: SlidersHorizontal },
-] as const;
-
-type PageKey = typeof ACCESS_PAGES[number]["key"];
-type PagePerms = { view: boolean; create: boolean; edit: boolean; delete: boolean };
-type RolePerms = Record<PageKey, PagePerms>;
-type AccessControl = Record<string, RolePerms>;
-
-const FULL_PAGE: PagePerms = { view: true, create: true, edit: true, delete: true };
-const NO_PAGE:   PagePerms = { view: false, create: false, edit: false, delete: false };
-
-function defaultPerms(codigo: string): RolePerms {
-  const all  = Object.fromEntries(ACCESS_PAGES.map(p => [p.key, FULL_PAGE])) as RolePerms;
-  const none = Object.fromEntries(ACCESS_PAGES.map(p => [p.key, NO_PAGE]))  as RolePerms;
-  switch (codigo) {
-    case "admin":        return all;
-    case "doctor":       return Object.fromEntries(ACCESS_PAGES.map(p => [p.key, ["billing","staff","settings","params"].includes(p.key) ? NO_PAGE : FULL_PAGE])) as RolePerms;
-    case "nurse":        return Object.fromEntries(ACCESS_PAGES.map(p => [p.key, ["health_plans","billing","staff","settings","params"].includes(p.key) ? NO_PAGE : FULL_PAGE])) as RolePerms;
-    case "receptionist": return Object.fromEntries(ACCESS_PAGES.map(p => [p.key, ["exams","records","staff","visits","analytics","settings","params"].includes(p.key) ? NO_PAGE : FULL_PAGE])) as RolePerms;
-    case "lab_tech":     return Object.fromEntries(ACCESS_PAGES.map(p => [p.key, ["appointments","health_plans","billing","records","staff","visits","analytics","settings","params"].includes(p.key) ? NO_PAGE : FULL_PAGE])) as RolePerms;
-    default:             return none;
-  }
-}
-
-function countEnabled(perms: RolePerms): number {
-  return ACCESS_PAGES.filter(p => perms[p.key]?.view).length;
-}
-
-/* ── Add Perfil modal ─────────────────────────────────────── */
-
-function AddPerfilModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const { addMessage } = useMessage();
-  const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch("/api/parametrizacao", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome: "PROFILE_SETTINGS", valor: name.trim(), codigo: name.trim().toLowerCase().replace(/\s+/g, "_") }),
-      });
-      if (!res.ok) throw new Error();
-      addMessage("Success", "Perfil criado com sucesso!");
-      onCreated();
-    } catch {
-      addMessage("Error", "Erro ao criar perfil.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title="Novo Perfil">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-5">
-        <Field label="Nome do Perfil">
-          <input
-            autoFocus
-            className={inputCls}
-            placeholder="Ex: Farmacêutico/a"
-            value={name}
-            onChange={e => setName(e.target.value)}
-          />
-        </Field>
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
-          <button type="submit" disabled={saving || !name.trim()} className="px-4 py-2 text-[13px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 disabled:opacity-50 transition-colors">
-            {saving ? "A criar…" : "Criar Perfil"}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-/* ── Permissions modal ────────────────────────────────────── */
-
-const ACTION_LABELS: Record<keyof PagePerms, string> = {
-  view: "Ver", create: "Criar", edit: "Editar", delete: "Eliminar",
-};
-
-function PermsModal({ perfil, perms, onSave, onClose }: {
-  perfil: { valor: string; codigo: string };
-  perms: RolePerms;
-  onSave: (p: RolePerms) => void;
-  onClose: () => void;
-}) {
-  const [draft, setDraft] = useState<RolePerms>(() => JSON.parse(JSON.stringify(perms)));
-
-  function toggleAction(page: PageKey, action: keyof PagePerms) {
-    setDraft(d => {
-      const cur = { ...d[page] };
-      if (action === "view" && cur.view) {
-        // turning off view disables all
-        cur.view = false; cur.create = false; cur.edit = false; cur.delete = false;
-      } else if (action !== "view" && !cur.view) {
-        // turning on any action requires view
-        cur.view = true; cur[action] = true;
-      } else {
-        cur[action] = !cur[action];
-      }
-      return { ...d, [page]: cur };
-    });
-  }
-
-  return (
-    <Modal open onClose={onClose} title={`Permissões — ${perfil.valor}`}>
-      <div className="flex flex-col" style={{ maxHeight: "70vh" }}>
-        <div className="overflow-y-auto flex-1">
-          <table className="w-full border-collapse text-left">
-            <thead className="sticky top-0 z-10 bg-dim-50">
-              <tr>
-                <th className="px-5 py-3 text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 border-b border-dim-100">Página</th>
-                {(Object.keys(ACTION_LABELS) as (keyof PagePerms)[]).map(a => (
-                  <th key={a} className="px-3 py-3 text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 border-b border-dim-100 text-center">{ACTION_LABELS[a]}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {ACCESS_PAGES.map(page => {
-                const Icon = page.icon;
-                const pp = draft[page.key];
-                return (
-                  <tr key={page.key} className="hover:bg-dim-50/60 transition-colors group">
-                    <td className="px-5 py-3 border-b border-dim-100">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-6 h-6 bg-dim-100 rounded-[6px] flex items-center justify-center shrink-0">
-                          <Icon className="text-dim-500" style={{ width: 12, height: 12 }} />
-                        </div>
-                        <span className="text-[13px] font-medium text-dim-800">{page.label}</span>
-                      </div>
-                    </td>
-                    {(Object.keys(ACTION_LABELS) as (keyof PagePerms)[]).map(action => {
-                      const on = pp?.[action] ?? false;
-                      return (
-                        <td key={action} className="px-3 py-3 border-b border-dim-100 text-center">
-                          <button
-                            type="button"
-                            onClick={() => toggleAction(page.key, action)}
-                            className={`inline-flex items-center justify-center w-6 h-6 rounded-full transition-all ${
-                              on
-                                ? "bg-brand-700 text-white shadow-[0_1px_2px_rgba(0,0,0,.1)] hover:bg-brand-800"
-                                : "bg-dim-100 text-dim-300 hover:bg-dim-200"
-                            }`}
-                          >
-                            {on ? <Check style={{ width: 10, height: 10 }} /> : <span className="text-[10px] font-bold">—</span>}
-                          </button>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-5 py-3 border-t border-dim-100 flex justify-end gap-2 bg-white">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
-          <button type="button" onClick={() => onSave(draft)} className="px-4 py-2 text-[13px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 transition-colors">Guardar Permissões</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-/* ── AccessTab ────────────────────────────────────────────── */
-
-function AccessTab() {
-  const { addMessage } = useMessage();
-  const qc = useQueryClient();
-  const [addOpen, setAddOpen] = useState(false);
-  const [editingPerfil, setEditingPerfil] = useState<{ valor: string; codigo: string } | null>(null);
-  const [accessControl, setAccessControl] = useState<AccessControl>({});
-  const [saving, setSaving] = useState(false);
-
-  const { data: perfis = [], isLoading } = useQuery<{ id: number; valor: string; codigo: string | null }[]>({
-    queryKey: ["parametrizacao", "PROFILE_SETTINGS"],
-    queryFn: () => fetch("/api/parametrizacao/PROFILE_SETTINGS").then(r => r.json()),
-    staleTime: 60_000,
-  });
-
-  const { data: allSettings } = useQuery<Record<string, unknown>>({
-    queryKey: ["settings-all"],
-    queryFn: () => fetch("/api/settings").then(r => r.json()),
-    staleTime: 60_000,
-  });
-
-  useEffect(() => {
-    if (!allSettings?.access_control) return;
-    setAccessControl(allSettings.access_control as AccessControl);
-  }, [allSettings]);
-
-  function getPerms(codigo: string): RolePerms {
-    return (accessControl[codigo] as RolePerms | undefined) ?? defaultPerms(codigo);
-  }
-
-  async function handleSavePerms(perfilCodigo: string, perms: RolePerms) {
-    const next = { ...accessControl, [perfilCodigo]: perms };
-    setSaving(true);
-    try {
-      const res = await fetch("/api/settings/access-control", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(next),
-      });
-      if (!res.ok) throw new Error();
-      setAccessControl(next);
-      qc.invalidateQueries({ queryKey: ["settings-all"] });
-      setEditingPerfil(null);
-      addMessage("Success", "Permissões guardadas com sucesso!");
-    } catch {
-      addMessage("Error", "Erro ao guardar permissões.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className={CARD}>
-        <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
-          <div>
-            <h3 className="font-display text-[14px] font-semibold text-dim-900">Perfis de Acesso</h3>
-            <p className="text-[11px] text-dim-400 mt-0.5">Define permissões por página e ação para cada perfil</p>
-          </div>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 transition-colors"
-          >
-            <Plus style={{ width: 14, height: 14 }} />
-            Adicionar Perfil
-          </button>
-        </div>
-
-        {isLoading ? (
-          <div className="px-5 py-8 text-center text-[13px] text-dim-400">A carregar perfis…</div>
-        ) : (
-          <div className="divide-y divide-dim-100">
-            {perfis.map(p => {
-              const codigo = p.codigo ?? p.valor.toLowerCase().replace(/\s+/g, "_");
-              const isAdmin = codigo === "admin";
-              const perms = getPerms(codigo);
-              const enabled = countEnabled(perms);
-
-              return (
-                <div key={p.id} className="px-5 py-4 flex items-center justify-between hover:bg-dim-50/60 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-dim-100 rounded-[8px] flex items-center justify-center shrink-0">
-                      <ShieldCheck className="text-dim-500" style={{ width: 15, height: 15 }} />
-                    </div>
-                    <div>
-                      <p className="text-[13px] font-semibold text-dim-900">{p.valor}</p>
-                      <p className="text-[11px] text-dim-400 mt-0.5">
-                        {isAdmin ? "Acesso total a todas as páginas" : `${enabled} de ${ACCESS_PAGES.length} páginas com acesso`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {isAdmin ? (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-brand-50 text-brand-700 ring-1 ring-brand-200/80">
-                        <Check style={{ width: 10, height: 10 }} /> Acesso Total
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => setEditingPerfil({ valor: p.valor, codigo })}
-                        disabled={saving}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-dim-200 text-dim-700 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors"
-                      >
-                        <ShieldCheck style={{ width: 13, height: 13 }} />
-                        Permissões
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {perfis.length === 0 && (
-              <div className="px-5 py-8 text-center text-[13px] text-dim-400">
-                Nenhum perfil encontrado. Adicione um perfil para começar.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {addOpen && (
-        <AddPerfilModal
-          onClose={() => setAddOpen(false)}
-          onCreated={() => {
-            setAddOpen(false);
-            qc.invalidateQueries({ queryKey: ["parametrizacao", "PROFILE_SETTINGS"] });
-          }}
-        />
-      )}
-
-      {editingPerfil && (
-        <PermsModal
-          perfil={editingPerfil}
-          perms={getPerms(editingPerfil.codigo)}
-          onSave={(p) => handleSavePerms(editingPerfil.codigo, p)}
-          onClose={() => setEditingPerfil(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 /* ── Main page ───────────────────────────────────────────── */
 
 const TABS = [
@@ -1505,6 +1237,7 @@ export default function SettingsPage() {
             return (
               <button
                 key={tab.key}
+                data-settings-tab={tab.key}
                 onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-2.5 w-full text-left px-3.5 py-2.5 rounded-[10px] text-[13px] font-medium transition-colors cursor-pointer ${
                   active ? "bg-brand-700 text-white shadow-[0_1px_2px_rgba(0,0,0,.08)]"

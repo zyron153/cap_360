@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 
 interface ReceiptData {
+  clinic: { name: string; nif: string; address: string; phone: string; email: string };
   invoiceNumber: string;
   issuedAt: Date | null;
   patient: { fullName: string; phone: string };
@@ -40,10 +41,10 @@ export function generateReceiptPdf(data: ReceiptData): Promise<Buffer> {
     const W = doc.page.width - 100; // usable width
 
     // ── Header ──────────────────────────────────────────────────────────────
-    doc.fontSize(22).fillColor(BRAND).font("Helvetica-Bold").text("Clínica Mais Saúde", 50, 50);
+    doc.fontSize(22).fillColor(BRAND).font("Helvetica-Bold").text(data.clinic.name, 50, 50);
     doc.fontSize(9).fillColor(DIM).font("Helvetica")
-      .text("Praia, Santiago, Cabo Verde", 50, 76)
-      .text("+238 261 0000 | clinica@maissaudecv.com", 50, 88);
+      .text(data.clinic.address, 50, 76)
+      .text(`${data.clinic.phone} | ${data.clinic.email}`, 50, 88);
 
     doc.fontSize(28).fillColor(DARK).font("Helvetica-Bold")
       .text("RECIBO", 50, 50, { align: "right", width: W });
@@ -112,7 +113,7 @@ export function generateReceiptPdf(data: ReceiptData): Promise<Buffer> {
     // ── Footer ───────────────────────────────────────────────────────────────
     doc.fontSize(8).fillColor(DIM).font("Helvetica")
       .text(
-        "Clínica Mais Saúde  •  NIF: 000000000  •  Este documento foi gerado automaticamente.",
+        `${data.clinic.name}  •  NIF: ${data.clinic.nif}  •  Este documento foi gerado automaticamente.`,
         50, 760, { align: "center", width: W }
       );
 

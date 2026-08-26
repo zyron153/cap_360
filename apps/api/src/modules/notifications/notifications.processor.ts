@@ -149,6 +149,27 @@ export class NotificationsProcessor {
     });
   }
 
+  @Process("send-invite")
+  async handleInvite(job: Job<{ email: string; fullName: string; token: string }>) {
+    const smtp = await this.cfg<SmtpConfig>("integration_email_smtp");
+    if (!smtp?.host) return;
+
+    const { email, fullName, token } = job.data;
+    const activateUrl = `${process.env.WEB_URL ?? "http://localhost:3000"}/activate?token=${token}`;
+
+    const html = `<div style="font-family:sans-serif;max-width:480px">
+      <h2>Bem-vindo(a) à Clínica Mais Saúde</h2>
+      <p>Olá ${fullName},</p>
+      <p>Foi convidado(a) a juntar-se à plataforma de gestão da clínica. Clique no botão abaixo para ativar a sua conta e definir a sua palavra-passe.</p>
+      <p style="margin:24px 0"><a href="${activateUrl}" style="background:#0D8080;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Ativar Conta</a></p>
+      <p style="color:#666;font-size:12px">Este convite expira em 7 dias. Se não fez este pedido, ignore este email.</p>
+    </div>`;
+
+    await this.createTransport(smtp).sendMail({
+      from: this.from(smtp), to: email, subject: "Convite — Clínica Mais Saúde", html,
+    });
+  }
+
   @Process("overdue-invoices")
   async handleOverdueInvoices(_job: Job) {
     const smtp = await this.cfg<SmtpConfig>("integration_email_smtp");

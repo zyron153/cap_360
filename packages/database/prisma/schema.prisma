@@ -150,6 +150,26 @@ model Staff {
   @@map("staff")
 }
 
+model StaffInvitation {
+  id            String    @id @default(uuid())
+  token         String    @unique @db.VarChar(64)
+  email         String    @db.VarChar(150)
+  fullName      String    @db.VarChar(150)
+  role          StaffRole
+  jobTitle      String?   @db.VarChar(100)
+  specialtyCode String?   @db.VarChar(50)
+  phone         String?   @db.VarChar(30)
+  availability  Json?
+  invitedBy     String?   @db.VarChar(150)
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([email])
+  @@index([token])
+  @@map("staff_invitations")
+}
+
 model Service {
   id              String   @id @default(uuid())
   name            String   @db.VarChar(150)

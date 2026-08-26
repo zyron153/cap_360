@@ -113,13 +113,14 @@ async function fetchInvoicePreview(id: string) {
   return res.json() as Promise<PreviewInvoice>;
 }
 
-async function fetchClinicEFaturaInfo() {
+// Configurações → Clínica is the single source of truth for the clinic's name/NIF
+async function fetchClinicInfo() {
   const res = await fetch("/api/settings");
   if (!res.ok) return null;
   const all = (await res.json()) as Record<string, Record<string, string>>;
-  const cfg = all["integration_efatura"];
-  if (!cfg) return null;
-  return { nif: cfg.nifContribuinte ?? "", nome: cfg.nomeEmpresa ?? "" };
+  const clinic = all["clinic"];
+  if (!clinic) return null;
+  return { nif: clinic.nif ?? "", nome: clinic.name ?? "" };
 }
 
 async function fetchEFaturaSubmission(id: string) {
@@ -136,8 +137,8 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
   });
 
   const { data: clinic } = useQuery({
-    queryKey: ["settings-efatura-display"],
-    queryFn: fetchClinicEFaturaInfo,
+    queryKey: ["settings-clinic-display"],
+    queryFn: fetchClinicInfo,
     enabled: !!invoiceId,
     staleTime: 60_000,
   });

@@ -1,13 +1,15 @@
 import { Test } from "@nestjs/testing";
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, BadRequestException } from "@nestjs/common";
 import { getQueueToken } from "@nestjs/bull";
 import { AppointmentsService } from "./appointments.service";
 import { AppointmentsRepository } from "./appointments.repository";
 import { AppointmentsGateway } from "./appointments.gateway";
 import { BillingService } from "../billing/billing.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { PrismaService } from "../../prisma/prisma.service";
 import { REDIS_CLIENT } from "../../common/redis/redis.module";
 
+const prisma = { setting: { findUnique: jest.fn() } };
 const repo = {
   findStaffAvailability: jest.fn(),
   findConfirmedInRange: jest.fn(),
@@ -39,6 +41,7 @@ describe("AppointmentsService", () => {
         { provide: AppointmentsGateway, useValue: gateway },
         { provide: BillingService, useValue: billingMock },
         { provide: NotificationsService, useValue: notifMock },
+        { provide: PrismaService, useValue: prisma },
         { provide: getQueueToken("reminders"), useValue: queue },
         { provide: REDIS_CLIENT, useValue: redis },
       ],
@@ -118,6 +121,80 @@ describe("AppointmentsService", () => {
       await service.create(DTO);
       expect(repo.create).toHaveBeenCalledTimes(1);
       expect(gateway.emitAppointmentCreated).toHaveBeenCalledWith(created);
+    });
+  });
+
+  describe("create — business hours validation", () => {
+    // 2026-07-01 is a Wednesday ("Quarta-feira"); 2026-07-05 is a Sunday ("Domingo")
+    const WED_10AM = new Date(2026, 6, 1, 10, 0, 0).toISOString();
+    const BASE_DTO = {
+      patientId: "patient-1",
+      staffId: STAFF_ID,
+      serviceId: "service-1",
+      scheduledAt: WED_10AM,
+      source: "web" as const,
+    };
+
+    beforeEach(() => {
+      redis.set.mockResolvedValue("OK");
+      redis.del.mockResolvedValue(1);
+      repo.findConfirmedInRange.mockResolvedValue([]);
+      repo.create.mockResolvedValue({ id: "appt-1", scheduledAt: new Date(WED_10AM) });
+      queue.add.mockResolvedValue({ id: "job-1" });
+      repo.createReminder.mockResolvedValue({});
+    });
+
+    it("allows scheduling when no clinic hours are configured yet (permissive default)", async () => {
+      prisma.setting.findUnique.mockResolvedValue(null);
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+    });
+
+    it("allows scheduling when that weekday has no matching hours entry", async () => {
+      prisma.setting.findUnique.mockResolvedValue({
+        value: { hours: [{ day: "Segunda-feira", active: true, open: "08:00", close: "18:00" }] },
+      });
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+    });
+
+    it("throws BadRequestException when the clinic is marked closed that day", async () => {
+      prisma.setting.findUnique.mockResolvedValue({
+        value: { hours: [{ day: "Domingo", active: false, open: "", close: "" }] },
+      });
+      const sunday = new Date(2026, 6, 5, 10, 0, 0).toISOString();
+      await expect(service.create({ ...BASE_DTO, scheduledAt: sunday })).rejects.toThrow(BadRequestException);
+    });
+
+    it("throws BadRequestException when scheduledAt is before the opening time", async () => {
+      prisma.setting.findUnique.mockResolvedValue({
+        value: { hours: [{ day: "Quarta-feira", active: true, open: "09:00", close: "18:00" }] },
+      });
+      const early = new Date(2026, 6, 1, 8, 0, 0).toISOString();
+      await expect(service.create({ ...BASE_DTO, scheduledAt: early })).rejects.toThrow(BadRequestException);
+    });
+
+    it("throws BadRequestException when the appointment would end after closing time", async () => {
+      prisma.setting.findUnique.mockResolvedValue({
+        value: { hours: [{ day: "Quarta-feira", active: true, open: "08:00", close: "17:00" }] },
+      });
+      const late = new Date(2026, 6, 1, 16, 45, 0).toISOString(); // ends 17:15, past 17:00 close
+      await expect(service.create({ ...BASE_DTO, scheduledAt: late })).rejects.toThrow(BadRequestException);
+    });
+
+    it("creates successfully when fully within the configured hours", async () => {
+      prisma.setting.findUnique.mockResolvedValue({
+        value: { hours: [{ day: "Quarta-feira", active: true, open: "08:00", close: "18:00" }] },
+      });
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+      expect(repo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not acquire the Redis slot lock when rejected for being outside business hours", async () => {
+      prisma.setting.findUnique.mockResolvedValue({
+        value: { hours: [{ day: "Domingo", active: false, open: "", close: "" }] },
+      });
+      const sunday = new Date(2026, 6, 5, 10, 0, 0).toISOString();
+      await expect(service.create({ ...BASE_DTO, scheduledAt: sunday })).rejects.toThrow(BadRequestException);
+      expect(redis.set).not.toHaveBeenCalled();
     });
   });
 });

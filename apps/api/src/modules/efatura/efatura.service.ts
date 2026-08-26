@@ -12,14 +12,21 @@ export class EFaturaService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  // nif/nomeEmpresa are sourced from Configurações → Clínica (single source of truth for
+  // the clinic's legal identity), not stored on the integration_efatura row itself.
   async getConfig(): Promise<EFaturaConfig | null> {
     const row = await this.prisma.setting.findUnique({
       where: { key: "integration_efatura" },
     });
     if (!row) return null;
-    const cfg = row.value as unknown as EFaturaConfig;
-    if (!cfg.enabled || !cfg.apiKey || !cfg.nifContribuinte || !cfg.nomeEmpresa) return null;
-    return cfg;
+    const stored = row.value as unknown as Omit<EFaturaConfig, "nifContribuinte" | "nomeEmpresa">;
+    if (!stored.enabled || !stored.apiKey) return null;
+
+    const clinicRow = await this.prisma.setting.findUnique({ where: { key: "clinic" } });
+    const clinic = clinicRow?.value as { nif?: string; name?: string } | undefined;
+    if (!clinic?.nif || !clinic?.name) return null;
+
+    return { ...stored, nifContribuinte: clinic.nif, nomeEmpresa: clinic.name };
   }
 
   // ponytail: POST path TBD — swap when Manual Técnico v11 confirms route

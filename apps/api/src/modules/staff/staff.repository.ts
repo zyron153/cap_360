@@ -1,7 +1,13 @@
 import { Injectable } from "@nestjs/common";
-import { randomUUID } from "crypto";
+import { StaffRole } from "@cms/database";
 import { PrismaService } from "../../prisma/prisma.service";
-import { CreateStaffDto, UpdateStaffDto } from "@cms/types";
+import { CreateStaffDto, UpdateStaffDto, InviteStaffDto } from "@cms/types";
+
+const INVITATION_SELECT = {
+  id: true, email: true, fullName: true, role: true,
+  jobTitle: true, phone: true, specialtyCode: true,
+  expiresAt: true, createdAt: true,
+} as const;
 
 const STAFF_SELECT = {
   id: true,
@@ -43,6 +49,10 @@ export class StaffRepository {
     });
   }
 
+  findByEmail(email: string) {
+    return this.prisma.staff.findFirst({ where: { email, deletedAt: null } });
+  }
+
   update(id: string, dto: UpdateStaffDto) {
     const avail = dto.availability;
     return this.prisma.staff.update({
@@ -71,12 +81,12 @@ export class StaffRepository {
     });
   }
 
-  create(dto: CreateStaffDto) {
+  /** Creates the real Staff row once a Keycloak account exists — called only from invitation activation. */
+  create(keycloakId: string, dto: { fullName: string; email: string; role: StaffRole; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; availability?: CreateStaffDto["availability"] }) {
     const avail = dto.availability ?? [];
     return this.prisma.staff.create({
       data: {
-        // ponytail: placeholder keycloakId until Keycloak provisioning is wired (Phase 2)
-        keycloakId: randomUUID(),
+        keycloakId,
         fullName: dto.fullName,
         email: dto.email,
         role: dto.role,
@@ -99,5 +109,53 @@ export class StaffRepository {
       },
       select: STAFF_SELECT,
     });
+  }
+
+  // ─── Invitations ───────────────────────────────────────────────────────────
+
+  createInvitation(dto: InviteStaffDto, token: string, expiresAt: Date, invitedBy?: string) {
+    return this.prisma.staffInvitation.create({
+      data: {
+        token,
+        email: dto.email,
+        fullName: dto.fullName,
+        role: dto.role,
+        jobTitle: dto.jobTitle ?? null,
+        phone: dto.phone ?? null,
+        specialtyCode: dto.specialtyCode ?? null,
+        availability: dto.availability ?? undefined,
+        invitedBy: invitedBy ?? null,
+        expiresAt,
+      },
+      select: INVITATION_SELECT,
+    });
+  }
+
+  findPendingInvitations() {
+    return this.prisma.staffInvitation.findMany({
+      where: { acceptedAt: null },
+      select: INVITATION_SELECT,
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  findInvitationByEmail(email: string) {
+    return this.prisma.staffInvitation.findFirst({ where: { email, acceptedAt: null } });
+  }
+
+  findInvitationByToken(token: string) {
+    return this.prisma.staffInvitation.findUnique({ where: { token } });
+  }
+
+  findInvitationById(id: string) {
+    return this.prisma.staffInvitation.findUnique({ where: { id } });
+  }
+
+  markInvitationAccepted(id: string) {
+    return this.prisma.staffInvitation.update({ where: { id }, data: { acceptedAt: new Date() } });
+  }
+
+  deleteInvitation(id: string) {
+    return this.prisma.staffInvitation.delete({ where: { id } });
   }
 }

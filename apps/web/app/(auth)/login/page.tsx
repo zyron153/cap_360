@@ -1,14 +1,20 @@
-import { Stethoscope } from "lucide-react";
+"use client";
 
-export default function LoginPage() {
-  const keycloakUrl = process.env.NEXT_PUBLIC_KEYCLOAK_URL;
-  const realm = process.env.NEXT_PUBLIC_KEYCLOAK_REALM;
-  const clientId = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID;
+import { Suspense } from "react";
+import { Stethoscope, AlertCircle, CheckCircle2 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 
-  const loginUrl =
-    keycloakUrl && realm && clientId
-      ? `${keycloakUrl}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=__REDIRECT__&response_type=code&scope=openid`
-      : "#";
+const ERROR_LABELS: Record<string, string> = {
+  invalid_state: "Sessão de autenticação inválida ou expirada. Tente novamente.",
+  token_exchange_failed: "Não foi possível concluir a autenticação. Tente novamente.",
+};
+
+function LoginCard() {
+  const params = useSearchParams();
+  const next = params.get("next") ?? "/dashboard";
+  const error = params.get("error");
+  const activated = params.get("activated") === "1";
+  const loginUrl = `/api/auth/login?next=${encodeURIComponent(next)}`;
 
   return (
     <main className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -33,6 +39,19 @@ export default function LoginPage() {
             {/* Divider */}
             <div className="border-t border-slate-100" />
 
+            {error && (
+              <div className="flex items-start gap-2 text-left bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
+                <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-700">{ERROR_LABELS[error] ?? "Ocorreu um erro ao iniciar sessão."}</p>
+              </div>
+            )}
+            {activated && !error && (
+              <div className="flex items-start gap-2 text-left bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-emerald-700">Conta ativada com sucesso! Inicie sessão para continuar.</p>
+              </div>
+            )}
+
             {/* Sign in */}
             <div className="space-y-3">
               <p className="text-sm text-slate-600">
@@ -54,5 +73,13 @@ export default function LoginPage() {
         </p>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginCard />
+    </Suspense>
   );
 }

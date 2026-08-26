@@ -78,11 +78,13 @@
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
+        "http://localhost:3001/*",
         "https://app.maissaudecv.com/*",
         "https://staging.maissaudecv.com/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
+        "http://localhost:3001",
         "https://app.maissaudecv.com",
         "https://staging.maissaudecv.com"
       ],
@@ -144,6 +146,14 @@
   ],
   "users": [
     {
+      "username": "service-account-api",
+      "enabled": true,
+      "serviceAccountClientId": "api",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users", "view-realm"]
+      }
+    },
+    {
       "id": "a0000000-0000-0000-0000-000000000001",
       "username": "admin",
       "email": "admin@maissaudecv.com",
@@ -151,7 +161,7 @@
       "lastName": "Sistema",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Admin@12345", "temporary": true }],
+      "credentials": [{ "type": "password", "value": "Clinica@12345", "temporary": true }],
       "realmRoles": ["admin"]
     },
     {
@@ -217,7 +227,7 @@
       "lastName": "Ferreira",
       "enabled": true,
       "emailVerified": true,
-      "credentials": [{ "type": "password", "value": "Lab@12345", "temporary": true }],
+      "credentials": [{ "type": "password", "value": "Lab@123456", "temporary": true }],
       "realmRoles": ["lab_tech"]
     }
   ],

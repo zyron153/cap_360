@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body } from "@nestjs/common";
+import { Controller, Get, Post, Query, Body, Param } from "@nestjs/common";
 import { Throttle, SkipThrottle } from "@nestjs/throttler";
 import { Public } from "../../common/decorators/public.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -7,6 +7,8 @@ import {
   AvailabilityQuerySchema,
   PublicBookingDto,
   PublicBookingSchema,
+  ActivateInvitationDto,
+  ActivateInvitationSchema,
 } from "@cms/types";
 import { PublicService } from "./public.service";
 
@@ -42,5 +44,21 @@ export class PublicController {
     @Body(new ZodValidationPipe(PublicBookingSchema)) dto: PublicBookingDto,
   ) {
     return this.svc.createBooking(dto);
+  }
+
+  @SkipThrottle()
+  @Get("invitations/:token")
+  getInvitation(@Param("token") token: string) {
+    return this.svc.getInvitation(token);
+  }
+
+  // Stricter throttle: 10 activation attempts per hour per IP — this sets a password
+  @Throttle({ default: { limit: 10, ttl: 3_600_000 } })
+  @Post("invitations/:token/activate")
+  activateInvitation(
+    @Param("token") token: string,
+    @Body(new ZodValidationPipe(ActivateInvitationSchema)) dto: ActivateInvitationDto,
+  ) {
+    return this.svc.activateInvitation(token, dto);
   }
 }

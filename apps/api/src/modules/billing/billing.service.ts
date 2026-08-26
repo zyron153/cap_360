@@ -202,6 +202,21 @@ export class BillingService {
     });
   }
 
+  // Configurações → Clínica is the single source of truth for the clinic's identity.
+  // Falls back to placeholder values if the admin hasn't saved it yet, so receipt
+  // generation never hard-fails on missing config.
+  private async getClinicInfo() {
+    const row = await this.prisma.setting.findUnique({ where: { key: "clinic" } });
+    const clinic = row?.value as { name?: string; nif?: string; address?: string; phone?: string; email?: string } | undefined;
+    return {
+      name: clinic?.name || "Clínica Mais Saúde",
+      nif: clinic?.nif || "—",
+      address: clinic?.address || "Cabo Verde",
+      phone: clinic?.phone || "—",
+      email: clinic?.email || "—",
+    };
+  }
+
   async getReceiptUrl(invoiceId: string): Promise<{ url: string }> {
     const invoice = await this.repo.findById(invoiceId);
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
@@ -214,7 +229,9 @@ export class BillingService {
       return { url: await this.r2.signedUrl(invoice.pdfR2Key) };
     }
 
+    const clinic = await this.getClinicInfo();
     const pdf = await generateReceiptPdf({
+      clinic,
       invoiceNumber: invoice.invoiceNumber,
       issuedAt: invoice.issuedAt,
       patient: invoice.patient,

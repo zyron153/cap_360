@@ -9,6 +9,7 @@ import { InjectQueue } from "@nestjs/bull";
 import { Queue } from "bull";
 import type { Redis } from "ioredis";
 import { REDIS_CLIENT } from "../../common/redis/redis.module";
+import { PrismaService } from "../../prisma/prisma.service";
 import { AppointmentsRepository } from "./appointments.repository";
 import { AppointmentsGateway } from "./appointments.gateway";
 import { BillingService } from "../billing/billing.service";
@@ -26,6 +27,11 @@ import {
 const SLOT_MINUTES = 30;
 const SLOT_LOCK_TTL_MS = 30_000;
 
+// JS Date#getDay() is 0=Sunday..6=Saturday — matches the day order in ClinicSettings.hours
+const DAY_NAMES = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
+
+interface ClinicHour { day: string; open: string; close: string; active: boolean }
+
 @Injectable()
 export class AppointmentsService {
   constructor(
@@ -33,9 +39,39 @@ export class AppointmentsService {
     private readonly gateway: AppointmentsGateway,
     private readonly billingService: BillingService,
     private readonly notifService: NotificationsService,
+    private readonly prisma: PrismaService,
     @InjectQueue("reminders") private readonly remindersQueue: Queue,
     @Inject(REDIS_CLIENT) private readonly redis: Redis
   ) {}
+
+  // Clinic-wide operating hours (Configurações → Clínica). Not yet configured, or no entry
+  // for this weekday, is treated as unrestricted rather than blocking every booking.
+  private async assertWithinBusinessHours(scheduledAt: Date, durationMinutes: number) {
+    const row = await this.prisma.setting.findUnique({ where: { key: "clinic" } });
+    const hours = (row?.value as { hours?: ClinicHour[] } | undefined)?.hours;
+    if (!hours?.length) return;
+
+    const today = hours.find((h) => h.day === DAY_NAMES[scheduledAt.getDay()]);
+    if (!today) return;
+
+    if (!today.active) {
+      throw new BadRequestException(`A clínica está encerrada à ${today.day}`);
+    }
+
+    const [openH, openM] = today.open.split(":").map(Number);
+    const [closeH, closeM] = today.close.split(":").map(Number);
+    const dayStart = new Date(scheduledAt);
+    dayStart.setHours(openH, openM, 0, 0);
+    const dayEnd = new Date(scheduledAt);
+    dayEnd.setHours(closeH, closeM, 0, 0);
+    const apptEnd = new Date(scheduledAt.getTime() + durationMinutes * 60_000);
+
+    if (scheduledAt < dayStart || apptEnd > dayEnd) {
+      throw new BadRequestException(
+        `Fora do horário de funcionamento da clínica (${today.open}–${today.close})`
+      );
+    }
+  }
 
   async getAvailability(query: AvailabilityQuery): Promise<TimeSlot[]> {
     const date = new Date(query.date);
@@ -91,6 +127,8 @@ export class AppointmentsService {
   async create(dto: CreateAppointmentDto) {
     const scheduledAt = new Date(dto.scheduledAt);
     const slotEnd = new Date(scheduledAt.getTime() + SLOT_MINUTES * 60_000);
+
+    await this.assertWithinBusinessHours(scheduledAt, SLOT_MINUTES);
 
     const lockKey = `slot:${dto.staffId}:${scheduledAt.toISOString()}`;
     const locked = await this.redis.set(lockKey, "1", "PX", SLOT_LOCK_TTL_MS, "NX");

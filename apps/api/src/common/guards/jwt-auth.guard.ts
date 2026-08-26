@@ -24,7 +24,7 @@ export class JwtAuthGuard {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env.NODE_ENV !== "production" && process.env.AUTH_BYPASS !== "false") {
       const request = context.switchToHttp().getRequest();
       request.user = {
         sub: "00000000-0000-0000-0000-000000000001",

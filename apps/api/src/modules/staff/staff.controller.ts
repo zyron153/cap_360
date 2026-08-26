@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Patch, Body, Param, ParseUUIDPipe, Req } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Req } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { CreateStaffSchema, CreateStaffDto, UpdateStaffSchema, UpdateStaffDto } from "@cms/types";
+import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto } from "@cms/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")
@@ -10,7 +10,7 @@ export class StaffController {
   constructor(private readonly service: StaffService) {}
 
   @Get("me")
-  findMe(@Req() req: { user: { sub: string } }) {
+  findMe(@Req() req: { user: { sub: string; email?: string } }) {
     return this.service.findMe(req.user.sub);
   }
 
@@ -19,15 +19,30 @@ export class StaffController {
     return this.service.findAll();
   }
 
+  @Get("invitations")
+  @Roles("admin")
+  listInvitations() {
+    return this.service.listInvitations();
+  }
+
+  @Delete("invitations/:id")
+  @Roles("admin")
+  cancelInvitation(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.cancelInvitation(id);
+  }
+
   @Get(":id")
   findOne(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.findById(id);
   }
 
-  @Post()
+  @Post("invite")
   @Roles("admin")
-  create(@Body(new ZodValidationPipe(CreateStaffSchema)) dto: CreateStaffDto) {
-    return this.service.create(dto);
+  invite(
+    @Body(new ZodValidationPipe(InviteStaffSchema)) dto: InviteStaffDto,
+    @Req() req: { user: { email?: string } },
+  ) {
+    return this.service.invite(dto, req.user.email);
   }
 
   @Patch(":id")

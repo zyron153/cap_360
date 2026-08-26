@@ -53,4 +53,8 @@ export class NotificationsService implements OnModuleInit {
     const s = await this.getSettings();
     return s.wa_reminder !== false;
   }
+
+  async sendInvite(email: string, fullName: string, token: string) {
+    await this.queue.add("send-invite", { email, fullName, token }, { attempts: 3 });
+  }
 }

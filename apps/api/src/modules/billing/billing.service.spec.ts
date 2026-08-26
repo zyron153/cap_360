@@ -5,6 +5,9 @@ import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { generateReceiptPdf } from "./receipt.pdf";
+
+jest.mock("./receipt.pdf", () => ({ generateReceiptPdf: jest.fn() }));
 
 const repo = {
   nextInvoiceNumber: jest.fn(),
@@ -26,8 +29,10 @@ const prisma = {
     findUnique: jest.fn(),
     upsert: jest.fn(),
   },
+  setting: { findUnique: jest.fn() },
 };
 const efaturaQueue = { add: jest.fn() };
+const generateReceiptPdfMock = generateReceiptPdf as jest.Mock;
 
 const INVOICE = {
   id: "inv-1",
@@ -194,6 +199,53 @@ describe("BillingService", () => {
       repo.findByIdLite.mockResolvedValue(null);
       await expect(service.retryEFatura("inv-x")).rejects.toThrow(NotFoundException);
       expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getReceiptUrl — clinic data on generated receipts", () => {
+    const FULL_INVOICE = {
+      id: "inv-1",
+      invoiceNumber: "INV-2026-0001",
+      issuedAt: new Date("2026-08-01T00:00:00Z"),
+      pdfR2Key: null,
+      patient: { fullName: "Maria Silva", phone: "+2389912345" },
+      items: [{ description: "Consulta Geral", quantity: 1, unitPrice: "1500", total: "1500" }],
+      subtotal: "1500",
+      total: "1500",
+      amountPaid: "1500",
+      status: "paid",
+    };
+    const CLINIC = { name: "Clínica Teste", nif: "999888777", address: "Rua Teste", phone: "+238 999 0000", email: "teste@maissaudecv.com" };
+
+    beforeEach(() => {
+      repo.findById.mockResolvedValue(FULL_INVOICE);
+      r2.isConfigured.mockReturnValue(true);
+      r2.upload.mockResolvedValue(undefined);
+      r2.signedUrl.mockResolvedValue("https://signed.url/receipt.pdf");
+      repo.update.mockResolvedValue({});
+      generateReceiptPdfMock.mockResolvedValue(Buffer.from("pdf"));
+    });
+
+    it("fetches the clinic setting and passes it into generateReceiptPdf", async () => {
+      prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
+      await service.getReceiptUrl("inv-1");
+      expect(generateReceiptPdfMock).toHaveBeenCalledWith(
+        expect.objectContaining({ clinic: expect.objectContaining(CLINIC) })
+      );
+    });
+
+    it("falls back to sensible defaults when the clinic setting is not configured", async () => {
+      prisma.setting.findUnique.mockResolvedValue(null);
+      await service.getReceiptUrl("inv-1");
+      const call = generateReceiptPdfMock.mock.calls[0][0];
+      expect(call.clinic.name).toBeTruthy();
+      expect(typeof call.clinic.name).toBe("string");
+    });
+
+    it("does not call generateReceiptPdf again when a pdfR2Key already exists", async () => {
+      repo.findById.mockResolvedValue({ ...FULL_INVOICE, pdfR2Key: "receipts/existing.pdf" });
+      await service.getReceiptUrl("inv-1");
+      expect(generateReceiptPdfMock).not.toHaveBeenCalled();
     });
   });
 });

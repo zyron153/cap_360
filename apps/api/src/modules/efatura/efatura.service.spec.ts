@@ -12,7 +12,24 @@ const CFG: EFaturaConfig = {
   nomeEmpresa: "Clínica Mais Saúde",
 };
 
+const EFATURA_ROW = { enabled: true, sandbox: false, endpoint: "https://mw.efatura.cv", apiKey: "tok-abc" };
+const CLINIC_ROW = { name: "Clínica Mais Saúde", nif: "123456789" };
+
 const prisma = { setting: { findUnique: jest.fn() } };
+
+// nif/nome now come from the "clinic" setting (single source of truth), not from
+// integration_efatura directly — this mock lets each test override either row.
+function mockSettings(overrides: { efatura?: Record<string, unknown> | null; clinic?: Record<string, unknown> | null } = {}) {
+  prisma.setting.findUnique.mockImplementation(({ where }: { where: { key: string } }) => {
+    if (where.key === "integration_efatura") {
+      return Promise.resolve(overrides.efatura === null ? null : { value: { ...EFATURA_ROW, ...overrides.efatura } });
+    }
+    if (where.key === "clinic") {
+      return Promise.resolve(overrides.clinic === null ? null : { value: { ...CLINIC_ROW, ...overrides.clinic } });
+    }
+    return Promise.resolve(null);
+  });
+}
 
 const BASE_INVOICE = {
   invoiceNumber: "INV-2026-0001",
@@ -46,34 +63,57 @@ describe("EFaturaService", () => {
   /* ── getConfig ──────────────────────────────────────────────────── */
 
   describe("getConfig", () => {
-    it("returns null when the setting row does not exist", async () => {
-      prisma.setting.findUnique.mockResolvedValue(null);
+    it("returns null when the integration_efatura setting row does not exist", async () => {
+      mockSettings({ efatura: null });
       expect(await service.getConfig()).toBeNull();
     });
 
     it("returns null when enabled=false", async () => {
-      prisma.setting.findUnique.mockResolvedValue({ value: { ...CFG, enabled: false } });
+      mockSettings({ efatura: { enabled: false } });
       expect(await service.getConfig()).toBeNull();
     });
 
     it("returns null when apiKey is empty", async () => {
-      prisma.setting.findUnique.mockResolvedValue({ value: { ...CFG, apiKey: "" } });
+      mockSettings({ efatura: { apiKey: "" } });
       expect(await service.getConfig()).toBeNull();
     });
 
-    it("returns null when nifContribuinte is empty", async () => {
-      prisma.setting.findUnique.mockResolvedValue({ value: { ...CFG, nifContribuinte: "" } });
+    it("returns null when the clinic setting row does not exist at all", async () => {
+      mockSettings({ clinic: null });
       expect(await service.getConfig()).toBeNull();
     });
 
-    it("returns the config when all required fields are present", async () => {
-      prisma.setting.findUnique.mockResolvedValue({ value: CFG });
-      expect(await service.getConfig()).toEqual(CFG);
+    it("returns null when the clinic has no NIF configured", async () => {
+      mockSettings({ clinic: { nif: "" } });
+      expect(await service.getConfig()).toBeNull();
     });
 
-    it("returns null when nomeEmpresa is empty", async () => {
-      prisma.setting.findUnique.mockResolvedValue({ value: { ...CFG, nomeEmpresa: "" } });
+    it("returns null when the clinic has no name configured", async () => {
+      mockSettings({ clinic: { name: "" } });
       expect(await service.getConfig()).toBeNull();
+    });
+
+    it("merges nifContribuinte/nomeEmpresa from the clinic setting — single source of truth", async () => {
+      mockSettings({});
+      const cfg = await service.getConfig();
+      expect(cfg?.nifContribuinte).toBe(CLINIC_ROW.nif);
+      expect(cfg?.nomeEmpresa).toBe(CLINIC_ROW.name);
+    });
+
+    it("does not use a stale nifContribuinte/nomeEmpresa stored on the integration_efatura row itself", async () => {
+      mockSettings({ efatura: { nifContribuinte: "000000000", nomeEmpresa: "Nome Antigo Errado" } });
+      const cfg = await service.getConfig();
+      expect(cfg?.nifContribuinte).toBe(CLINIC_ROW.nif);
+      expect(cfg?.nomeEmpresa).toBe(CLINIC_ROW.name);
+    });
+
+    it("returns the rest of the E-Fatura fields unchanged", async () => {
+      mockSettings({});
+      const cfg = await service.getConfig();
+      expect(cfg).toMatchObject({
+        enabled: true, sandbox: false,
+        endpoint: "https://mw.efatura.cv", apiKey: "tok-abc",
+      });
     });
   });
 
