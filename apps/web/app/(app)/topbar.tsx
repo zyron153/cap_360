@@ -7,7 +7,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/dashboard":    "Dashboard",
   "/appointments": "Agendamentos",
   "/patients":     "Pacientes",
-  "/billing":      "Faturação",
+  "/billing":      "Financeiro",
   "/health-plans": "Planos de Saúde",
   "/whatsapp":     "WhatsApp Hub",
   "/exams":        "Exames & Resultados",

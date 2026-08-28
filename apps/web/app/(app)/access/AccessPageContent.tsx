@@ -21,7 +21,7 @@ const ACCESS_PAGES: { key: PageKey; label: string; icon: React.ElementType }[] =
   { key: "patients",     label: "Pacientes CRM",         icon: UserRound         },
   { key: "health_plans", label: "Planos de Saúde",       icon: HeartPulse        },
   { key: "exams",        label: "Exames & Resultados",   icon: FlaskConical      },
-  { key: "billing",      label: "Faturação",             icon: Receipt           },
+  { key: "billing",      label: "Financeiro",            icon: Receipt           },
   { key: "records",      label: "Registos Clínicos",     icon: ClipboardList     },
   { key: "staff",        label: "Equipa & Turnos",       icon: UserCog           },
   { key: "visits",       label: "Visitas Domiciliárias", icon: Home              },

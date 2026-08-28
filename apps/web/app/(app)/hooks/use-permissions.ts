@@ -35,6 +35,7 @@ export function usePermissions() {
     isLoading,
     role,
     me,
+    isAdmin,
     can: (page: PageKey): boolean => isAdmin || (perms[page]?.view ?? false),
     canDo: (page: PageKey, action: "create" | "edit" | "delete"): boolean =>
       isAdmin || (perms[page]?.[action] ?? false),

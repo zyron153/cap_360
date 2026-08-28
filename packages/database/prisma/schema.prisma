@@ -90,6 +90,12 @@ enum WaitlistStatus {
   expired
 }
 
+enum ExpenseStatus {
+  pending
+  approved
+  rejected
+}
+
 // ─── Core ────────────────────────────────────────────────────────────────────
 
 model Patient {
@@ -139,11 +145,13 @@ model Staff {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  appointments  Appointment[]
-  shifts        StaffShift[]
-  availability  StaffAvailability[]
-  leaveRequests LeaveRequest[]
-  patientNotes  PatientNote[]
+  appointments      Appointment[]
+  shifts            StaffShift[]
+  availability      StaffAvailability[]
+  leaveRequests     LeaveRequest[]
+  patientNotes      PatientNote[]
+  requestedExpenses Expense[]           @relation("ExpenseRequestedBy")
+  approvedExpenses  Expense[]           @relation("ExpenseApprovedBy")
 
   @@index([role])
   @@index([deletedAt])
@@ -478,6 +486,48 @@ model EFaturaSubmission {
 
   @@index([status])
   @@map("efatura_submissions")
+}
+
+// ─── Financeiro (expenses + manual income; invoice payments are the other side of Entradas) ──
+
+model Expense {
+  id            String        @id @default(uuid())
+  description   String        @db.VarChar(200)
+  category      String        @db.VarChar(100)
+  amount        Decimal       @db.Decimal(10, 2)
+  date          DateTime      @db.Date
+  supplier      String?       @db.VarChar(150)
+  method        PaymentMethod
+  reference     String?       @db.VarChar(100)
+  receiptR2Key  String?       @db.VarChar(300)
+  status        ExpenseStatus @default(pending)
+  notes         String?       @db.VarChar(500)
+  requestedById String?
+  approvedById  String?
+  approvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  requestedBy Staff? @relation("ExpenseRequestedBy", fields: [requestedById], references: [id])
+  approvedBy  Staff? @relation("ExpenseApprovedBy", fields: [approvedById], references: [id])
+
+  @@index([status])
+  @@index([date])
+  @@map("expenses")
+}
+
+model Income {
+  id          String   @id @default(uuid())
+  description String   @db.VarChar(200)
+  category    String   @db.VarChar(100)
+  amount      Decimal  @db.Decimal(10, 2)
+  date        DateTime @db.Date
+  notes       String?  @db.VarChar(500)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@map("income")
 }
 
 // ─── Exams (Phase 1 stub, fully used in M5) ──────────────────────────────────

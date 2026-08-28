@@ -7,3 +7,4 @@ export * from "./public-booking";
 export * from "./staff";
 export * from "./parametrizacao";
 export * from "./service";
+export * from "./financeiro";

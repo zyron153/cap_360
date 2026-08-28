@@ -19,8 +19,11 @@ export function middleware(req: NextRequest) {
   }
 
   // Protect the app shell
+  // ponytail: Keycloak is flaky in dev (H2 in-memory db loses tables on restart) — skip the
+  // gate outside production, same condition JwtAuthGuard already uses on the API side.
+  const devBypass = process.env.NODE_ENV !== "production" && process.env.AUTH_BYPASS !== "false";
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  if (!isPublic && !accessToken) {
+  if (!isPublic && !accessToken && !devBypass) {
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);

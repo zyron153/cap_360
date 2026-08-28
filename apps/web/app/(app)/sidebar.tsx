@@ -37,7 +37,7 @@ const NAV = [
       { href: "/whatsapp",     label: "WhatsApp Hub",          icon: MessageCircle, badge: "7",  badgeVariant: "warn"    },
       { href: "/health-plans", label: "Planos de Saúde",       icon: Shield },
       { href: "/exams",        label: "Exames & Resultados",   icon: FileSearch },
-      { href: "/billing",      label: "Faturação",             icon: Receipt,       badge: "3",  badgeVariant: "danger"  },
+      { href: "/billing",      label: "Financeiro",            icon: Receipt,       badge: "3",  badgeVariant: "danger"  },
       { href: "/records",      label: "Registos Clínicos",     icon: ClipboardList },
       { href: "/staff",        label: "Equipa & Turnos",       icon: Users2 },
       { href: "/visits",       label: "Visitas Domiciliárias", icon: Home },

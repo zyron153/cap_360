@@ -18,6 +18,7 @@ import { PublicModule } from "./modules/public/public.module";
 import { SettingsModule } from "./modules/settings/settings.module";
 import { ParametrizacaoModule } from "./modules/parametrizacao/parametrizacao.module";
 import { EFaturaModule } from "./modules/efatura/efatura.module";
+import { FinanceiroModule } from "./modules/financeiro/financeiro.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
@@ -52,6 +53,7 @@ import { RedisModule } from "./common/redis/redis.module";
     SettingsModule,
     ParametrizacaoModule,
     EFaturaModule,
+    FinanceiroModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

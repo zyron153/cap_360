@@ -32,7 +32,7 @@ const TAG_STYLE: Record<string, string> = {
 const TAG_LABEL: Record<string, string> = {
   appointment: "Consulta",
   result:      "Resultado",
-  billing:     "Faturação",
+  billing:     "Financeiro",
   general:     "Geral",
 };
 
