@@ -12,6 +12,7 @@ import {
 import { BillingService } from "./billing.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decorator";
 import {
   CreateInvoiceSchema,
   RecordPaymentSchema,
@@ -45,9 +46,10 @@ export class BillingController {
 
   @Post()
   create(
-    @Body(new ZodValidationPipe(CreateInvoiceSchema)) dto: CreateInvoiceDto
+    @Body(new ZodValidationPipe(CreateInvoiceSchema)) dto: CreateInvoiceDto,
+    @CurrentUser() user: JwtUser
   ) {
-    return this.service.create(dto);
+    return this.service.create(dto, user.realm_access.roles);
   }
 
   @Post(":id/payments")

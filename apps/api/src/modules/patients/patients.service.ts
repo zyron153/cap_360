@@ -4,6 +4,7 @@ import {
   ConflictException,
 } from "@nestjs/common";
 import { PatientsRepository } from "./patients.repository";
+import { RequestContext } from "../../common/context/request-context";
 import {
   CreatePatientDto,
   UpdatePatientDto,
@@ -27,7 +28,9 @@ export class PatientsService {
             OR: [
               { fullName: { contains: q, mode: "insensitive" as const } },
               { phone: { contains: q } },
-              { nif: { contains: q } },
+              // nif is encrypted (non-deterministic ciphertext) — only an exact match on its
+              // blind-index hash can find it, not a substring `contains`
+              { nifHash: this.repo.nifSearchHash(q) },
               { email: { contains: q, mode: "insensitive" as const } },
             ],
           }
@@ -98,18 +101,29 @@ export class PatientsService {
   }
 
   async update(id: string, dto: UpdatePatientDto) {
-    await this.findById(id);
+    const existing = await this.findById(id);
 
     const data: Record<string, unknown> = { ...dto };
     if (dto.phone) data.phone = this.normalizePhone(dto.phone);
     if (dto.dateOfBirth) data.dateOfBirth = new Date(dto.dateOfBirth);
 
-    return this.repo.update(id, data);
+    const updated = await this.repo.update(id, data);
+
+    // Only the fields actually submitted in this update — not the whole record — so the diff
+    // reads as "what changed" rather than a noisy full dump of an unrelated record.
+    const changedKeys = Object.keys(dto) as (keyof typeof existing)[];
+    const before = Object.fromEntries(changedKeys.map((k) => [k, existing[k]]));
+    const after = Object.fromEntries(changedKeys.map((k) => [k, (updated as Record<string, unknown>)[k]]));
+    RequestContext.setAuditDiff(before, after);
+
+    return updated;
   }
 
   async softDelete(id: string) {
-    await this.findById(id);
-    return this.repo.softDelete(id);
+    const existing = await this.findById(id);
+    const deleted = await this.repo.softDelete(id);
+    RequestContext.setAuditDiff({ deletedAt: existing.deletedAt }, { deletedAt: deleted.deletedAt });
+    return deleted;
   }
 
   async addNote(patientId: string, dto: CreatePatientNoteDto, staffId: string) {

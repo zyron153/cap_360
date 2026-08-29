@@ -103,8 +103,11 @@ model Patient {
   fullName              String    @db.VarChar(150)
   dateOfBirth           DateTime  @db.Date
   gender                Gender
-  /// AES-256-GCM encrypted at application layer
-  nif                   String?   @db.VarChar(50)
+  /// AES-256-GCM encrypted at application layer (EncryptionService) — "ivHex:authTagHex:dataHex"
+  nif                   String?   @db.VarChar(255)
+  /// HMAC-SHA256 blind index of the plaintext NIF — encrypted `nif` above can't be looked up
+  /// or uniqueness-checked directly, since AES-GCM ciphertext differs per call (random IV)
+  nifHash               String?   @db.VarChar(64)
   phone                 String    @db.VarChar(30)
   email                 String?   @db.VarChar(150)
   address               String?   @db.VarChar(300)
@@ -126,8 +129,8 @@ model Patient {
   healthPlan        HealthPlan?        @relation(fields: [healthPlanId], references: [id])
 
   @@unique([phone])
+  @@unique([nifHash])
   @@index([fullName])
-  @@index([nif])
   @@index([deletedAt])
   @@map("patients")
 }
@@ -228,6 +231,9 @@ model Appointment {
   cancellationReason String?           @db.VarChar(300)
   checkedInAt        DateTime?
   completedAt        DateTime?
+  /// Client-supplied dedup key — a retried "create appointment" request (double-click, timeout
+  /// retry) with the same key returns the existing appointment instead of creating a duplicate.
+  idempotencyKey     String?           @db.VarChar(100)
   deletedAt          DateTime?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
@@ -240,6 +246,7 @@ model Appointment {
   invoices  Invoice[]
   examRequests ExamRequest[]
 
+  @@unique([idempotencyKey])
   @@index([patientId])
   @@index([staffId])
   @@index([scheduledAt])
@@ -457,11 +464,15 @@ model Payment {
   amount    Decimal       @db.Decimal(10, 2)
   method    PaymentMethod
   reference String?       @db.VarChar(100)
+  /// Client-supplied dedup key — a retried "record payment" request (double-click, timeout
+  /// retry) with the same key returns the existing payment instead of recording it twice.
+  idempotencyKey String?  @db.VarChar(100)
   paidAt    DateTime      @default(now())
   createdAt DateTime      @default(now())
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
+  @@unique([idempotencyKey])
   @@index([invoiceId])
   @@map("payments")
 }

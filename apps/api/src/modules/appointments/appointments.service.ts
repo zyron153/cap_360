@@ -125,16 +125,23 @@ export class AppointmentsService {
   }
 
   async create(dto: CreateAppointmentDto) {
+    // Checked first, before any locking or conflict check: a retried request (double-click,
+    // client timeout retry) must replay the original booking, not re-run booking logic that
+    // could now see a different (already-booked-by-itself) world.
+    if (dto.idempotencyKey) {
+      const existing = await this.repo.findByIdempotencyKey(dto.idempotencyKey);
+      if (existing) return existing;
+    }
+
     const scheduledAt = new Date(dto.scheduledAt);
     const slotEnd = new Date(scheduledAt.getTime() + SLOT_MINUTES * 60_000);
 
     await this.assertWithinBusinessHours(scheduledAt, SLOT_MINUTES);
 
-    const lockKey = `slot:${dto.staffId}:${scheduledAt.toISOString()}`;
-    const locked = await this.redis.set(lockKey, "1", "PX", SLOT_LOCK_TTL_MS, "NX");
-    if (!locked) {
-      throw new ConflictException("This time slot is temporarily locked — please retry");
-    }
+    // A non-grid-aligned start time (e.g. 10:15) spans two 30-min buckets — lock every bucket
+    // the appointment touches, not just its exact start, so two overlapping-but-not-identical
+    // requests (10:00–10:30 vs 10:15–10:45) actually contend for a shared key.
+    const lockKeys = await this.acquireSlotLocks(this.slotBucketKeys(dto.staffId, scheduledAt, slotEnd));
 
     try {
       const conflicts = await this.repo.findConfirmedInRange(dto.staffId, scheduledAt);
@@ -155,6 +162,7 @@ export class AppointmentsService {
         scheduledAt,
         source: dto.source,
         notes: dto.notes,
+        idempotencyKey: dto.idempotencyKey,
       });
 
       await this.enqueueReminders(appointment.id, scheduledAt);
@@ -163,8 +171,35 @@ export class AppointmentsService {
 
       return appointment;
     } finally {
-      await this.redis.del(lockKey);
+      await Promise.all(lockKeys.map((key) => this.redis.del(key)));
     }
+  }
+
+  /** Every SLOT_MINUTES-aligned bucket the half-open interval [start, end) touches. */
+  private slotBucketKeys(staffId: string, start: Date, end: Date): string[] {
+    const keys: string[] = [];
+    const cursor = new Date(start);
+    cursor.setSeconds(0, 0);
+    cursor.setMinutes(Math.floor(cursor.getMinutes() / SLOT_MINUTES) * SLOT_MINUTES);
+    while (cursor < end) {
+      keys.push(`slot:${staffId}:${cursor.toISOString()}`);
+      cursor.setMinutes(cursor.getMinutes() + SLOT_MINUTES);
+    }
+    return keys;
+  }
+
+  /** Acquires every key or none — rolls back whatever it already grabbed before throwing. */
+  private async acquireSlotLocks(keys: string[]): Promise<string[]> {
+    const acquired: string[] = [];
+    for (const key of keys) {
+      const locked = await this.redis.set(key, "1", "PX", SLOT_LOCK_TTL_MS, "NX");
+      if (!locked) {
+        await Promise.all(acquired.map((k) => this.redis.del(k)));
+        throw new ConflictException("This time slot is temporarily locked — please retry");
+      }
+      acquired.push(key);
+    }
+    return acquired;
   }
 
   async findById(id: string) {

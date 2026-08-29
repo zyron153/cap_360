@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from "@nestjs/comm
 import { FinanceiroRepository } from "./financeiro.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { StaffService } from "../staff/staff.service";
+import { RequestContext } from "../../common/context/request-context";
 import {
   CreateExpenseDto, UpdateExpenseDto, ExpenseDecisionDto,
   CreateIncomeDto, UpdateIncomeDto,
@@ -19,6 +20,13 @@ function dateRange(from?: string, to?: string) {
     ...(from ? { gte: new Date(from) } : {}),
     ...(to ? { lte: new Date(`${to}T23:59:59Z`) } : {}),
   };
+}
+
+/** Audit diff of only the fields actually submitted in an update — not the whole record. */
+function setFieldDiff(existing: Record<string, unknown>, updated: Record<string, unknown>, keys: string[]) {
+  const before = Object.fromEntries(keys.map((k) => [k, existing[k]]));
+  const after = Object.fromEntries(keys.map((k) => [k, updated[k]]));
+  RequestContext.setAuditDiff(before, after);
 }
 
 @Injectable()
@@ -63,10 +71,12 @@ export class FinanceiroService {
     const existing = await this.repo.findExpenseById(id);
     if (!existing) throw new NotFoundException(`Expense ${id} not found`);
     if (existing.status !== "pending") throw new BadRequestException("Só é possível editar despesas pendentes");
-    return this.repo.updateExpense(id, {
+    const updated = await this.repo.updateExpense(id, {
       ...dto,
       ...(dto.date ? { date: new Date(dto.date) } : {}),
     });
+    setFieldDiff(existing, updated, Object.keys(dto));
+    return updated;
   }
 
   async decideExpense(id: string, dto: ExpenseDecisionDto, keycloakId: string) {
@@ -74,17 +84,21 @@ export class FinanceiroService {
     if (!existing) throw new NotFoundException(`Expense ${id} not found`);
     if (existing.status !== "pending") throw new BadRequestException("Esta despesa já foi decidida");
     const approver = await this.staff.findMe(keycloakId);
-    return this.repo.updateExpense(id, {
+    const updated = await this.repo.updateExpense(id, {
       status: dto.status,
       approvedAt: new Date(),
       ...(approver.id ? { approvedBy: { connect: { id: approver.id } } } : {}),
     });
+    RequestContext.setAuditDiff({ status: existing.status }, { status: dto.status });
+    return updated;
   }
 
   async deleteExpense(id: string) {
     const existing = await this.repo.findExpenseById(id);
     if (!existing) throw new NotFoundException(`Expense ${id} not found`);
-    return this.repo.deleteExpense(id);
+    const result = await this.repo.deleteExpense(id);
+    RequestContext.setAuditDiff(existing, null);
+    return result;
   }
 
   async uploadReceipt(id: string, file: UploadedReceipt) {
@@ -122,13 +136,17 @@ export class FinanceiroService {
   async updateIncome(id: string, dto: UpdateIncomeDto) {
     const existing = await this.repo.findIncomeById(id);
     if (!existing) throw new NotFoundException(`Income ${id} not found`);
-    return this.repo.updateIncome(id, { ...dto, ...(dto.date ? { date: new Date(dto.date) } : {}) });
+    const updated = await this.repo.updateIncome(id, { ...dto, ...(dto.date ? { date: new Date(dto.date) } : {}) });
+    setFieldDiff(existing, updated, Object.keys(dto));
+    return updated;
   }
 
   async deleteIncome(id: string) {
     const existing = await this.repo.findIncomeById(id);
     if (!existing) throw new NotFoundException(`Income ${id} not found`);
-    return this.repo.deleteIncome(id);
+    const result = await this.repo.deleteIncome(id);
+    RequestContext.setAuditDiff(existing, null);
+    return result;
   }
 
   // ── Resumo (dashboard) ──────────────────────────────────

@@ -1,10 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
-import { Prisma } from "@cap/database";
+import { EncryptionService } from "../../common/services/encryption.service";
+import { Prisma, PaymentMethod, InvoiceStatus } from "@cap/database";
 
 @Injectable()
 export class BillingRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
+  ) {}
 
   async nextInvoiceNumber(): Promise<string> {
     const year = new Date().getFullYear();
@@ -28,8 +32,8 @@ export class BillingRepository {
     });
   }
 
-  findById(id: string) {
-    return this.prisma.invoice.findUnique({
+  async findById(id: string) {
+    const invoice = await this.prisma.invoice.findUnique({
       where: { id },
       include: {
         items: { include: { service: { select: { name: true } } } },
@@ -37,6 +41,15 @@ export class BillingRepository {
         patient: { select: { id: true, fullName: true, phone: true, nif: true } },
       },
     });
+    if (!invoice) return invoice;
+    // patient.nif is stored encrypted — decrypt for the invoice preview / receipt PDF
+    return {
+      ...invoice,
+      patient: {
+        ...invoice.patient,
+        nif: invoice.patient.nif ? this.encryption.decrypt(invoice.patient.nif) : invoice.patient.nif,
+      },
+    };
   }
 
   findByIdLite(id: string) {
@@ -62,22 +75,49 @@ export class BillingRepository {
     });
   }
 
-  updateStatus(id: string, data: Prisma.InvoiceUpdateInput) {
-    return this.prisma.invoice.update({
-      where: { id },
-      data,
-      select: { id: true, status: true, amountPaid: true },
+  /** Looks up a payment by its client-supplied idempotency key and returns its invoice's
+   * current state, shaped exactly like recordPaymentAtomic's return — a retried request just
+   * replays the original outcome instead of erroring or recording a second payment. */
+  async findPaymentReplay(idempotencyKey: string) {
+    const payment = await this.prisma.payment.findUnique({
+      where: { idempotencyKey },
+      select: { invoice: { select: { id: true, status: true, amountPaid: true } } },
     });
+    return payment?.invoice ?? null;
   }
 
-  createPayment(data: Prisma.PaymentCreateInput) {
-    return this.prisma.payment.create({ data });
-  }
+  /**
+   * Inserts the payment, re-sums, and updates the invoice's status/amountPaid in one DB
+   * transaction — a concurrent payment on the same invoice can no longer read a stale sum
+   * between the insert and the status update, since both happen inside the same transaction.
+   */
+  recordPaymentAtomic(
+    invoiceId: string,
+    payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string },
+    invoiceTotal: number,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.payment.create({
+        data: {
+          invoice: { connect: { id: invoiceId } },
+          amount: payment.amount,
+          method: payment.method,
+          reference: payment.reference,
+          paidAt: payment.paidAt,
+          idempotencyKey: payment.idempotencyKey,
+        },
+      });
 
-  sumPayments(invoiceId: string) {
-    return this.prisma.payment.aggregate({
-      where: { invoiceId },
-      _sum: { amount: true },
+      const { _sum } = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
+      const totalPaid = Number(_sum.amount ?? 0);
+      const amountDue = invoiceTotal - totalPaid;
+      const status: InvoiceStatus = amountDue <= 0 ? "paid" : totalPaid > 0 ? "partially_paid" : "issued";
+
+      return tx.invoice.update({
+        where: { id: invoiceId },
+        data: { amountPaid: totalPaid, status },
+        select: { id: true, status: true, amountPaid: true },
+      });
     });
   }
 

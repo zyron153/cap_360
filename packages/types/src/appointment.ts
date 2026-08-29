@@ -19,6 +19,9 @@ export const CreateAppointmentSchema = z.object({
   scheduledAt: z.string().datetime({ offset: true }),
   notes: z.string().max(500).optional(),
   source: z.enum(["web", "whatsapp", "phone", "walk_in"]).default("web"),
+  // Client-generated once per form-open (not per submit-click) — a retried request with the
+  // same key returns the original appointment instead of creating a duplicate.
+  idempotencyKey: z.string().max(100).optional(),
 });
 export type CreateAppointmentDto = z.infer<typeof CreateAppointmentSchema>;
 

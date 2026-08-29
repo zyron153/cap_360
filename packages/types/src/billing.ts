@@ -41,6 +41,9 @@ export const RecordPaymentSchema = z.object({
   method: z.enum(["cash", "bank_transfer", "health_plan", "vinti4"]),
   reference: z.string().max(100).optional(),
   paidAt: z.string().datetime({ offset: true }).optional(),
+  // Client-generated once per form-open (not per submit-click) — a retried request with the
+  // same key returns the original payment instead of recording a duplicate.
+  idempotencyKey: z.string().max(100).optional(),
 });
 export type RecordPaymentDto = z.infer<typeof RecordPaymentSchema>;
 

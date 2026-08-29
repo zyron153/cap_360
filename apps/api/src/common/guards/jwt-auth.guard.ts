@@ -24,7 +24,8 @@ export class JwtAuthGuard {
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    if (process.env.NODE_ENV !== "production" && process.env.AUTH_BYPASS !== "false") {
+    // Fail-safe by default: bypass requires an explicit opt-in, not just an unset var.
+    if (process.env.NODE_ENV !== "production" && process.env.AUTH_BYPASS === "true") {
       const request = context.switchToHttp().getRequest();
       request.user = {
         sub: "00000000-0000-0000-0000-000000000001",

@@ -1,7 +1,9 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bull";
 import { Queue } from "bull";
@@ -18,6 +20,8 @@ import {
 
 @Injectable()
 export class BillingService {
+  private readonly logger = new Logger(BillingService.name);
+
   constructor(
     private readonly repo: BillingRepository,
     private readonly r2: R2Service,
@@ -25,11 +29,30 @@ export class BillingService {
     @InjectQueue("efatura") private readonly efaturaQueue: Queue,
   ) {}
 
-  async create(dto: CreateInvoiceDto) {
+  async create(dto: CreateInvoiceDto, callerRoles: string[] = []) {
     let subtotal = 0;
     const itemsData = [];
 
     for (const item of dto.items) {
+      // Custom/off-catalogue line items (no serviceId) aren't an "override" — there's no
+      // catalogue price to compare against, so anyone who can create invoices still can.
+      // A catalogued service billed at a different price than Service.price IS an override,
+      // and only admin may do that — everyone else must bill at the catalogue price.
+      if (item.serviceId) {
+        const catalogueService = await this.repo.findServiceById(item.serviceId);
+        if (catalogueService && Number(catalogueService.price) !== item.unitPrice) {
+          if (!callerRoles.includes("admin")) {
+            throw new ForbiddenException(
+              `Only an admin can bill service ${item.serviceId} at a price other than the catalogue price`
+            );
+          }
+          this.logger.warn(
+            `Invoice price override for patient ${dto.patientId}: service ${item.serviceId} ` +
+            `catalogue price ${catalogueService.price}, billed at ${item.unitPrice}`
+          );
+        }
+      }
+
       const total = item.unitPrice * item.quantity;
       subtotal += total;
       itemsData.push({
@@ -139,6 +162,14 @@ export class BillingService {
   }
 
   async recordPayment(invoiceId: string, dto: RecordPaymentDto) {
+    // Checked first, before the invoice even loads: a retried request (double-click, client
+    // timeout retry) must replay the original outcome, not re-validate against state that the
+    // original request may have already changed (e.g. this payment is what made it "paid").
+    if (dto.idempotencyKey) {
+      const replay = await this.repo.findPaymentReplay(dto.idempotencyKey);
+      if (replay) return replay;
+    }
+
     const invoice = await this.repo.findByIdLite(invoiceId);
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
 
@@ -148,31 +179,19 @@ export class BillingService {
       );
     }
 
-    await this.repo.createPayment({
-      invoice: { connect: { id: invoiceId } },
-      amount: dto.amount,
-      method: dto.method as never,
-      reference: dto.reference,
-      paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
-    });
-
-    const { _sum } = await this.repo.sumPayments(invoiceId);
-    const totalPaid = Number(_sum.amount ?? 0);
-    const amountDue = Number(invoice.total) - totalPaid;
-
-    let newStatus: string;
-    if (amountDue <= 0) {
-      newStatus = "paid";
-    } else if (totalPaid > 0) {
-      newStatus = "partially_paid";
-    } else {
-      newStatus = "issued";
-    }
-
-    return this.repo.updateStatus(invoiceId, {
-      amountPaid: totalPaid,
-      status: newStatus as never,
-    });
+    // Insert + re-sum + status update all happen inside one transaction (BillingRepository) —
+    // a concurrent payment on this invoice can't read a stale sum between the two steps.
+    return this.repo.recordPaymentAtomic(
+      invoiceId,
+      {
+        amount: dto.amount,
+        method: dto.method as never,
+        reference: dto.reference,
+        paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
+        idempotencyKey: dto.idempotencyKey,
+      },
+      Number(invoice.total)
+    );
   }
 
   async createDraft(data: {

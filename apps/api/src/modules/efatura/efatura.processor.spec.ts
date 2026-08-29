@@ -2,8 +2,12 @@ import { Test } from "@nestjs/testing";
 import { EFaturaProcessor } from "./efatura.processor";
 import { EFaturaService } from "./efatura.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { EncryptionService } from "../../common/services/encryption.service";
 import type { EFaturaConfig } from "./efatura.types";
 import type { Job } from "bull";
+
+process.env.FIELD_ENCRYPTION_KEY = "c".repeat(64);
+const encryptionForFixtures = new EncryptionService();
 
 const CFG: EFaturaConfig = {
   enabled: true, sandbox: false,
@@ -13,11 +17,13 @@ const CFG: EFaturaConfig = {
   nomeEmpresa: "CAP",
 };
 
+// Patient.nif is stored encrypted — the DB row Prisma actually returns looks like this,
+// never the plaintext "987654321" a naive fixture might use.
 const DB_INVOICE = {
   id: "inv-1",
   invoiceNumber: "INV-2026-0001",
   issuedAt: new Date("2026-08-01"),
-  patient: { fullName: "Maria Silva", nif: "987654321" },
+  patient: { fullName: "Maria Silva", nif: encryptionForFixtures.encrypt("987654321") },
   items: [
     { description: "Consulta Geral", quantity: 1, unitPrice: "1500", total: "1500", serviceId: "svc-1" },
   ],
@@ -53,6 +59,7 @@ describe("EFaturaProcessor", () => {
         EFaturaProcessor,
         { provide: PrismaService, useValue: prisma },
         { provide: EFaturaService, useValue: efatura },
+        EncryptionService,
       ],
     }).compile();
     processor = mod.get(EFaturaProcessor);
@@ -159,6 +166,12 @@ describe("EFaturaProcessor", () => {
         (c: [{ where: unknown; data: { errorMessage?: string } }]) => c[0]?.data?.errorMessage
       );
       expect(updateCall[0].data.errorMessage.length).toBeLessThanOrEqual(500);
+    });
+
+    it("decrypts the patient's NIF before building the E-Factura payload — never sends ciphertext to the tax authority", async () => {
+      await processor.handleSubmit(makeJob({ invoiceId: "inv-1" }));
+      const payloadArg = efatura.buildPayload.mock.calls[0][1];
+      expect(payloadArg.patient.nif).toBe("987654321");
     });
 
     it("increments retryCount on re-submission via upsert update path", async () => {

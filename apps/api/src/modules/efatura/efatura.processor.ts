@@ -3,6 +3,7 @@ import { Logger } from "@nestjs/common";
 import { Job } from "bull";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EFaturaService } from "./efatura.service";
+import { EncryptionService } from "../../common/services/encryption.service";
 import type { EFaturaSubmitJob, EFaturaCancelJob } from "./efatura.types";
 
 @Processor("efatura")
@@ -11,7 +12,8 @@ export class EFaturaProcessor {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly efatura: EFaturaService
+    private readonly efatura: EFaturaService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   @Process("submit")
@@ -54,10 +56,15 @@ export class EFaturaProcessor {
     }
 
     try {
+      // patient.nif is stored encrypted — decrypt before it ever reaches the tax authority payload
+      const patient = {
+        ...invoice.patient,
+        nif: invoice.patient.nif ? this.encryption.decrypt(invoice.patient.nif) : invoice.patient.nif,
+      };
       const payload = this.efatura.buildPayload(cfg, {
         invoiceNumber: invoice.invoiceNumber,
         issuedAt: invoice.issuedAt,
-        patient: invoice.patient,
+        patient,
         items: invoice.items.map(item => ({
           ...item,
           unitPrice: Number(item.unitPrice),

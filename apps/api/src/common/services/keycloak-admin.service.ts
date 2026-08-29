@@ -8,6 +8,9 @@ interface NewKeycloakUser {
   role: string;
 }
 
+// SECURITY.md §2.3 — MFA is mandatory for these roles, recommended (not enforced) for the rest.
+const MFA_MANDATORY_ROLES = new Set(["admin", "doctor", "corporate_hr"]);
+
 @Injectable()
 export class KeycloakAdminService {
   private readonly baseUrl = process.env.KEYCLOAK_URL ?? "http://localhost:8080";
@@ -56,6 +59,7 @@ export class KeycloakAdminService {
         enabled: true,
         emailVerified: true,
         credentials: [{ type: "password", value: user.password, temporary: false }],
+        ...(MFA_MANDATORY_ROLES.has(user.role) ? { requiredActions: ["CONFIGURE_TOTP"] } : {}),
       }),
     });
     if (createRes.status === 409) throw new ConflictException(`A Keycloak user with email ${user.email} already exists`);

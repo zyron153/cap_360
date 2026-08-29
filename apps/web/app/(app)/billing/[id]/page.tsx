@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -169,13 +169,18 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     defaultValues: { method: "cash" },
   });
 
+  // One key per payment attempt — stable across retries of the same submit (double-click, a
+  // client timeout retry), regenerated once the form resets for the next, separate payment.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
+
   const payMutation = useMutation({
-    mutationFn: (data: RecordPaymentDto) => recordPayment(id, data),
+    mutationFn: (data: RecordPaymentDto) => recordPayment(id, { ...data, idempotencyKey }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["invoice", id] });
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
       queryClient.invalidateQueries({ queryKey: ["billing-summary"] });
       reset();
+      setIdempotencyKey(crypto.randomUUID());
     },
   });
 

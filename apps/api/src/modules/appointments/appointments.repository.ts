@@ -26,6 +26,19 @@ export class AppointmentsRepository {
     });
   }
 
+  /** A retried "create appointment" request (double-click, timeout retry) with the same
+   * client-supplied key returns the original appointment instead of creating a duplicate. */
+  findByIdempotencyKey(idempotencyKey: string) {
+    return this.prisma.appointment.findUnique({
+      where: { idempotencyKey },
+      include: {
+        patient: { select: { id: true, fullName: true, phone: true } },
+        staff: { select: { id: true, fullName: true } },
+        service: { select: { id: true, name: true } },
+      },
+    });
+  }
+
   create(data: Prisma.AppointmentCreateInput) {
     return this.prisma.appointment.create({
       data,

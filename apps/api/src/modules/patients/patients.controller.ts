@@ -16,6 +16,7 @@ import { PatientsService } from "./patients.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decorator";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { AuditView } from "../../common/decorators/audit-view.decorator";
 import {
   CreatePatientSchema,
   UpdatePatientSchema,
@@ -49,6 +50,7 @@ export class PatientsController {
   }
 
   @Get(":id")
+  @AuditView() // SECURITY.md: "patient record viewed" must be audit-logged, not just edits
   findOne(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.findById(id);
   }

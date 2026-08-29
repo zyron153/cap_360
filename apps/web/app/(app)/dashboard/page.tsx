@@ -113,6 +113,9 @@ export default function DashboardPage() {
   const [patientOpen, setPatientOpen]   = useState(false);
   const [apptForm, setApptForm]         = useState({ patientId: "", serviceId: "", staffId: "", scheduledAt: "", notes: "" });
   const [apptSubmitting, setApptSubmitting] = useState(false);
+  // One key per booking attempt — stable across retries of the same submit, regenerated once
+  // the modal resets after a success so the next, separate booking gets its own key.
+  const [apptIdempotencyKey, setApptIdempotencyKey] = useState(() => crypto.randomUUID());
   const [patientForm, setPatientForm]   = useState({ fullName: "", dateOfBirth: "", phone: "", email: "", gender: "female" });
   const [patConsent, setPatConsent]     = useState(false);
   const [patSubmitting, setPatSubmitting] = useState(false);
@@ -297,9 +300,10 @@ export default function DashboardPage() {
     setApptSubmitting(true);
     try {
       const res = await fetch("/api/appointments", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId: apptForm.patientId, staffId: apptForm.staffId, serviceId: apptForm.serviceId, scheduledAt: new Date(apptForm.scheduledAt).toISOString(), notes: apptForm.notes || undefined, source: "web" }) });
+        body: JSON.stringify({ patientId: apptForm.patientId, staffId: apptForm.staffId, serviceId: apptForm.serviceId, scheduledAt: new Date(apptForm.scheduledAt).toISOString(), notes: apptForm.notes || undefined, source: "web", idempotencyKey: apptIdempotencyKey }) });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.message ?? "Erro ao criar marcação"); }
       setApptForm({ patientId: "", serviceId: "", staffId: "", scheduledAt: "", notes: "" }); setApptOpen(false);
+      setApptIdempotencyKey(crypto.randomUUID());
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       addMessage("Success", "Marcação criada com sucesso!");
     } catch (e: unknown) { addMessage("Error", e instanceof Error ? e.message : "Erro desconhecido"); }

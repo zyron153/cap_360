@@ -2,6 +2,7 @@ import { Test } from "@nestjs/testing";
 import { ConflictException } from "@nestjs/common";
 import { PatientsService } from "./patients.service";
 import { PatientsRepository } from "./patients.repository";
+import { RequestContext } from "../../common/context/request-context";
 
 const repo = {
   findMany: jest.fn(),
@@ -92,6 +93,55 @@ describe("PatientsService", () => {
 
       await expect(service.create(BASE_DTO)).rejects.toThrow(ConflictException);
       expect(repo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("update — audit diff", () => {
+    it("records only the changed fields' before/after values, not the whole patient", async () => {
+      repo.findById.mockResolvedValue({
+        id: "p1", fullName: "Ana Costa", phone: "+2389912345", email: "old@cap.cv", nif: null,
+      });
+      repo.update.mockResolvedValue({
+        id: "p1", fullName: "Ana Silva", phone: "+2389912345", email: "new@cap.cv", nif: null,
+      });
+      const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+
+      await service.update("p1", { fullName: "Ana Silva", email: "new@cap.cv" });
+
+      expect(diffSpy).toHaveBeenCalledWith(
+        { fullName: "Ana Costa", email: "old@cap.cv" },
+        { fullName: "Ana Silva", email: "new@cap.cv" }
+      );
+      diffSpy.mockRestore();
+    });
+
+    it("does not set a diff for fields that weren't part of the update", async () => {
+      repo.findById.mockResolvedValue({ id: "p1", fullName: "Ana Costa", phone: "+2389912345" });
+      repo.update.mockResolvedValue({ id: "p1", fullName: "Ana Silva", phone: "+2389912345" });
+      const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+
+      await service.update("p1", { fullName: "Ana Silva" });
+
+      const [before, after] = diffSpy.mock.calls[0];
+      expect(before).not.toHaveProperty("phone");
+      expect(after).not.toHaveProperty("phone");
+      diffSpy.mockRestore();
+    });
+  });
+
+  describe("softDelete — audit diff", () => {
+    it("records the deletedAt transition", async () => {
+      repo.findById.mockResolvedValue({ id: "p1", deletedAt: null });
+      repo.softDelete.mockResolvedValue({ id: "p1", deletedAt: new Date("2026-08-28T00:00:00Z") });
+      const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+
+      await service.softDelete("p1");
+
+      expect(diffSpy).toHaveBeenCalledWith(
+        { deletedAt: null },
+        { deletedAt: new Date("2026-08-28T00:00:00Z") }
+      );
+      diffSpy.mockRestore();
     });
   });
 });

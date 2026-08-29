@@ -61,6 +61,9 @@ export default function NewAppointmentPage() {
   const [selectedStaff, setSelectedStaff] = useState("");
   const [selectedService, setSelectedService] = useState("");
   const [selectedSlot, setSelectedSlot] = useState("");
+  // One key per page visit — stable across retries of the same submit (double-click, a client
+  // timeout retry); navigating away on success and back in gets a fresh mount and a fresh key.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
 
   const { data: slots } = useQuery({
     queryKey: ["availability", selectedService, selectedStaff, selectedDate],
@@ -99,7 +102,7 @@ export default function NewAppointmentPage() {
       addMessage("Error", scheduleError);
       return;
     }
-    mutation.mutate(data);
+    mutation.mutate({ ...data, idempotencyKey });
   }
 
   const availableSlots = slots?.filter((s) => s.available) ?? [];

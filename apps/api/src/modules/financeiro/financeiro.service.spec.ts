@@ -4,6 +4,7 @@ import { FinanceiroService } from "./financeiro.service";
 import { FinanceiroRepository } from "./financeiro.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { StaffService } from "../staff/staff.service";
+import { RequestContext } from "../../common/context/request-context";
 
 const repo = {
   findExpenses: jest.fn(),
@@ -122,6 +123,63 @@ describe("FinanceiroService", () => {
     it("throws NotFoundException for an unknown id", async () => {
       repo.findExpenseById.mockResolvedValue(null);
       await expect(service.decideExpense("exp-x", { status: "approved" }, "kc-2")).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("audit diff — Financeiro is money, every non-create mutation should show what changed", () => {
+    let diffSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+    });
+    afterEach(() => diffSpy.mockRestore());
+
+    it("updateExpense records only the submitted fields' before/after", async () => {
+      repo.findExpenseById.mockResolvedValue({ ...EXPENSE, amount: "1500", category: "Fornecimentos" });
+      repo.updateExpense.mockResolvedValue({ ...EXPENSE, amount: 750, category: "Fornecimentos" });
+
+      await service.updateExpense("exp-1", { amount: 750 });
+
+      expect(diffSpy).toHaveBeenCalledWith({ amount: "1500" }, { amount: 750 });
+    });
+
+    it("decideExpense records the status transition", async () => {
+      repo.findExpenseById.mockResolvedValue(EXPENSE);
+      staff.findMe.mockResolvedValue({ id: "staff-2", fullName: "Admin" });
+      repo.updateExpense.mockResolvedValue({ ...EXPENSE, status: "approved" });
+
+      await service.decideExpense("exp-1", { status: "approved" }, "kc-2");
+
+      expect(diffSpy).toHaveBeenCalledWith({ status: "pending" }, { status: "approved" });
+    });
+
+    it("deleteExpense records the deleted row, with no 'after' state", async () => {
+      const full = { ...EXPENSE, description: "Material", amount: "1500" };
+      repo.findExpenseById.mockResolvedValue(full);
+      repo.deleteExpense.mockResolvedValue({});
+
+      await service.deleteExpense("exp-1");
+
+      expect(diffSpy).toHaveBeenCalledWith(full, null);
+    });
+
+    it("updateIncome records only the submitted fields' before/after", async () => {
+      repo.findIncomeById.mockResolvedValue({ id: "inc-1", amount: "500", category: "Subsídios" });
+      repo.updateIncome.mockResolvedValue({ id: "inc-1", amount: 800, category: "Subsídios" });
+
+      await service.updateIncome("inc-1", { amount: 800 });
+
+      expect(diffSpy).toHaveBeenCalledWith({ amount: "500" }, { amount: 800 });
+    });
+
+    it("deleteIncome records the deleted row, with no 'after' state", async () => {
+      const full = { id: "inc-1", description: "Subsídio", amount: "500" };
+      repo.findIncomeById.mockResolvedValue(full);
+      repo.deleteIncome.mockResolvedValue({});
+
+      await service.deleteIncome("inc-1");
+
+      expect(diffSpy).toHaveBeenCalledWith(full, null);
     });
   });
 

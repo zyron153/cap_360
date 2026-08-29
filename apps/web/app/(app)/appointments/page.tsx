@@ -114,6 +114,9 @@ export default function AppointmentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState(BLANK_APPT);
   const [submitting, setSubmitting] = useState(false);
+  // One key per booking attempt — stable across retries of the same submit, regenerated once
+  // the modal resets after a success so the next, separate booking gets its own key.
+  const [apptIdempotencyKey, setApptIdempotencyKey] = useState(() => crypto.randomUUID());
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
 
@@ -194,6 +197,7 @@ export default function AppointmentsPage() {
           scheduledAt: new Date(scheduledAt).toISOString(),
           notes: form.notes || undefined,
           source: "web",
+          idempotencyKey: apptIdempotencyKey,
         }),
       });
       if (!res.ok) {
@@ -202,6 +206,7 @@ export default function AppointmentsPage() {
       }
       setForm(BLANK_APPT);
       setNewOpen(false);
+      setApptIdempotencyKey(crypto.randomUUID());
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       addMessage("Success", "Marcação criada com sucesso!");
     } catch (e: unknown) {

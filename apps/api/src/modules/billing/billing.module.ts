@@ -4,6 +4,7 @@ import { BillingController } from "./billing.controller";
 import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
+import { EncryptionService } from "../../common/services/encryption.service";
 import { EFaturaModule } from "../efatura/efatura.module";
 
 @Module({
@@ -13,7 +14,7 @@ import { EFaturaModule } from "../efatura/efatura.module";
   ],
   controllers: [BillingController],
   // PrismaService comes from the global PrismaModule — no explicit import needed
-  providers: [BillingService, BillingRepository, R2Service],
+  providers: [BillingService, BillingRepository, R2Service, EncryptionService],
   exports: [BillingService],
 })
 export class BillingModule {}

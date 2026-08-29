@@ -1,5 +1,5 @@
 import { Test } from "@nestjs/testing";
-import { NotFoundException, BadRequestException } from "@nestjs/common";
+import { NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
 import { getQueueToken } from "@nestjs/bull";
 import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
@@ -17,9 +17,8 @@ const repo = {
   findMany: jest.fn(),
   count: jest.fn(),
   update: jest.fn(),
-  updateStatus: jest.fn(),
-  createPayment: jest.fn(),
-  sumPayments: jest.fn(),
+  recordPaymentAtomic: jest.fn(),
+  findPaymentReplay: jest.fn(),
   findServiceById: jest.fn(),
 };
 const r2 = { isConfigured: jest.fn(), upload: jest.fn(), signedUrl: jest.fn() };
@@ -59,55 +58,31 @@ describe("BillingService", () => {
     r2.isConfigured.mockReturnValue(false);
   });
 
-  describe("recordPayment — payment status machine", () => {
+  // The actual status-machine math (paid / partially_paid) now lives inside
+  // BillingRepository.recordPaymentAtomic, tested in billing.repository.spec.ts — it has to run
+  // inside the same DB transaction as the insert, so it can't stay at the service level. These
+  // tests cover what the service is actually responsible for: guards and correct delegation.
+  describe("recordPayment — guards and delegation to the atomic repository call", () => {
     beforeEach(() => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
-      repo.createPayment.mockResolvedValue({});
-      repo.updateStatus.mockResolvedValue({});
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000" });
     });
 
-    it("transitions to paid when the full amount is recorded", async () => {
-      repo.sumPayments.mockResolvedValue({ _sum: { amount: "2000" } });
-      await service.recordPayment("inv-1", { amount: 2000, method: "cash" });
-      expect(repo.updateStatus).toHaveBeenCalledWith(
-        "inv-1",
-        expect.objectContaining({ status: "paid", amountPaid: 2000 })
-      );
-    });
-
-    it("transitions to partially_paid when a partial amount is recorded", async () => {
-      repo.sumPayments.mockResolvedValue({ _sum: { amount: "800" } });
+    it("delegates to recordPaymentAtomic with the payment data and the invoice's current total", async () => {
       await service.recordPayment("inv-1", { amount: 800, method: "bank_transfer" });
-      expect(repo.updateStatus).toHaveBeenCalledWith(
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
         "inv-1",
-        expect.objectContaining({ status: "partially_paid", amountPaid: 800 })
+        expect.objectContaining({ amount: 800, method: "bank_transfer" }),
+        2000
       );
     });
 
-    it("calculates remaining balance correctly across two payments", async () => {
-      // First payment: 500
-      repo.sumPayments.mockResolvedValue({ _sum: { amount: "500" } });
-      await service.recordPayment("inv-1", { amount: 500, method: "cash" });
-      expect(repo.updateStatus).toHaveBeenCalledWith(
-        "inv-1",
-        expect.objectContaining({ status: "partially_paid", amountPaid: 500 })
-      );
-
-      // Second payment: remaining 1500
-      repo.sumPayments.mockResolvedValue({ _sum: { amount: "2000" } });
-      await service.recordPayment("inv-1", { amount: 1500, method: "cash" });
-      expect(repo.updateStatus).toHaveBeenCalledWith(
-        "inv-1",
-        expect.objectContaining({ status: "paid", amountPaid: 2000 })
-      );
-    });
-
-    it("throws BadRequestException on a paid invoice", async () => {
+    it("throws BadRequestException on a paid invoice, without recording a payment", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "paid" });
       await expect(
         service.recordPayment("inv-1", { amount: 100, method: "cash" })
       ).rejects.toThrow(BadRequestException);
-      expect(repo.createPayment).not.toHaveBeenCalled();
+      expect(repo.recordPaymentAtomic).not.toHaveBeenCalled();
     });
 
     it("throws BadRequestException on a cancelled invoice", async () => {
@@ -122,6 +97,119 @@ describe("BillingService", () => {
       await expect(
         service.recordPayment("inv-999", { amount: 100, method: "cash" })
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("recordPayment — idempotency key replay", () => {
+    beforeEach(() => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000" });
+    });
+
+    it("returns the original result without recording again when the key was already used", async () => {
+      repo.findPaymentReplay.mockResolvedValue({ id: "inv-1", status: "partially_paid", amountPaid: "800" });
+
+      const result = await service.recordPayment("inv-1", { amount: 800, method: "cash", idempotencyKey: "key-abc" });
+
+      expect(result).toEqual({ id: "inv-1", status: "partially_paid", amountPaid: "800" });
+      expect(repo.recordPaymentAtomic).not.toHaveBeenCalled();
+    });
+
+    it("records normally and passes the key through when it hasn't been used before", async () => {
+      repo.findPaymentReplay.mockResolvedValue(null);
+
+      await service.recordPayment("inv-1", { amount: 800, method: "cash", idempotencyKey: "key-new" });
+
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ idempotencyKey: "key-new" }),
+        2000
+      );
+    });
+
+    it("skips the replay check entirely when no key is provided", async () => {
+      await service.recordPayment("inv-1", { amount: 800, method: "cash" });
+      expect(repo.findPaymentReplay).not.toHaveBeenCalled();
+      expect(repo.recordPaymentAtomic).toHaveBeenCalled();
+    });
+  });
+
+  describe("create — price-override visibility", () => {
+    beforeEach(() => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0003");
+      repo.create.mockResolvedValue({});
+    });
+
+    it("logs a warning when an admin overrides a line item's price", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+      const warnSpy = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
+      } as never, ["admin"]);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("service-1"));
+      warnSpy.mockRestore();
+    });
+
+    it("does not warn when the price matches the catalogue", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+      const warnSpy = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 1500 }],
+      } as never, ["receptionist"]);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it("does not warn for a line item with no serviceId (off-catalogue / custom item)", async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 250 }],
+      } as never, ["receptionist"]);
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(repo.findServiceById).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+
+    it("still creates the invoice at the submitted price when an admin overrides the catalogue", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+      jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
+      } as never, ["admin"]);
+
+      expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ subtotal: 500, total: 500 }));
+    });
+
+    it("rejects a non-admin trying to override a catalogued service's price", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+
+      await expect(
+        service.create({
+          patientId: "patient-1",
+          items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
+        } as never, ["receptionist"])
+      ).rejects.toThrow(ForbiddenException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("lets a non-admin create an off-catalogue custom line item — there's no catalogue price to override", async () => {
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 250 }],
+      } as never, ["receptionist"]);
+
+      expect(repo.create).toHaveBeenCalled();
     });
   });
 
