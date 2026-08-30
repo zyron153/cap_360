@@ -2,92 +2,80 @@
 
 Next.js App Router routes for the `apps/web` application.
 
+> **Regenerated 2026-08-30** from the actual `apps/web/app/**/page.tsx` tree — the previous version
+> of this doc described a route structure (nested `/admin/*`, `/companies/*`,
+> `/health-plans/products/*`, a `(patient)` self-service portal, `/appointments/[id]`,
+> `/patients/[id]/documents`) that **does not exist**. The real app is much flatter: most
+> list+detail interactions happen via modals/tabs on one page rather than separate routes, several
+> pages are mockup shells for not-yet-built modules (M3/M5/M7/M9/M10 — see their module docs), and
+> there is no patient-facing portal at all.
+
 ## Route Groups
 
 ### `(auth)` — unauthenticated
 
 | Path | File | Description |
 |---|---|---|
-| `/login` | `(auth)/login/page.tsx` | Keycloak PKCE redirect |
-| `/login/callback` | `(auth)/login/callback/page.tsx` | Handles Keycloak redirect after login |
+| `/login` | `(auth)/login/page.tsx` | Redirects into Keycloak's own login page |
+| `/activate` | `(auth)/activate/page.tsx` | Staff invitation acceptance (token from `POST /staff/invite`'s email) — not in the original doc at all |
 
-### `(app)` — requires authentication (guarded by layout middleware)
+❌ No `/login/callback` page — the OAuth callback is a Route Handler, not a page (see API Proxy /
+Auth section below).
 
-#### Dashboard
+### `(app)` — requires authentication
 
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/` | `(app)/dashboard/page.tsx` | all staff | Today's appointments, quick stats |
+| Path | File | Roles (route-level `@Roles`, not page-level) |
+|---|---|---|
+| `/dashboard` | `(app)/dashboard/page.tsx` | all staff |
+| `/appointments` | `(app)/appointments/page.tsx` | admin, receptionist, doctor, nurse |
+| `/appointments/new` | `(app)/appointments/new/page.tsx` | admin, receptionist |
+| `/patients` | `(app)/patients/page.tsx` | admin, receptionist, doctor, nurse |
+| `/patients/new` | `(app)/patients/new/page.tsx` | admin, receptionist |
+| `/patients/[id]` | `(app)/patients/[id]/page.tsx` | admin, receptionist, doctor, nurse |
+| `/patients/[id]/edit` | `(app)/patients/[id]/edit/page.tsx` | admin, receptionist — not in the original doc |
+| `/billing` | `(app)/billing/page.tsx` | admin, receptionist |
+| `/billing/new` | `(app)/billing/new/page.tsx` | admin, receptionist |
+| `/billing/[id]` | `(app)/billing/[id]/page.tsx` | admin, receptionist |
+| `/health-plans` | `(app)/health-plans/page.tsx` | admin, receptionist, corporate_hr — one page handles products + subscriptions, not a `/products` sub-tree |
+| `/staff` | `(app)/staff/page.tsx` | admin — not under `/admin/*` |
+| `/settings` | `(app)/settings/page.tsx` | admin |
+| `/parametrizacoes` | `(app)/parametrizacoes/page.tsx` | admin — service pricing, business hours, clinic info; not in the original doc |
+| `/access` | `(app)/access/page.tsx` | admin — not in the original doc; role/permission-related |
 
-#### Appointments
+🎭 **Mockup shells with no real backend** (see each module's doc for what's actually built, if anything):
 
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/appointments` | `(app)/appointments/page.tsx` | all staff | FullCalendar week/day/month view |
-| `/appointments/new` | `(app)/appointments/new/page.tsx` | receptionist, admin | Create booking form |
-| `/appointments/[id]` | `(app)/appointments/[id]/page.tsx` | all staff | Detail: status, notes, patient |
-| `/appointments/waitlist` | `(app)/appointments/waitlist/page.tsx` | receptionist, admin | Waitlist management |
+| Path | File | Stands in for |
+|---|---|---|
+| `/whatsapp` | `(app)/whatsapp/page.tsx` | M3 — WhatsApp Integration |
+| `/exams` | `(app)/exams/page.tsx` | M5 — Exam Results |
+| `/records` | `(app)/records/page.tsx` | M7 — Clinical Records |
+| `/visits` | `(app)/visits/page.tsx` | M9 — Home Visits |
+| `/analytics` | `(app)/analytics/page.tsx` | M10 — Analytics |
 
-#### Patients
-
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/patients` | `(app)/patients/page.tsx` | all staff | Searchable patient list |
-| `/patients/new` | `(app)/patients/new/page.tsx` | receptionist, admin | Registration form |
-| `/patients/[id]` | `(app)/patients/[id]/page.tsx` | all staff | Profile + timeline |
-| `/patients/[id]/documents` | `(app)/patients/[id]/documents/page.tsx` | doctor, nurse, lab_tech, admin | Upload & download |
-
-#### Billing
-
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/billing` | `(app)/billing/page.tsx` | receptionist, admin | Invoice list + filters |
-| `/billing/new` | `(app)/billing/new/page.tsx` | receptionist, admin | Manual invoice creation |
-| `/billing/[id]` | `(app)/billing/[id]/page.tsx` | receptionist, admin | Invoice + payment recording |
-
-#### Health Plans
-
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/health-plans` | `(app)/health-plans/page.tsx` | admin, receptionist | Plan list |
-| `/health-plans/products` | `(app)/health-plans/products/page.tsx` | admin | Product catalogue |
-| `/health-plans/products/new` | `(app)/health-plans/products/new/page.tsx` | admin | Create product |
-| `/health-plans/products/[id]` | `(app)/health-plans/products/[id]/page.tsx` | admin | Edit product |
-
-#### Companies
-
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/companies` | `(app)/companies/page.tsx` | admin | Company list |
-| `/companies/new` | `(app)/companies/new/page.tsx` | admin | Register company |
-| `/companies/[id]` | `(app)/companies/[id]/page.tsx` | admin, corporate_hr | Company detail + plans |
-
-#### Admin
-
-| Path | File | Roles | Description |
-|---|---|---|---|
-| `/admin/staff` | `(app)/admin/staff/page.tsx` | admin | Staff roster + Keycloak links |
-| `/admin/rooms` | `(app)/admin/rooms/page.tsx` | admin | Room management |
-| `/admin/services` | `(app)/admin/services/page.tsx` | admin | Service catalogue + pricing |
-| `/admin/holidays` | `(app)/admin/holidays/page.tsx` | admin | Public holiday calendar |
-| `/admin/audit` | `(app)/admin/audit/page.tsx` | admin | Audit log |
+❌ Doesn't exist at all: `/appointments/[id]` detail page, `/appointments/waitlist`,
+`/patients/[id]/documents`, `/companies*` (no page — Companies is only ever managed inline from the
+Health Plans page, if at all), `/admin/rooms` (no page, and no backend either — see
+`M8-staff-resource-scheduler.md`), `/admin/holidays`, `/admin/audit`.
 
 ### `(patient)` — patient self-service portal
 
-| Path | File | Description |
-|---|---|---|
-| `/portal` | `(patient)/portal/page.tsx` | Dashboard: upcoming appointments |
-| `/portal/book` | `(patient)/portal/book/page.tsx` | Self-booking flow |
-| `/portal/results` | `(patient)/portal/results/page.tsx` | Exam results list |
-| `/portal/invoices` | `(patient)/portal/invoices/page.tsx` | Own invoices |
-| `/portal/profile` | `(patient)/portal/profile/page.tsx` | Edit contact info |
+❌ **Doesn't exist.** No `(patient)` route group, no booking/results/invoices/profile pages for
+patients. `GET /patients/me` is the only patient-facing API route, and nothing in `apps/web` calls it.
+
+---
 
 ## API Proxy
 
-All `/api/*` requests are rewritten by `next.config.ts` to `http://localhost:3001/v1/*`.
+✅ Real, via `next.config.ts` rewrites: `/api/:path*` → `` `${NEXT_PUBLIC_API_URL ?? "http://localhost:4001"}/v1/:path*` ``.
+🟡 Note the hardcoded fallback is port **4001**, while the API's own default listen port
+(`API_PORT` in `apps/api/src/main.ts`) is **3001** — harmless as long as `.env.local` sets
+`NEXT_PUBLIC_API_URL` explicitly (which local setup does), but the fallback value itself doesn't
+match the API's default.
 
 ## Auth Guard
 
-- The `(app)` layout reads the Keycloak session via `@react-keycloak/web` (or `next-auth` with Keycloak provider).
-- Unauthenticated requests are redirected to `/login`.
-- Role-based route restrictions are enforced client-side; the API enforces them server-side via `RolesGuard`.
+🟡 **Not `@react-keycloak/web` or `next-auth`** — neither package is a dependency. Auth is a
+custom implementation: three Next.js Route Handlers (`app/api/auth/login`, `/callback`, `/logout`)
+drive the OAuth/PKCE exchange with Keycloak directly. Role-based restrictions are enforced
+server-side by the API's `RolesGuard` (route-level `@Roles`, not page-level) — whether the `(app)`
+layout also redirects unauthenticated/wrong-role users client-side was not re-verified in this pass.

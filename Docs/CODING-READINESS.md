@@ -1,9 +1,17 @@
-# Mais Saúde 360 — Coding Readiness Analysis
+# CAP 360 — Coding Readiness Analysis
 
 > **Prepared:** June 2026
 > **Purpose:** Cross-reference all architecture docs, identify gaps, and list everything that must be resolved or created before a developer can write the first line of production code.
 > **Verdict (original):** The project is well-architected but had 6 blocking gaps and 14 non-blocking gaps before coding could start.
 > **Status (June 2026):** All 6 blocking gaps are resolved. Coding is underway. See updated gap statuses below.
+
+> **2026-08-30 note:** this is now a historical, point-in-time snapshot from very early in the
+> project. Coding has since progressed far past "underway" — core modules (Appointments, Patients,
+> Billing/Financeiro, Staff) are built and covered by ~225 automated tests. The "✅ Complete" column
+> in §1 tracks **documentation existing**, not features being implemented as described — several of
+> those documents' contents have since been found to describe aspirational designs that were
+> simplified or never built (see each doc's own "Implementation status" note, added in this pass).
+> For current, ground-truth gap tracking, see `TODO.md` and `REVIEW.md` instead of this file.
 
 ---
 
@@ -22,8 +30,8 @@
 | Testing strategy | ✅ Complete | Unit, integration, E2E, perf, security |
 | **Prisma schema file** | ✅ **RESOLVED** | `packages/database/prisma/schema.prisma` — 29 tables, migrations applied |
 | **Monorepo scaffold** | ✅ **RESOLVED** | pnpm workspaces + Turbopack + `turbo.json` fully set up |
-| **Keycloak realm export** | ⚠️ **PENDING** | Still required for automated dev setup; manual realm config in place |
-| **Seed data script** | ✅ **RESOLVED** | `packages/database/prisma/seed.ts` — 6 services, 5 rooms seeded |
+| **Keycloak realm export** | ✅ **RESOLVED** (as of this pass) | `infra/keycloak/cap-realm.json`, imported automatically by `docker compose up` |
+| **Seed data script** | ✅ **RESOLVED** | `packages/database/src/seed.ts` (not under `prisma/`) |
 | **Environment example files** | ✅ **RESOLVED** | Root `.env.example` and per-app `.env` templates created |
 | **UI wireframes / screens** | ✅ **REPLACED** | All 12 sidebar screens implemented as working Next.js pages |
 | **BSP / WhatsApp credentials** | ⚠️ PENDING | 360dialog or Twilio account not yet set up |
@@ -354,4 +362,4 @@ The following are documented but explicitly deferred to Phase 4 — do not attem
 
 ---
 
-*Mais Saúde 360 · Coding Readiness Analysis v1.0 · June 2026*
+*CAP 360 · Coding Readiness Analysis v1.0 · June 2026 · annotated 2026-08-30 as a historical snapshot*

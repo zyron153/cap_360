@@ -9,6 +9,12 @@
 
 Provides the clinic's first business intelligence layer. Replaces zero visibility on patient volumes, revenue, and operational performance with real-time dashboards and exportable reports.
 
+> **Implementation status: 🎭 UI mockup only — no backend at all.** No `/analytics/*` routes, no
+> materialised views, no dashboards, no exports. The one place in the running app with real
+> aggregate data is Financeiro's `GET /financeiro/summary` (expenses + income, date-ranged) — see
+> `M6-billing-invoicing.md` §2.6 — which covers none of the KPIs described below. Nothing in this
+> document is implemented.
+
 ---
 
 ## 2. Dashboard Views
@@ -128,4 +134,4 @@ See `API-SPEC.md` → Section 11 (Analytics)
 
 ---
 
-*Module M10 · v1.0 · June 2026*
+*Module M10 · v1.1 · updated 2026-08-30 against the current implementation*

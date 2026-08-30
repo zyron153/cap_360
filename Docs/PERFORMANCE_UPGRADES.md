@@ -49,7 +49,7 @@ Added `<PerfPanel />` (dev only).
 ### Bundle Analyzer
 - Added `@next/bundle-analyzer` to `apps/web/package.json`
 - `next.config.ts` wraps config with `withBundleAnalyzer({ enabled: ANALYZE === 'true' })`
-- Run: `ANALYZE=true pnpm --filter @cms/web build`
+- Run: `ANALYZE=true pnpm --filter @cap/web build`
 
 ---
 
@@ -225,7 +225,8 @@ Added 4 composite indexes targeting the most frequent filter patterns:
 | `(status, createdAt)` | invoices | BFF billing-summary: `WHERE status = 'issued' AND createdAt >= ?` |
 | `(patientId, status)` | invoices | Patient invoice timeline: `WHERE patientId = ?` |
 
-> **Migration required:** run `pnpm --filter @cms/database db:push` (dev) or `prisma migrate dev` to apply the new indexes to the database.
+> **Migration required:** run `pnpm --filter @cap/database db:push` to apply the new indexes to the
+> database — this project uses `prisma db push`, not `prisma migrate dev` (see `DEPLOYMENT.md`).
 
 ---
 

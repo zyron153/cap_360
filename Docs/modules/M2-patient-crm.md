@@ -9,6 +9,12 @@
 
 The Patient CRM is the single source of truth for every patient in the clinic. All other modules (appointments, billing, exams, WhatsApp) reference and enrich the patient record. It replaces the current state of zero structured patient data.
 
+> **Implementation status:** core CRUD, search, consent tracking, and GDPR-style erasure
+> (encrypted PII, hard-nulled on soft-delete) are built and tested. The **Document Manager** screen
+> has no backend behind it (only a signed download-url route exists, nothing creates a document
+> row); the **communication log** table exists but nothing writes to it; **tags**, **duplicate
+> review/merge**, and **full-text search** described below were never built.
+
 ---
 
 ## 2. Core Features
@@ -17,58 +23,53 @@ The Patient CRM is the single source of truth for every patient in the clinic. A
 
 Each patient record contains:
 
-**Demographics:**
-- Full name, date of birth, gender, nationality
-- NIF (Cabo Verde tax ID) — used for invoice generation
-- Photo (uploaded to R2)
+**Demographics** *(✅ = implemented, ❌ = never built)*:
+- ✅ Full name, date of birth (both **encrypted at rest**, AES-256-GCM), gender
+- ❌ Nationality — no field exists
+- ✅ NIF (Cabo Verde tax ID, also encrypted, with a separate blind-index hash for exact-match search) — used for invoice generation
+- ❌ Photo — no field, no upload path
 
 **Contact:**
-- WhatsApp phone (primary — unique identifier for bot interaction)
-- Secondary phone, email
-- Residential address and zone (neighbourhood/district)
+- ✅ Phone (unique identifier) — normalized and validated against the Cabo Verde `+238` country
+  code specifically, not a generic E.164 check
+- ❌ Secondary phone, zone (neighbourhood/district) — no fields exist
+- ✅ Email, residential address
 
 **Clinical context:**
-- Primary physician assignment
-- Active health plan (linked from M4)
-- Tags: `VIP`, `Chronic`, `Paediatric`, `Home Visit Only`, `Corporate Plan`
+- ❌ Primary physician assignment — no field
+- ✅ Active health plan (linked from M4, one FK, not a membership table)
+- ❌ Tags — no field exists
 
 **Administrative:**
-- Emergency contact name and phone
-- Consent forms and privacy agreements (uploaded documents)
+- ✅ Emergency contact name and phone
+- ❌ Consent forms and privacy agreements as uploaded documents — consent is a single
+  `consentGiven` boolean + `consentGivenAt` timestamp, not a document
 
 ### 2.2 Patient History Timeline
 
-Chronological feed displayed in the patient record view, aggregating:
-- All appointments (status, service, doctor, notes)
-- All exam requests and results
-- Home visit history
-- Invoices and payment history
-- All WhatsApp / SMS / email communications
-- Manual staff notes
-
-Each event is expandable inline. Clinical notes visible only to authorised roles.
+✅ Implemented via `GET /patients/:id/timeline`, merging **appointments + communications +
+invoices** (newest first, capped at 20 per type). ❌ Exam requests/results and home-visit history
+are not included — neither module has a backend to pull from.
 
 ### 2.3 Communication Log
 
-Every interaction with the patient is automatically appended:
-- Inbound/outbound WhatsApp messages (from M3 webhook)
-- Emails sent via SendGrid (delivery status tracked)
-- SMS sent via Africa's Talking
-- Manual notes added by staff
-- Staff can attach follow-up tasks with due dates
+🟡 The `communication_log` table exists and is queried by the timeline above, but **nothing
+currently writes to it** — there's no WhatsApp webhook (M3 doesn't exist) and no SendGrid/Africa's
+Talking integration to log deliveries from. Manual staff notes go to the separate `patient_notes`
+table instead, not this log. Follow-up tasks with due dates: not implemented.
 
 ### 2.4 Patient Search
 
-- Search by name, phone, NIF, or email
-- Full-text search using PostgreSQL `pg_trgm` extension
-- Filter by tag, health plan status, last visit date
-- Results ranked by relevance; phone search returns instant match
+🟡 Search by name/phone/email uses a plain case-insensitive `contains` match, not PostgreSQL
+`pg_trgm`/full-text search or relevance ranking. NIF search is necessarily **exact-match only**
+(via a blind-index hash) since the column is encrypted — a partial NIF will not match. Filtering
+by health-plan status exists (`planFilter`); filtering by tag or last-visit date does not (no tags
+field exists at all).
 
 ### 2.5 Duplicate Detection
 
-- On new patient creation, the system checks for existing records with same phone or NIF
-- Presents potential duplicates to staff before allowing creation
-- Merge tool available to admin to combine duplicate records
+🟡 Simpler than described: `POST /patients` rejects outright (`409 Conflict`) on an existing
+phone or NIF match — there's no "present potential duplicates for review" flow and no merge tool.
 
 ---
 
@@ -90,14 +91,22 @@ See `API-SPEC.md` → Section 2 (Patients)
 
 ## 5. Access Control
 
-| Data | patient | receptionist | doctor | nurse | admin |
-|---|---|---|---|---|---|
-| Demographics | own | ✅ | read | read (assigned) | ✅ |
-| Clinical notes | 🔒 | summary | ✅ own | assigned only | read |
-| Communication log | own | ✅ | 🔒 | 🔒 | ✅ |
-| Documents | own | ✅ | ✅ | upload | ✅ |
-| Tags | 🔒 | ✅ | ✅ | 🔒 | ✅ |
-| Delete/merge | 🔒 | 🔒 | 🔒 | 🔒 | ✅ |
+🟡 Actual RBAC is **coarse route-level `@Roles` guards**, not the per-field matrix below — a doctor
+and a nurse see the exact same patient fields as a receptionist (no "own/assigned only" narrowing,
+no field-level redaction of clinical notes). Real behaviour, from `patients.controller.ts`:
+
+| Route | Allowed roles |
+|---|---|
+| List / view / timeline | admin, receptionist, doctor, nurse (all identical access) |
+| `GET /patients/me` | `patient` role only (own record, via JWT `patient_id` claim) |
+| Create / update | admin, receptionist only — **doctor and nurse cannot create or edit** a patient record |
+| Soft-delete (erasure) | admin only |
+| Add note | admin, receptionist, doctor, nurse |
+| Documents (`download-url` only) | admin, doctor, nurse, receptionist, lab_tech, patient |
+
+❌ `lab_tech` and `corporate_hr` (both real `StaffRole` values) have **no access at all** to the
+patients module except the documents download-url route above. ❌ Tags and delete/merge don't
+apply — neither feature exists (see §2.1 and §2.5).
 
 ---
 
@@ -116,12 +125,17 @@ See `API-SPEC.md` → Section 2 (Patients)
 
 ## 6. GDPR / Data Privacy
 
-- Patient consent for data processing captured at registration (consent form stored as document)
-- Data portability: admin can export full patient record as JSON or PDF
-- Right to erasure: soft-delete clears PII but retains anonymised billing records (legal requirement)
-- Access log: every view of a patient record is written to `audit_log`
-- Data retention: inactive patient records archived after 7 years (configurable)
+- 🟡 Consent is a single `consentGiven` boolean + `consentGivenAt` timestamp captured at
+  registration — **not** a stored consent-form document
+- ❌ Data portability (export full record as JSON/PDF): not implemented
+- ✅ Right to erasure: soft-delete now genuinely nulls out direct PII (name, DOB, phone, NIF,
+  email, address, emergency contact) via `patients.repository.ts`'s `softDelete()`, decrypting
+  nothing further afterward; **billing records are retained** un-anonymised, linked only by patient
+  ID, for tax/legal purposes — matches the "anonymised billing" intent in spirit, not literally
+- ✅ Access log: `GET /patients/:id` is annotated `@AuditView()` and writes to the immutable
+  `audit_log` table (append-only, enforced by a DB trigger — see `SECURITY.md`)
+- ❌ Data retention / auto-archival after N years: not implemented — no scheduled job exists for it
 
 ---
 
-*Module M2 · v1.0 · June 2026*
+*Module M2 · v1.1 · updated 2026-08-30 against the current implementation*

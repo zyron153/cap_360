@@ -40,3 +40,10 @@ The eye is guided deliberately: critical alerts at the apex, primary actions imm
 ---
 
 *Every screen produced under Clinical Clarity should look as though a master craftsperson labored over it — the product of deep expertise, painstaking attention, and an unwavering commitment to the humans it serves.*
+
+---
+
+> **Fidelity check (2026-08-30):** the primary palette and type system described above are real —
+> `#0A6E6E` and Work Sans/Bricolage Grotesque are actually in `apps/web`'s CSS. One drift: the PDF
+> receipt generator (`apps/api/src/modules/billing/receipt.pdf.ts`) uses a slightly different teal,
+> `#0F9191`, not `#0A6E6E` — a small brand-consistency gap worth closing if it matters.

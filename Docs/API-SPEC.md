@@ -1,703 +1,506 @@
-# Mais Saúde 360 — API Specification
+# CAP 360 — API Specification
 
-> **Base URL:** `https://api.maissaudecv.com/v1`
-> **Auth:** Bearer JWT (Keycloak) — include `Authorization: Bearer <token>` on all protected routes
-> **Content-Type:** `application/json`
+> **Base path:** `/v1` (e.g. `http://localhost:4001/v1` in dev; the web app proxies `/api/*` → `${API_URL}/v1/*`)
+> **Auth:** Bearer JWT, issued directly by Keycloak (there is no custom `/auth/*` proxy in the API —
+> the frontend talks to Keycloak's own OIDC token endpoint). Include `Authorization: Bearer <token>`.
+> **Content-Type:** `application/json` (all bodies are validated with Zod via a shared `ZodValidationPipe`)
 > **Error format:** `{ "statusCode": 400, "message": "...", "error": "Bad Request" }`
+> **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) skips
+> JWT verification entirely for local development.
+
+This document reflects the routes and body shapes that actually exist in
+`apps/api/src/modules/*/*.controller.ts` and `packages/types/src/*.ts`. Field names are the real
+camelCase used by the Zod schemas — not the snake_case of the original design.
 
 ---
 
-## 1. Authentication
+## 1. Appointments (M1)
 
-### POST `/auth/token`
-Exchange Keycloak credentials for a JWT (for mobile/non-browser clients).
+**Controller roles (all routes unless noted):** admin, receptionist, doctor, nurse
+
+### GET `/appointments/availability`
+**Query:** `serviceId` (uuid, required), `staffId` (uuid, optional), `date` (`YYYY-MM-DD`, required)
+
+Returns 30-minute slots for that staff member's configured weekly `StaffAvailability`, with
+`available: false` on any slot that conflicts with an existing booking, falls outside clinic
+business hours, or is inside a matching `AuditView`-audited window. Also returns no slots at all
+(empty array) for the whole day if it's a public holiday, the clinic is marked closed that
+weekday, or the staff member has an approved `LeaveRequest` covering the date.
 
 ```
-POST /auth/token
-Body: { "username": "string", "password": "string" }
-Response 200: { "access_token": "...", "refresh_token": "...", "expires_in": 3600 }
+Response 200:
+[
+  { "start": "2026-06-15T09:00:00.000Z", "end": "2026-06-15T09:30:00.000Z",
+    "staffId": "uuid", "staffName": "", "available": true }
+]
 ```
 
-### POST `/auth/refresh`
+### GET `/appointments`
+**Query:** `from`, `to` (`YYYY-MM-DD`, required — validated as real calendar dates), `staffId`, `patientId` (optional)
+
 ```
-Body: { "refresh_token": "string" }
-Response 200: { "access_token": "...", "expires_in": 3600 }
+Response 200: Appointment[] with patient { id, fullName }, staff { id, fullName }, service { id, name, durationMinutes }
 ```
 
-### POST `/auth/logout`
+### GET `/appointments/:id`
 ```
-Headers: Authorization: Bearer <token>
-Response 204: No Content
+Response 200: Full appointment incl. patient { id, fullName, phone }, staff { id, fullName, role },
+  service { id, name, durationMinutes, price }, room { id, name }
+Response 404: not found
 ```
+
+### GET `/appointments/waitlist`
+**Query:** `serviceId` (optional)
+```
+Response 200: Waitlist[] with status "waiting" only, ordered oldest-first
+```
+
+### POST `/appointments`
+```
+Body:
+{
+  "patientId": "uuid", "staffId": "uuid", "serviceId": "uuid",
+  "roomId": "uuid (optional)",
+  "scheduledAt": "ISO8601 datetime with offset",
+  "notes": "string (optional, max 500)",
+  "source": "web | whatsapp | phone | walk_in (default web)",
+  "idempotencyKey": "string (optional, max 100) — a retry with the same key replays the original booking"
+}
+Response 201: Appointment
+Response 400: outside business hours / public holiday / staff on approved leave
+Response 409: staff or room slot already booked / temporarily locked (Redis contention) — retry
+```
+
+### POST `/appointments/series` — recurring bookings
+Pre-generates every occurrence as an ordinary appointment (linked via `seriesId`), each going
+through the exact same checks as a single `POST /appointments` call. Best-effort: an occurrence
+that fails its own checks is skipped and reported, not fatal to the rest of the series.
+
+```
+Body:
+{
+  "patientId": "uuid", "staffId": "uuid", "serviceId": "uuid", "roomId": "uuid (optional)",
+  "scheduledAt": "ISO8601 datetime with offset (first occurrence)",
+  "frequency": "daily | weekly | monthly",
+  "interval": "number, default 1 (every N [frequency] units)",
+  "endDate": "YYYY-MM-DD — exactly one of endDate/occurrenceCount required",
+  "occurrenceCount": "number, 1–104",
+  "notes": "string (optional)", "source": "web | whatsapp | phone | walk_in (default web)",
+  "idempotencyKey": "string (optional) — a retry with the same key replays the original series"
+}
+Response 201:
+{
+  "seriesId": "uuid",
+  "created": [ ...Appointment ],
+  "skipped": [ { "date": "ISO8601", "reason": "string" } ]
+}
+```
+
+### POST `/appointments/waitlist`
+```
+Body: { "patientId": "uuid", "serviceId": "uuid", "staffId": "uuid (optional)",
+  "preferredDateFrom": "YYYY-MM-DD (optional)", "preferredDateTo": "YYYY-MM-DD (optional)", "notes": "string (optional)" }
+Response 201: Waitlist entry
+```
+
+### PATCH `/appointments/:id/status`
+```
+Body: { "status": "confirmed | checked_in | completed | cancelled | no_show", "cancellationReason": "string (optional)" }
+Response 200: Updated appointment. Marking "completed" auto-creates a draft invoice for the service.
+```
+
+### PATCH `/appointments/:id/reschedule`
+```
+Body: { "scheduledAt": "ISO8601 datetime with offset" }
+Response 200: Updated appointment, status reset to "pending"; old reminder jobs cancelled, new ones enqueued
+Response 400: only pending/confirmed appointments can be rescheduled
+```
+
+Reschedule only moves the start time — there is no way to change duration via this endpoint (the
+calendar UI's drag-and-drop reflects this: dragging moves, resizing is disabled).
 
 ---
 
 ## 2. Patients (M2)
 
-### GET `/patients`
-**Roles:** receptionist, admin
-**Query params:** `q` (name/phone/NIF search), `planFilter` (`all` | `plan` | `none`, default `all`), `page` (default 1), `limit` (default 20)
+**Controller roles (default):** admin, receptionist, doctor, nurse
 
-> `planFilter` is applied server-side in the Prisma `WHERE` clause so pagination totals are accurate. `plan` = patients with an active health plan; `none` = self-pay patients.
+### GET `/patients`
+**Roles:** admin, receptionist, doctor, nurse
+**Query:** `q` (name / phone / NIF exact-match search), `planFilter` (`all` | `plan` | `none`, default `all`), `page` (default 1), `limit` (default 20)
+
+NIF search matches by a blind-index hash (the field is encrypted, so no partial/`LIKE` match is
+possible on it — only an exact NIF hits).
 
 ```
 Response 200:
-{
-  "data": [
-    {
-      "id": "uuid",
-      "full_name": "Maria Silva",
-      "phone_whatsapp": "+2389001234",
-      "date_of_birth": "1985-03-12",
-      "tags": ["VIP"],
-      "health_plan": { "id": "uuid", "product_name": "Plano Familiar" }
-    }
-  ],
-  "meta": { "total": 120, "page": 1, "limit": 20 }
-}
+{ "data": [ { "id","fullName","dateOfBirth","gender","phone","email","consentGiven","healthPlanId","createdAt","updatedAt" } ],
+  "total": 120, "page": 1, "limit": 20, "totalPages": 6 }
 ```
 
-### POST `/patients`
-**Roles:** receptionist, admin
-
-```
-Body:
-{
-  "full_name": "string (required)",
-  "phone_whatsapp": "string (required, unique)",
-  "date_of_birth": "YYYY-MM-DD",
-  "gender": "male | female | other",
-  "nif": "string",
-  "email": "string",
-  "address": "string",
-  "zone": "string",
-  "emergency_contact_name": "string",
-  "emergency_contact_phone": "string"
-}
-Response 201: { ...patient object }
-```
+### GET `/patients/me`
+**Roles:** patient
+Dev-only fallback path; there is no real patient-facing login yet (`Patient` has no `keycloakId`).
 
 ### GET `/patients/:id`
-**Roles:** receptionist, doctor, admin (patients see own via `/me`)
-
+**Roles:** admin, receptionist, doctor, nurse — logged via `@AuditView()` (every view of a full
+patient record is written to `audit_log`, not just mutations)
 ```
-Response 200: Full patient profile including active health plan and last 5 appointments
-```
-
-### PATCH `/patients/:id`
-**Roles:** receptionist, admin
-```
-Body: Partial patient fields
-Response 200: Updated patient object
+Response 200: Full patient object (nif and dateOfBirth decrypted transparently)
+Response 404: not found or soft-deleted
 ```
 
 ### GET `/patients/:id/timeline`
-**Roles:** receptionist, doctor, admin
-
 ```
-Response 200:
+Response 200: TimelineEvent[] merging appointments + communications + invoices, newest first, capped at 20 per type
+```
+
+### POST `/patients`
+**Roles:** admin, receptionist
+```
+Body:
 {
-  "appointments": [...],
-  "exam_requests": [...],
-  "home_visits": [...],
-  "invoices": [...],
-  "communication_log": [...]
+  "fullName": "string (2-150)", "dateOfBirth": "YYYY-MM-DD", "gender": "male | female | other",
+  "nif": "string (6-20, optional)", "phone": "E.164-ish, required",
+  "email": "string (optional)", "address": "string (optional, max 300)",
+  "emergencyContactName": "string (optional)", "emergencyContactPhone": "string (optional)",
+  "consentGiven": "boolean, required", "healthPlanId": "uuid (optional)"
 }
+Response 201: Patient (phone normalised to +238<7 digits>; nif/dateOfBirth encrypted at rest, returned decrypted)
+Response 409: phone or NIF already in use (including a race caught at the DB level, not just the pre-check)
+```
+
+### PATCH `/patients/:id`
+**Roles:** admin, receptionist
+```
+Body: any subset of the POST fields except consentGiven
+Response 200: Updated patient
+```
+
+### DELETE `/patients/:id`
+**Roles:** admin
+Soft-delete implementing right to erasure: sets `deletedAt` **and** nulls every direct-PII field
+(`fullName`, `dateOfBirth`, `nif`, `nifHash`, `phone`, `email`, `address`,
+`emergencyContactName`, `emergencyContactPhone`). `gender`, `healthPlanId`, and all related records
+(appointments, invoices, notes) are kept for anonymous reporting and legal/billing retention.
+```
+Response 200: The now-anonymised patient row
 ```
 
 ### POST `/patients/:id/notes`
-**Roles:** receptionist, doctor, nurse, admin
 ```
-Body: { "note": "string", "is_private": false }
-Response 201: { ...note object }
+Body: { "content": "string (1-2000)" }
+Response 201: Note
 ```
 
 ---
 
-## 3. Appointments (M1)
+## 3. Billing / Financeiro (M6)
 
-### GET `/appointments`
-**Roles:** receptionist, doctor (own), admin
-**Query params:** `staffId`, `from`, `to` (YYYY-MM-DD), `status`, `patientId`, `page`, `limit`
+### Invoices — `/invoices`, roles: admin, receptionist
 
-> `from` and `to` are validated by `AppointmentCalendarQuerySchema` (Zod `.refine()`). Invalid calendar dates such as `2026-06-31` return `400 Bad Request` instead of propagating to the database.
-
+#### GET `/invoices`
+**Query:** `patientId`, `status`, `from`, `to` (`YYYY-MM-DD`), `page`, `limit`
 ```
-Response 200:
-{
-  "data": [
-    {
-      "id": "uuid",
-      "patient": { "id": "uuid", "full_name": "...", "phone_whatsapp": "..." },
-      "staff": { "id": "uuid", "full_name": "Dr. João Andrade", "specialty": "Cardiology" },
-      "service": { "id": "uuid", "name": "Consulta de Cardiologia", "duration_minutes": 45 },
-      "starts_at": "2026-06-15T09:00:00Z",
-      "ends_at": "2026-06-15T09:45:00Z",
-      "status": "scheduled",
-      "booking_source": "web"
-    }
-  ],
-  "meta": { "total": 45, "page": 1, "limit": 20 }
-}
+Response 200: { data, total, page, limit, totalPages }
 ```
 
-### POST `/appointments`
-**Roles:** patient (own), receptionist, doctor, admin
+#### GET `/invoices/:id`
+```
+Response 200: Invoice incl. items, payments, patient { fullName, nif } (nif decrypted)
+```
 
+#### GET `/invoices/:id/receipt`
+```
+Response 200: { "url": "signed R2 URL, or a placeholder URL if R2 isn't configured" }
+```
+
+#### POST `/invoices`
 ```
 Body:
 {
-  "patient_id": "uuid (required)",
-  "staff_id": "uuid (required)",
-  "service_id": "uuid (required)",
-  "starts_at": "ISO8601 datetime (required)",
-  "room_id": "uuid (optional)",
-  "health_plan_id": "uuid (optional)",
-  "notes": "string",
-  "booking_source": "web | whatsapp_bot | phone | walk_in"
+  "patientId": "uuid", "appointmentId": "uuid (optional)",
+  "items": [ { "serviceId": "uuid, required", "description": "string", "quantity": 1, "unitPrice": number } ],
+  "notes": "string (optional)", "dueDate": "YYYY-MM-DD (optional)"
 }
-Response 201: Appointment object + confirmation sent via WhatsApp/email
-Response 409: { "message": "Slot unavailable — conflict detected" }
+Response 201: Invoice with computed totals; E-Fatura submission queued automatically
+```
+A catalogued `serviceId` billed at a price other than `services.price` is a price override —
+always logged, and **admin-only** (non-admins get `403`). An item with no `serviceId` (off-
+catalogue/custom) has no catalogue price to override, so any role that can create invoices can add
+one.
+
+#### POST `/invoices/:id/payments`
+```
+Body: { "amount": number, "method": "cash | bank_transfer | health_plan | vinti4",
+  "reference": "string (optional)", "paidAt": "ISO8601 (optional)", "idempotencyKey": "string (optional)" }
+Response 201: { id, status: "partially_paid" | "paid", amountPaid }
+Response 400: invoice is already paid/cancelled, or this payment would push amountPaid above the invoice total
+```
+Insert + re-sum + status update run in one DB transaction — a concurrent payment on the same
+invoice can't read a stale running total between the steps.
+
+#### POST `/invoices/:id/cancel`
+```
+Response 200: Invoice with status "cancelled"
+Response 400: cannot cancel a fully paid invoice
+```
+Idempotent on an already-cancelled invoice (returns it unchanged). If the invoice's E-Fatura
+submission had already been `accepted` by the tax authority, also enqueues an E-Fatura cancel job.
+
+#### GET `/invoices/:id/efatura`
+```
+Response 200: EFaturaSubmission record
+Response 404: no submission exists for this invoice
 ```
 
-### PATCH `/appointments/:id`
-**Roles:** receptionist, admin, doctor (status only)
-
+#### POST `/invoices/:id/efatura/retry`
 ```
-Body: { "status": "confirmed|checked_in|completed|cancelled|no_show", "starts_at": "...", "room_id": "..." }
-Response 200: Updated appointment + notification sent if rescheduled/cancelled
+Response 202: { "queued": true } — resets the submission to "pending" and re-enqueues it
 ```
 
-### GET `/appointments/availability`
-**Roles:** Public (used by booking widget)
-**Query params:** `staff_id`, `service_id`, `date_from`, `date_to`
+There is no `POST /invoices/:id/issue` and no `GET /invoices/:id/pdf` — a receipt PDF is generated
+lazily by `GET /invoices/:id/receipt` and uploaded to R2 (or a placeholder URL if R2 isn't
+configured), not issued as a separate workflow step.
+
+### Financeiro (Despesas/Entradas) — `/financeiro`, roles: admin, receptionist
+
+Not in the original design at all — added this project.
 
 ```
-Response 200:
-{
-  "available_slots": [
-    { "starts_at": "2026-06-15T09:00:00Z", "ends_at": "2026-06-15T09:45:00Z" },
-    { "starts_at": "2026-06-15T10:00:00Z", "ends_at": "2026-06-15T10:45:00Z" }
-  ]
-}
-```
+GET    /financeiro/despesas                    query: from,to,status,page,limit
+POST   /financeiro/despesas                    body: description,category,amount,date,supplier?,method,reference?,notes?
+PATCH  /financeiro/despesas/:id                body: any subset of the above
+PATCH  /financeiro/despesas/:id/decision       roles: admin — body: { status: "approved"|"rejected" }
+DELETE /financeiro/despesas/:id                roles: admin
+POST   /financeiro/despesas/:id/receipt        multipart file upload → R2
+GET    /financeiro/despesas/:id/receipt-url    signed download URL
 
-### GET `/appointments/:id/reminders`
-**Roles:** receptionist, admin
-```
-Response 200: List of scheduled/sent reminders for this appointment
+GET    /financeiro/entradas                    query: from,to,page,limit
+POST   /financeiro/entradas                    body: description,category,amount,date,notes?
+PATCH  /financeiro/entradas/:id
+DELETE /financeiro/entradas/:id
+
+GET    /financeiro/summary                     → { totalEntradas, totalDespesas, balance, monthly[], byCategory[] }
 ```
 
 ---
 
-## 4. WhatsApp Integration (M3)
+## 4. Health Plans (M4)
 
-### POST `/whatsapp/webhook`
-**Auth:** WhatsApp webhook verify token (not JWT)
-
-```
-Handles inbound messages from Meta WhatsApp Cloud API.
-Returns 200 immediately; processing is async.
-```
-
-### GET `/whatsapp/webhook`
-**Auth:** Webhook verification (hub.verify_token)
-```
-Used by Meta for webhook verification during setup.
-```
-
-### GET `/whatsapp/conversations`
-**Roles:** receptionist, admin
-**Query params:** `status` (bot|agent|resolved), `assigned_to`, `page`, `limit`
+**Controller roles (default):** admin, receptionist, corporate_hr
 
 ```
-Response 200: Paginated conversation list with last message preview
+GET    /health-plans/products                                    roles: +doctor
+GET    /health-plans/products/:id                                roles: +doctor
+POST   /health-plans/products         roles: admin      body: name,code,description?,monthlyFee,maxMembers?,coverageRules?
+PATCH  /health-plans/products/:id     roles: admin
+DELETE /health-plans/products/:id     roles: admin
+
+GET    /health-plans                                              query: (see service) — list subscriptions
+GET    /health-plans/:id
+POST   /health-plans                  roles: admin, receptionist   body: productId, holderPatientId? XOR companyId, planNumber, startDate, endDate?
 ```
 
-### GET `/whatsapp/conversations/:id/messages`
-**Roles:** receptionist, admin
+`planNumber` is client-computed (count of existing plans for this product+year, +1), not a DB
+sequence — a race between two concurrent "add plan" submissions for the same product can collide
+on the `planNumber` unique constraint and surface as a raw `500`, not a friendly `409`. There is no
+`POST /health-plans/:id/members` / `DELETE .../members/:patient_id` — a `HealthPlan` links to at
+most one holder patient directly (`patients.healthPlanId`), not a membership join table.
 
-```
-Response 200: Full message thread for a conversation
-```
+---
 
-### POST `/whatsapp/conversations/:id/assign`
-**Roles:** receptionist, admin
-```
-Body: { "staff_id": "uuid" }
-Response 200: Conversation assigned; patient notified via bot
-```
+## 5. Companies — `/companies`
 
-### POST `/whatsapp/conversations/:id/messages`
-**Roles:** receptionist, admin
+**Roles:** admin, corporate_hr (mutations: admin only)
 ```
-Body: { "message": "string", "template_name": "string (optional)" }
-Response 201: Message sent and logged
-```
-
-### POST `/whatsapp/send`
-**Roles:** receptionist, admin (internal use; also called by reminder jobs)
-```
-Body:
-{
-  "to": "+238xxxxxxxx",
-  "type": "template | text",
-  "template_name": "appointment_reminder",
-  "template_params": ["Maria", "15 Junho", "09:00", "Cardiologia"]
-}
-Response 202: Accepted
+GET    /companies          query: page, limit
+GET    /companies/:id
+POST   /companies          roles: admin   body: name, taxId, email?, phone?, address?
+PATCH  /companies/:id      roles: admin
+DELETE /companies/:id      roles: admin
 ```
 
 ---
 
-## 5. Health Plans (M4)
+## 6. Services — `/services`
 
-### GET `/health-plans`
-**Roles:** receptionist, admin
-**Query params:** `status`, `type`, `expiring_before`, `page`, `limit`
-
+**Roles:** admin, receptionist, doctor, nurse (mutations: admin only)
 ```
-Response 200: Paginated plan list with member count and utilisation %
-```
-
-### POST `/health-plans`
-**Roles:** admin
-```
-Body:
-{
-  "product_id": "uuid",
-  "patient_id": "uuid (for family plans)",
-  "company_id": "uuid (for corporate plans)",
-  "start_date": "YYYY-MM-DD",
-  "end_date": "YYYY-MM-DD",
-  "auto_renew": true
-}
-Response 201: Health plan object
-```
-
-### GET `/health-plans/:id`
-**Roles:** receptionist, admin, patient (own), corporate_hr (own company)
-```
-Response 200: Plan details + utilisation stats + member list
-```
-
-### POST `/health-plans/:id/members`
-**Roles:** admin, corporate_hr
-```
-Body: { "patient_id": "uuid" }
-Response 201: Member added
-```
-
-### DELETE `/health-plans/:id/members/:patient_id`
-**Roles:** admin, corporate_hr
-```
-Response 204: Member removed
+GET    /services           query: active?
+GET    /services/:id
+POST   /services           roles: admin   body: name, code (UPPERCASE-WITH-DASHES), description?, durationMinutes, price
+PATCH  /services/:id       roles: admin
+DELETE /services/:id       roles: admin
 ```
 
 ---
 
-## 6. Exams & Results (M5)
+## 7. Staff & Invitations (M8)
 
-### GET `/exam-requests`
-**Roles:** receptionist, doctor (own requests), nurse, lab_tech, admin
-**Query params:** `status`, `assigned_tech_id`, `patient_id`, `date_from`, `date_to`
+**Controller roles (default):** admin, receptionist, doctor, nurse
 
 ```
-Response 200: Worklist of exam requests
+GET    /staff/me                                    — resolves the caller's own staff record from the JWT
+GET    /staff                                       — active staff list
+GET    /staff/invitations         roles: admin       — pending invitations
+DELETE /staff/invitations/:id     roles: admin
+GET    /staff/:id
+POST   /staff/invite              roles: admin       body: CreateStaffSchema shape (see below) — sends the invite email, does not create a Staff row yet
+PATCH  /staff/:id                 roles: admin
 ```
 
-### POST `/exam-requests`
-**Roles:** receptionist, doctor, admin
 ```
-Body:
+Invite body:
 {
-  "patient_id": "uuid",
-  "service_id": "uuid",
-  "requesting_doctor_id": "uuid",
-  "urgency": "routine | urgent | stat",
-  "clinical_notes": "string",
-  "appointment_id": "uuid (optional)"
+  "fullName": "string (2-150)", "email": "string", "role": "admin | doctor | nurse | receptionist | lab_tech",
+  "jobTitle": "string (optional)", "phone": "string (optional)", "specialtyCode": "string (optional)",
+  "availability": [ { "dayOfWeek": 0-6, "startTime": "HH:MM", "endTime": "HH:MM" } ]
 }
-Response 201: Exam request created + preparation instructions sent to patient
 ```
 
-### PATCH `/exam-requests/:id`
-**Roles:** nurse, lab_tech, admin
-```
-Body: { "status": "in_progress | resulted", "assigned_tech_id": "uuid" }
-Response 200: Updated request
-```
+Activation (public, token-based — see §9) creates the Keycloak user **then** the local `staff`
+row, transactionally safe: if the local write fails, the just-created Keycloak user is deleted
+(best-effort) rather than left as an orphaned account with no app-side record. `admin`, `doctor`,
+and `corporate_hr` accounts are required to set up TOTP MFA on first login
+(`requiredActions: ["CONFIGURE_TOTP"]`) — this only applies to accounts created after this was
+added; existing accounts need a one-time realm-admin action.
 
-### POST `/exam-requests/:id/results`
-**Roles:** nurse, lab_tech, admin
-```
-Body: multipart/form-data
-  - file: PDF/image (max 20MB)
-  - summary: string
-Response 201: Result stored, download token generated, patient notified
-```
-
-### GET `/exam-results/:token/download`
-**Auth:** Token-based (no JWT required — patient link)
-```
-Returns signed R2 download URL or streams file.
-Token expires in 72 hours. Access is logged.
-```
+There is no `POST /staff/:id/shifts` or `POST /staff/:id/leave` endpoint — `StaffShift` and
+`LeaveRequest` rows exist in the schema and are honoured by the appointments-availability logic,
+but nothing in the running app can create or approve one.
 
 ---
 
-## 7. Billing (M6)
+## 8. BFF — Backend for Frontend
 
-### GET `/invoices`
-**Roles:** receptionist, admin
-**Query params:** `patient_id`, `status`, `date_from`, `date_to`, `page`, `limit`
-
-```
-Response 200: Paginated invoice list
-```
-
-### POST `/invoices`
-**Roles:** receptionist, admin
-```
-Body:
-{
-  "patient_id": "uuid",
-  "appointment_id": "uuid (optional)",
-  "health_plan_id": "uuid (optional)",
-  "items": [
-    { "service_id": "uuid", "description": "string", "quantity": 1, "unit_price": 5000 }
-  ]
-}
-Response 201: Invoice object with computed totals
-```
-
-### POST `/invoices/:id/issue`
-**Roles:** receptionist, admin
-```
-Response 200: Invoice status → issued; PDF generated; sent to patient
-```
-
-### POST `/invoices/:id/payments`
-**Roles:** receptionist, admin
-```
-Body:
-{
-  "amount": 5000,
-  "method": "cash | bank_transfer | health_plan | vinti4",
-  "reference": "string (optional)",
-  "paidAt": "ISO8601 (optional, defaults to now)"
-}
-Response 201:
-{
-  "id": "uuid",
-  "status": "partially_paid | paid",
-  "amountPaid": 5000
-}
-```
-> Returns only the updated status fields. The frontend re-fetches the full invoice detail (`GET /invoices/:id`) via React Query cache invalidation. Returning the full items+payments payload on every payment would be wasted work.
-
-### GET `/invoices/:id/pdf`
-**Roles:** receptionist, admin, patient (own)
-```
-Response 200: application/pdf stream
-```
-
----
-
-## 8. Clinical Records (M7)
-
-### GET `/appointments/:id/clinical-note`
-**Roles:** doctor (own patient), admin
-```
-Response 200: SOAP note or 404 if not yet created
-```
-
-### POST `/appointments/:id/clinical-note`
-**Roles:** doctor
-```
-Body:
-{
-  "subjective": "string",
-  "objective": "string",
-  "assessment": "string",
-  "plan": "string",
-  "icd10_codes": ["J45.0", "..."]
-}
-Response 201: Clinical note created
-```
-
-### PATCH `/appointments/:id/clinical-note`
-**Roles:** doctor (while unlocked), admin
-```
-Body: Partial SOAP fields
-Response 200: Updated note
-```
-
-### POST `/clinical-notes/:id/prescriptions`
-**Roles:** doctor
-```
-Body:
-{
-  "drug_name": "string",
-  "dosage": "string",
-  "frequency": "string",
-  "duration": "string",
-  "instructions": "string"
-}
-Response 201: Prescription added
-```
-
-### POST `/clinical-notes/:id/referrals`
-**Roles:** doctor
-```
-Body:
-{
-  "referred_to_staff_id": "uuid (internal, optional)",
-  "referred_to_external": "string (optional)",
-  "specialty": "string",
-  "reason": "string"
-}
-Response 201: Referral created; booking link sent to patient if internal
-```
-
----
-
-## 9. Staff & Shifts (M8)
-
-### GET `/staff`
-**Roles:** receptionist, admin
-**Query params:** `role`, `specialty`, `is_active`
-```
-Response 200: Staff list
-```
-
-### GET `/staff/:id/availability`
-**Roles:** receptionist, admin (and public for booking widget)
-**Query params:** `date_from`, `date_to`
-```
-Response 200: Available time slots after subtracting booked appointments and leaves
-```
-
-### POST `/staff/:id/shifts`
-**Roles:** admin
-```
-Body: { "date": "YYYY-MM-DD", "start_time": "HH:MM", "end_time": "HH:MM" }
-Response 201: Shift created
-```
-
-### POST `/staff/:id/leave`
-**Roles:** admin, (staff requesting own leave)
-```
-Body: { "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "type": "annual | sick", "reason": "string" }
-Response 201: Leave request submitted
-```
-
----
-
-## 10. Home Visits (M9)
-
-### GET `/home-visits`
-**Roles:** receptionist, nurse (assigned), admin
-**Query params:** `status`, `assigned_staff_id`, `date`
-```
-Response 200: List with patient address and map link
-```
-
-### POST `/home-visits`
-**Roles:** receptionist, admin, patient
-```
-Body:
-{
-  "patient_id": "uuid",
-  "service_id": "uuid",
-  "address": "string",
-  "lat": 14.930,
-  "lng": -23.513,
-  "urgency": "routine | urgent | emergency",
-  "reason": "string",
-  "preferred_time": "ISO8601"
-}
-Response 201: Visit request created
-```
-
-### PATCH `/home-visits/:id/status`
-**Roles:** nurse (assigned), admin
-```
-Body: { "status": "assigned | departed | at_patient | completed | cancelled" }
-Response 200: Status updated with timestamp
-```
-
-### POST `/home-visits/:id/assign`
-**Roles:** receptionist, admin
-```
-Body: { "staff_id": "uuid" }
-Response 200: Visit assigned; nurse notified
-```
-
----
-
-## 11. Analytics (M10)
-
-### GET `/analytics/dashboard`
-**Roles:** admin
-**Query params:** `period` (today | week | month | year)
-```
-Response 200:
-{
-  "appointments": { "total": 45, "completed": 38, "no_shows": 4, "cancelled": 3 },
-  "revenue": { "total": 450000, "currency": "CVE" },
-  "online_booking_rate": 0.62,
-  "top_services": [...],
-  "new_patients": 12
-}
-```
-
-### GET `/analytics/appointments`
-**Roles:** admin
-**Query params:** `date_from`, `date_to`, `group_by` (day|week|month)
-```
-Response 200: Time-series data
-```
-
-### GET `/analytics/revenue`
-**Roles:** admin
-**Query params:** `date_from`, `date_to`, `group_by`, `by_service`, `by_doctor`
-```
-Response 200: Revenue breakdown
-```
-
-### GET `/analytics/export`
-**Roles:** admin
-**Query params:** `report` (appointments|revenue|patients|plans), `format` (pdf|xlsx), `date_from`, `date_to`
-```
-Response 200: File download
-```
-
----
-
-## 12. Services Catalogue
-
-### GET `/services`
-**Roles:** Public (used by booking widget)
-**Query params:** `category`, `is_active`
-```
-Response 200: List of services with pricing
-```
-
-### POST `/services`
-**Roles:** admin
-```
-Body: Full service object
-Response 201: Service created
-```
-
----
-
-## 13. BFF — Backend for Frontend
-
-Screen-aggregate endpoints that collapse multi-request UI patterns into a single parallel server-side fetch. All require the same authentication/roles as their constituent resource endpoints.
+Screen-aggregate endpoints collapsing multi-request UI patterns into one parallel server-side
+fetch. Same auth/roles as their constituent resources.
 
 ### GET `/bff/patient-screen/:id`
-**Roles:** receptionist, doctor, nurse, admin
-
-Returns the full patient profile (including health plan name) and the merged timeline in one request. Replaces the previous pattern of `GET /patients/:id` + `GET /patients/:id/timeline`.
-
+Full patient profile (incl. health plan + product name) and merged timeline in one request.
 ```
-Response 200:
-{
-  "patient": {
-    "id": "uuid",
-    "fullName": "Maria da Graça",
-    "dateOfBirth": "1985-03-12",
-    "gender": "female",
-    "phone": "+2389001234",
-    "email": "...",
-    "address": "...",
-    "nif": "...",
-    "healthPlanId": "uuid",
-    "healthPlan": {
-      "planNumber": "PL-2024-001",
-      "product": { "name": "Plano Familiar Mais+" }
-    },
-    ...
-  },
-  "timeline": [
-    {
-      "id": "uuid",
-      "type": "appointment | communication | invoice | note",
-      "title": "Consulta de Cardiologia",
-      "description": "Dr. Nuno Barros — completed",
-      "date": "2026-06-18T09:00:00Z",
-      "metadata": { "status": "completed" }
-    }
-  ]
-}
+Response 200: { "patient": {...}, "timeline": [...] }
 ```
 
-Timeline is sorted descending by date. Maximum 20 items per event type (appointments, communications, invoices).
-
----
+### GET `/bff/staff`
+Active staff list shaped for dropdowns.
 
 ### GET `/bff/billing-summary`
-**Roles:** receptionist, admin
-
-Returns aggregate KPI counts for the billing dashboard header cards.
-
 ```
-Response 200:
-{
-  "issuedCount": 12,        // invoices with status "issued" this month
-  "collectedAmount": 245000, // sum of amountPaid on "paid" invoices this month (CVE)
-  "overdueCount": 3          // invoices with status "overdue" (all time)
-}
+Response 200: { "issuedCount": number, "collectedAmount": number, "overdueCount": number }
 ```
 
 ---
 
-## 14. Common HTTP Status Codes
+## 9. Public (unauthenticated) — `/public`
+
+**Auth:** none (`@Public()`) — rate-limited at 60 req/min per IP (`@Throttle`) on every route below.
+
+```
+GET  /public/services                          — active services for the booking widget
+GET  /public/staff                             — staff list for the booking widget
+GET  /public/availability      query: serviceId, staffId?, date
+POST /public/bookings          body: PublicBookingSchema (below)
+GET  /public/invitations/:token                — staff invitation preview (fullName, email, role, expired)
+POST /public/invitations/:token/activate       body: { fullName, password } — see §7
+```
+
+```
+PublicBookingSchema:
+{
+  "fullName": "string (2-120)", "phone": "string (7-20)", "dateOfBirth": "YYYY-MM-DD",
+  "email": "string (optional)", "gender": "male | female | other (default other)",
+  "serviceId": "uuid", "staffId": "uuid", "scheduledAt": "ISO8601 with offset",
+  "notes": "string (optional)",
+  "consentGiven": "must be literal true — the API rejects anything else"
+}
+Response 201: the created Appointment (patient found-or-created by phone; consentGiven flows
+  through from this real, validated value — it is not assumed)
+```
+
+---
+
+## 10. Settings & Parametrização
+
+### `/settings` — roles: admin, receptionist, doctor, nurse (mutations narrower, see below)
+```
+GET   /settings                                                 — all settings keyed by name
+PATCH /settings/clinic              roles: admin, receptionist  — business hours, address, etc. (JSON)
+PATCH /settings/notifications       roles: admin, receptionist  — feature toggles (wa_confirm, wa_cancel, wa_reminder, email_daily, email_overdue)
+PATCH /settings/access-control      roles: admin
+PATCH /settings/integration/:key    roles: admin                — e.g. integration_whatsapp, integration_email_smtp, integration_efatura credentials
+```
+
+### `/parametrizacao` — roles: admin, receptionist, doctor, nurse, lab_tech (mutations: admin only)
+Admin-configurable dropdown option lists (e.g. expense categories).
+```
+GET    /parametrizacao              — grouped counts by `nome`
+GET    /parametrizacao/:nome        — entries for one group
+POST   /parametrizacao   roles: admin   body: { nome: SCREAMING_SNAKE_CASE, valor, codigo?, descricao?, ordem?, ativo? }
+PATCH  /parametrizacao/:id   roles: admin
+DELETE /parametrizacao/:id   roles: admin
+```
+
+---
+
+## 11. Documents
+
+### GET `/documents/:id/download-url`
+**Roles:** admin, doctor, nurse, receptionist, lab_tech, patient
+```
+Response 200: { "url": "signed R2 download URL" }
+```
+There is **no upload endpoint** — nothing in the running app can currently create a
+`PatientDocument` row via the API.
+
+---
+
+## 12. Not implemented
+
+The following modules from the original design have **no backend at all** — no controller, no
+service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail):
+
+| Module | State |
+|---|---|
+| M3 — WhatsApp Integration | 🎭 UI mockup only. No `/whatsapp/*` routes, no webhook handler, no bot |
+| M5 — Exam Results | Only `exam_requests` exists as a schema stub, no controller/service at all; no result field, no `/exam-requests/:id/results`, no token-based download |
+| M7 — Clinical Records | 🎭 UI mockup only. No `/appointments/:id/clinical-note`, no prescriptions/referrals |
+| M9 — Home Visits | 🎭 UI mockup only. No `/home-visits/*` routes |
+| M10 — Analytics | 🎭 UI mockup only. No `/analytics/*` routes — the Financeiro summary (§3) is the one place with real aggregate data today |
+
+---
+
+## 13. Common HTTP Status Codes
 
 | Code | Meaning | When Used |
 |---|---|---|
-| 200 | OK | Successful GET/PATCH |
-| 201 | Created | Successful POST |
-| 204 | No Content | Successful DELETE |
-| 400 | Bad Request | Validation error |
-| 401 | Unauthorised | Missing/expired token |
+| 200 | OK | Successful GET/PATCH/some POST |
+| 201 | Created | Successful POST creating a resource |
+| 202 | Accepted | Async work queued (e.g. E-Fatura retry) |
+| 400 | Bad Request | Zod validation error, or a business rule (outside business hours, already paid, etc.) |
+| 401 | Unauthorised | Missing/expired token (unless `AUTH_BYPASS=true` in dev) |
 | 403 | Forbidden | Insufficient role |
-| 404 | Not Found | Resource doesn't exist |
-| 409 | Conflict | Double-booking, duplicate NIF |
-| 422 | Unprocessable Entity | Business logic violation |
-| 429 | Too Many Requests | Rate limit hit |
+| 404 | Not Found | Resource doesn't exist or is soft-deleted |
+| 409 | Conflict | Double-booking, duplicate phone/NIF, temporarily locked slot |
+| 429 | Too Many Requests | Rate limit hit (public routes only, today) |
 | 500 | Internal Server Error | Unexpected server error |
 
 ---
 
-## 15. Rate Limiting
+## 14. Rate Limiting
 
-| Endpoint Group | Limit |
-|---|---|
-| Public (booking widget, availability) | 60 req/min per IP |
-| Authenticated API | 300 req/min per user |
-| WhatsApp webhook | 1000 req/min (Meta sends bursts) |
-| Analytics export | 5 req/min per user |
-| Auth endpoints | 10 req/min per IP |
+`ThrottlerGuard` (`@nestjs/throttler`, in-memory storage — not Redis-backed) is registered
+globally, so every route gets a default limit unless overridden per-route.
 
----
+| Endpoint Group | Limit | Status |
+|---|---|---|
+| Everything (global default) | 300 req/min per IP | ✅ Enforced |
+| Public (`/public/*`) | 60 req/min per IP | ✅ Enforced (`@Throttle` override, stricter than the default) |
 
-## 16. Webhook Events (Outbound)
-
-The platform emits webhook events to registered endpoints (configurable per clinic):
-
-| Event | Trigger |
-|---|---|
-| `appointment.created` | New appointment booked |
-| `appointment.cancelled` | Appointment cancelled |
-| `appointment.no_show` | No-show flag set |
-| `exam_result.ready` | Exam result uploaded |
-| `invoice.paid` | Full payment received |
-| `health_plan.expiring_soon` | 30/15/7 days before expiry |
-| `home_visit.completed` | Home visit status → completed |
+The original design's "10 req/min auth endpoints" and "1000 req/min WhatsApp webhook" rows
+described infrastructure that doesn't exist (no custom `/auth/*` endpoints, no WhatsApp webhook).
 
 ---
 
-*Mais Saúde 360 · API Specification v1.2 · June 2026*
+*CAP 360 · API Specification · regenerated from the actual controllers — 2026-08-30*

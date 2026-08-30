@@ -1,4 +1,4 @@
-# Mais Saúde 360 — Technical Architecture
+# CAP 360 — Technical Architecture
 
 > **Version:** 1.2 · **Date:** June 2026
 > Companion document to PRD v1.0
@@ -49,7 +49,7 @@ Mais Saúde 360 is a cloud-native, multi-tenant Healthcare ERP/CRM. The architec
 | Primary DB | PostgreSQL 16 | ACID compliance; relational integrity for medical records |
 | Cache / Queue | Redis 7 | Session store; BullMQ job queue; rate limiting |
 | File Storage | Cloudflare R2 (or AWS S3) | S3-compatible; GDPR-eligible; cost-efficient |
-| Search | PostgreSQL Full-Text Search (pg_trgm) | Sufficient for patient search at MVP scale |
+| Search | PostgreSQL Full-Text Search (pg_trgm) | 🟡 Planned, but the actual implementation is simpler: plain case-insensitive `contains` matching, no `pg_trgm` extension or GIN index (see `modules/M2-patient-crm.md` §2.4) |
 | Backups | pg_dump → R2/S3 (daily) | 30-day retention; automated via cron |
 
 ### 2.4 Infrastructure & DevOps
@@ -301,7 +301,7 @@ In `NODE_ENV=development`, a floating `⚡ PERF` panel appears bottom-right on e
 - SQL query count and total time (read from `X-Query-Count` / `X-Query-Time` response headers)
 - Web Vitals: LCP, FCP, CLS, TTFB, INP (via `useReportWebVitals`)
 
-Bundle analysis: `ANALYZE=true pnpm --filter @cms/web build` opens a treemap of client + server bundles.
+Bundle analysis: `ANALYZE=true pnpm --filter @cap/web build` opens a treemap of client + server bundles.
 
 ### 9.3 BFF Pattern (Backend for Frontend)
 
@@ -359,7 +359,8 @@ Per-page `staleTime` overrides: appointments calendar `60_000` ms; billing detai
 | `(status, createdAt)` | invoices | BFF billing-summary: `WHERE status = ? AND createdAt >= ?` |
 | `(patientId, status)` | invoices | Patient invoice timeline |
 
-> Activate with `pnpm --filter @cms/database db:push` (dev) or `prisma migrate dev`.
+> Activate with `pnpm --filter @cap/database exec prisma db push --skip-generate` — this project
+> uses `db push`, not `prisma migrate dev`, for day-to-day schema changes (see `DEPLOYMENT.md` §4).
 
 **Lean repository methods** to avoid over-fetching:
 
@@ -405,4 +406,4 @@ Frontend (`apps/web/app/(app)/patients/page.tsx`): `planFilter` is now a URL par
 
 ---
 
-*Mais Saúde 360 · Architecture Document v1.2 · June 2026*
+*CAP 360 · Architecture Document v1.3 · spot-corrected 2026-08-30 against the current implementation*

@@ -9,6 +9,12 @@
 
 Manages the full lifecycle of diagnostic exam requests — from request creation through lab processing to secure digital result delivery to the patient via WhatsApp. Eliminates manual result hand-off and provides a digital archive per patient.
 
+> **Implementation status: 🎭 UI mockup only.** An `exam_requests` table exists in the schema
+> (self-labelled a "Phase 1 stub") but has **no controller or service at all** — nothing can create,
+> list, or update one through the API. There is no `exam_results` table and no result field of any
+> kind, so the worklist, upload, secure-download-token, and DICOM viewer features below (§3.2–§3.4)
+> have nothing to build on yet. Nothing in this document is implemented.
+
 ---
 
 ## 2. Supported Exam Categories
@@ -106,4 +112,4 @@ See `API-SPEC.md` → Section 6 (Exams & Results)
 
 ---
 
-*Module M5 · v1.0 · June 2026*
+*Module M5 · v1.1 · updated 2026-08-30 against the current implementation*

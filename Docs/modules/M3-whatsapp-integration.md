@@ -12,6 +12,13 @@ The WhatsApp Integration Hub preserves the clinic's existing WhatsApp-first pati
 
 For detailed bot conversation flows, see `WHATSAPP-BOT-FLOWS.md`.
 
+> **Implementation status: 🎭 UI mockup only — no backend exists.** There is no `/whatsapp/*`
+> webhook route, no `whatsapp_conversations`/`whatsapp_messages` table, no bot FSM, and no agent
+> inbox. The **one real thing** this module's design overlaps with: outbound WhatsApp messages for
+> appointment confirmation and the 48h/24h/2h reminders are genuinely sent, but that logic lives
+> entirely inside the Appointments module (M1) via a simple send function — not through any of the
+> architecture described below (§2–§4, §6). See the corrected §5 table.
+
 ---
 
 ## 2. Architecture
@@ -88,18 +95,16 @@ When a new conversation enters the inbox (or is assigned), the assigned staff me
 
 ## 5. Automated Outbound Messages
 
-All outbound messages sent by the platform (not just bot flows):
-
-| Trigger | Template | Sender |
+| Trigger | Template | Status |
 |---|---|---|
-| Appointment created | `appointment_confirmation` | System |
-| 48h before appointment | `appointment_reminder_48h` | System (BullMQ job) |
-| 24h before appointment | `appointment_reminder_24h` | System (BullMQ job) |
-| 2h before appointment | `appointment_reminder_2h` | System (BullMQ job) |
-| Appointment cancelled | `appointment_cancelled` | System |
-| Exam result uploaded | `exam_result_ready` | System |
-| Invoice issued | `invoice_receipt` | System |
-| Health plan expiring | `health_plan_expiring` | System (scheduled job) |
+| Appointment created | `appointment_confirmation` | ✅ Real (Appointments module, not this one) |
+| 48h before appointment | `appointment_reminder_48h` | ✅ Real (BullMQ job) |
+| 24h before appointment | `appointment_reminder_24h` | ✅ Real (BullMQ job) |
+| 2h before appointment | `appointment_reminder_2h` | ✅ Real (BullMQ job) |
+| Appointment cancelled | `appointment_cancelled` | ❌ Not sent — and the underlying reminder jobs aren't even cancelled (`M1-smart-appointment-engine.md` §2.4) |
+| Exam result uploaded | `exam_result_ready` | ❌ Not sent — M5 has no result field to upload in the first place |
+| Invoice issued | `invoice_receipt` | ❌ Not sent — receipts are pulled on demand, never pushed (`M6-billing-invoicing.md` §2.4) |
+| Health plan expiring | `health_plan_expiring` | ❌ Not sent — no expiry job exists (`M4-health-plan-management.md` §3.4) |
 
 ---
 
@@ -149,4 +154,4 @@ See `API-SPEC.md` → Section 4 (WhatsApp Integration)
 
 ---
 
-*Module M3 · v1.0 · June 2026*
+*Module M3 · v1.1 · updated 2026-08-30 against the current implementation*

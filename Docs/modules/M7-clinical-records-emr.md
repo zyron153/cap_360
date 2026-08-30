@@ -9,6 +9,12 @@
 
 A lightweight Electronic Medical Records module that gives doctors a structured digital workspace for consultation notes, prescriptions, and referrals. Designed to be simple and fast — not a full hospital EMR — with strict access control to protect patient clinical privacy.
 
+> **Implementation status: 🎭 UI mockup only — no backend at all.** No `clinical_notes`,
+> `prescriptions`, or `referrals` table exists; no `/appointments/:id/clinical-note` route or
+> equivalent exists. The only real, adjacent thing in the running app is `patient_notes` — a plain
+> free-text staff note with no SOAP structure, no ICD-10 codes, and no lock/audit behaviour (see
+> `M2-patient-crm.md` §2.1/§2.2). Nothing in this document is implemented.
+
 ---
 
 ## 2. Core Features
@@ -110,4 +116,4 @@ See `API-SPEC.md` → Section 8 (Clinical Records)
 
 ---
 
-*Module M7 · v1.0 · June 2026*
+*Module M7 · v1.1 · updated 2026-08-30 against the current implementation*

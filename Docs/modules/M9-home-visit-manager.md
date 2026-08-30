@@ -9,6 +9,12 @@
 
 Manages the full lifecycle of home medical and nursing visits — a key differentiator service for Mais Saúde CV. Provides request capture, staff assignment, real-time status tracking, and post-visit clinical note and billing integration.
 
+> **Implementation status: 🎭 UI mockup only — no backend at all.** No `home_visits` table, no
+> `/home-visits/*` routes, no status-tracking, no map integration, and (per M7 above) no SOAP-note
+> integration to post a visit into even if one existed. There is also no React Native mobile app in
+> this repo (`apps/` contains only `api` and `web`) — §6's mobile-app priority has nothing to run
+> on. Nothing in this document is implemented.
+
 ---
 
 ## 2. Core Features
@@ -108,4 +114,4 @@ Home Visit Manager is the primary use case for the React Native mobile app (Phas
 
 ---
 
-*Module M9 · v1.0 · June 2026*
+*Module M9 · v1.1 · updated 2026-08-30 against the current implementation*

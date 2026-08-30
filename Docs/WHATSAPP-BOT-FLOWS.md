@@ -1,9 +1,17 @@
-# Mais Saúde 360 — WhatsApp Bot Flows
+# CAP 360 — WhatsApp Bot Flows
 
 > **API:** Meta Cloud API via 360dialog or Twilio
 > **Language:** Portuguese (pt-CV dialect)
 > **Architecture:** Finite State Machine (FSM) stored in Redis per phone number
 > **Handoff:** Any flow can escalate to the shared agent inbox at any point
+
+> **Implementation status: 🎭 none of this exists.** There is no bot, no FSM, no agent inbox, no
+> `/whatsapp/webhook` — see `modules/M3-whatsapp-integration.md` for the full picture. This
+> document is kept as a conversation-design reference for if/when M3 is built. The one factual
+> correction worth making now: of the templates in §1, only the four appointment-reminder rows are
+> actually sent today (by the Appointments module directly, not by anything described in this
+> file) — `appointment_cancelled`, `exam_result_ready`, `invoice_receipt`, `health_plan_expiring`,
+> and `welcome_new_patient` are never sent by anything in the codebase.
 
 ---
 
@@ -11,17 +19,17 @@
 
 All outbound messages outside the 24-hour customer service window must use pre-approved templates.
 
-| Template Name | Category | Purpose |
-|---|---|---|
-| `appointment_confirmation` | UTILITY | Sent immediately after booking |
-| `appointment_reminder_48h` | UTILITY | 48 hours before appointment |
-| `appointment_reminder_24h` | UTILITY | 24 hours before appointment |
-| `appointment_reminder_2h` | UTILITY | 2 hours before appointment |
-| `appointment_cancelled` | UTILITY | Cancellation confirmation |
-| `exam_result_ready` | UTILITY | Notify patient result is ready |
-| `invoice_receipt` | UTILITY | Payment receipt |
-| `health_plan_expiring` | UTILITY | Renewal reminder |
-| `welcome_new_patient` | UTILITY | First-time registration welcome |
+| Template Name | Category | Purpose | Actually sent today? |
+|---|---|---|---|
+| `appointment_confirmation` | UTILITY | Sent immediately after booking | ✅ yes |
+| `appointment_reminder_48h` | UTILITY | 48 hours before appointment | ✅ yes |
+| `appointment_reminder_24h` | UTILITY | 24 hours before appointment | ✅ yes |
+| `appointment_reminder_2h` | UTILITY | 2 hours before appointment | ✅ yes |
+| `appointment_cancelled` | UTILITY | Cancellation confirmation | ❌ no |
+| `exam_result_ready` | UTILITY | Notify patient result is ready | ❌ no |
+| `invoice_receipt` | UTILITY | Payment receipt | ❌ no |
+| `health_plan_expiring` | UTILITY | Renewal reminder | ❌ no |
+| `welcome_new_patient` | UTILITY | First-time registration welcome | ❌ no |
 
 ---
 
@@ -519,4 +527,4 @@ Staff see:
 
 ---
 
-*Mais Saúde 360 · WhatsApp Bot Flows v1.0 · June 2026*
+*CAP 360 · WhatsApp Bot Flows v1.1 · updated 2026-08-30 — design reference only, not implemented*

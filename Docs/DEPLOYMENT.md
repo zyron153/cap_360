@@ -1,7 +1,15 @@
-# Mais Saúde 360 — Deployment Guide
+# CAP 360 — Deployment Guide
 
-> **Version:** 1.0 · **Date:** June 2026
+> **Version:** 1.1 · **Date:** updated 2026-08-30 against the current implementation
 > Covers: local development, staging, and production environments.
+
+> **Implementation status:** local development (docker-compose + `pnpm dev`) is real, with several
+> concrete detail differences noted inline below. **Kubernetes/Helm, Vault, and the automated
+> backup/rollback procedures in §6, §7, §9, §10 are entirely aspirational** — there is no `infra/k8s/`
+> directory in this repo, no Helm chart, and no Vault integration. The real CI/CD pipeline (§5) is
+> much smaller than described, and — a genuine bug found while writing this — **its test job
+> currently references the wrong package name**, likely breaking it. There is no
+> `apps/whatsapp-hub` and no `apps/mobile`; the monorepo has exactly two apps, `api` and `web`.
 
 ---
 
@@ -21,24 +29,28 @@
 
 ## 2. Repository Structure
 
+The real structure today:
+
 ```
-maissaude-360/
+Code/
 ├── apps/
-│   ├── web/              # Next.js web app
-│   ├── api/              # NestJS API server
-│   ├── whatsapp-hub/     # WhatsApp webhook + bot service
-│   └── mobile/           # React Native app (Expo)
+│   ├── web/              # Next.js 15 web app                    ✅
+│   └── api/              # NestJS 10 API server                  ✅
+│                            (no whatsapp-hub, no mobile app — ❌ never built)
 ├── packages/
-│   ├── database/         # Prisma schema + migrations
-│   ├── shared-types/     # TypeScript types shared across apps
-│   └── ui/               # Shared React component library
-├── infrastructure/
-│   ├── docker/           # Dockerfiles
-│   ├── k8s/              # Kubernetes manifests
-│   └── nginx/            # NGINX config
+│   ├── database/         # @cap/database — Prisma schema + migrations
+│   ├── types/            # @cap/types — Zod schemas shared across apps
+│   │                        (not "shared-types")
+│   └── config/           # shared tsconfig/eslint — not a UI component library;
+│                            no shared React component package exists
+├── infra/                # not "infrastructure/"
+│   ├── docker/           # api.Dockerfile, web.Dockerfile only
+│   ├── keycloak/         # cap-realm.json
+│   └── nginx/            # nginx.conf
+│                            (no k8s/ directory — ❌ no manifests exist)
 ├── .github/
-│   └── workflows/        # GitHub Actions CI/CD
-└── docker-compose.yml    # Local development
+│   └── workflows/        # ci.yml only — no separate security.yml
+└── docker-compose.yml    # postgres + redis + keycloak, dev only
 ```
 
 ---
@@ -48,67 +60,68 @@ maissaude-360/
 ### 3.1 Initial Setup
 
 ```bash
-# Clone repo
-git clone https://github.com/maissaude/maissaude-360.git
-cd maissaude-360
+# Clone repo (update to the actual remote, not the placeholder below)
+git clone <this repo's actual URL>
+cd "Clinica Mais Saude/Code"
 
 # Install dependencies (pnpm workspaces)
 pnpm install
 
-# Copy environment files
+# Copy environment files — there is no apps/whatsapp-hub, so no third .env to copy
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
-cp apps/whatsapp-hub/.env.example apps/whatsapp-hub/.env
 
 # Start infrastructure (PostgreSQL, Redis, Keycloak)
 docker compose up -d postgres redis keycloak
 
-# Run DB migrations
+# Push the Prisma schema — this project uses `db push`, not migrations, for day-to-day
+# schema changes (see §4). One-time real migrations exist only for the initial two commits.
 cd packages/database
-pnpm prisma migrate dev
+pnpm db:generate
+pnpm exec prisma db push --skip-generate
 
 # Seed development data
-pnpm prisma db seed
+pnpm db:seed
 
 # Start all apps (hot-reload)
 pnpm dev
 ```
 
-### 3.2 docker-compose.yml (development services)
+### 3.2 docker-compose.yml (development services) — actual current file
 
 ```yaml
-version: '3.9'
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: maissaude360
-      POSTGRES_USER: dev
-      POSTGRES_PASSWORD: devpassword
+      POSTGRES_USER: maissaude
+      POSTGRES_PASSWORD: maissaude
+      POSTGRES_DB: maissaude_dev
     ports:
-      - "5432:5432"
+      - "5434:5432"   # host port 5434, not 5432 — avoids clashing with a local Postgres
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    command: redis-server --requirepass redispassword
+    # no --requirepass — dev Redis has no password at all
 
   keycloak:
-    image: quay.io/keycloak/keycloak:23.0
+    image: quay.io/keycloak/keycloak:24.0
+    command: start-dev --import-realm
     environment:
+      KC_DB: dev-mem   # in-memory H2 — realm/users reset on every container restart
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-    command: start-dev --import-realm
     volumes:
-      - ./infrastructure/keycloak/realm-export.json:/opt/keycloak/data/import/realm.json
+      - ./infra/keycloak/cap-realm.json:/opt/keycloak/data/import/cap-realm.json:ro
     ports:
       - "8080:8080"
 
 volumes:
-  postgres_data:
+  pgdata:
 ```
 
 ### 3.3 Dev URLs
@@ -117,109 +130,80 @@ volumes:
 |---|---|
 | Web App | http://localhost:3000 |
 | API | http://localhost:3001 |
-| WhatsApp Hub | http://localhost:3002 |
 | Keycloak | http://localhost:8080 |
-| PostgreSQL | localhost:5432 |
+| PostgreSQL | localhost:5434 (not 5432 — see compose file above) |
 | Redis | localhost:6379 |
+
+❌ No WhatsApp Hub — that service doesn't exist.
 
 ---
 
 ## 4. Database Migrations
 
+🟡 **This project's actual day-to-day workflow does not use `prisma migrate`.** Schema changes
+during this repo's history have been applied with `prisma db push --skip-generate
+--accept-data-loss` directly against the dev database — there are only **two** real migration
+files, both from the initial June commits (`20260615101124_init`,
+`20260618000001_add_company_public_holidays`); every schema change since (encryption columns,
+recurring appointments, Financeiro, composite indexes, and more) exists in `schema.prisma` and the
+live dev database but was **never captured as a migration file**. This means the migration
+directory does not reflect the current schema, and `prisma migrate deploy` would not produce a
+database matching `schema.prisma` today.
+
 ```bash
-# Create a new migration
+# What's actually used, day to day:
 cd packages/database
-pnpm prisma migrate dev --name add_exam_results_table
+pnpm exec prisma db push --skip-generate --accept-data-loss
+pnpm db:generate   # regenerate the Prisma client after schema.prisma changes
 
-# Apply migrations to staging/prod
-pnpm prisma migrate deploy
-
-# Reset dev DB (caution!)
-pnpm prisma migrate reset
-
-# Open Prisma Studio (dev only)
-pnpm prisma studio
+# The migrate:* scripts exist in package.json but are not the working pattern:
+pnpm db:migrate         # prisma migrate dev — unused since June
+pnpm db:migrate:prod    # prisma migrate deploy — this is what CI actually calls (see §5's bug)
+pnpm db:reset           # prisma migrate reset --force — DESTROYS the local DB, needs explicit permission
+pnpm db:studio          # Prisma Studio
 ```
-
-Migrations run automatically in the CI/CD pipeline before deployment.
 
 ---
 
 ## 5. CI/CD Pipeline (GitHub Actions)
 
-### 5.1 On Push to `develop`
+The real pipeline (`.github/workflows/ci.yml`) is 4 jobs on push/PR to `main`/`develop` — no
+`staging` branch:
 
-```yaml
-# .github/workflows/ci.yml
-name: CI
-
-on:
-  push:
-    branches: [develop, staging, main]
-  pull_request:
-    branches: [develop]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: test_db
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-      redis:
-        image: redis:7-alpine
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v2
-      - run: pnpm install
-      - run: pnpm prisma migrate deploy
-        env:
-          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
-      - run: pnpm test
-      - run: pnpm lint
-      - run: pnpm type-check
-
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker images
-        run: |
-          docker build -t ghcr.io/maissaude/api:${{ github.sha }} ./apps/api
-          docker build -t ghcr.io/maissaude/web:${{ github.sha }} ./apps/web
-          docker build -t ghcr.io/maissaude/whatsapp-hub:${{ github.sha }} ./apps/whatsapp-hub
-      - name: Push to GitHub Container Registry
-        run: |
-          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker push ghcr.io/maissaude/api:${{ github.sha }}
-          docker push ghcr.io/maissaude/web:${{ github.sha }}
-          docker push ghcr.io/maissaude/whatsapp-hub:${{ github.sha }}
+```
+quality          → pnpm install, turbo run typecheck, turbo run lint
+test             → real postgres:16 + redis:7 service containers, then:
+                    pnpm --filter @cms/database run db:generate     ⚠️ SEE BUG BELOW
+                    pnpm --filter @cms/database run db:migrate:prod ⚠️ SEE BUG BELOW
+                    pnpm turbo run test
+build            → docker build + push api.Dockerfile / web.Dockerfile to GHCR
+                    (only on push to main; needs quality+test to pass first)
+deploy-staging   → 🎭 STUB — just `echo`s a kubectl command, doesn't run one; then a real
+                    curl smoke-test against a staging URL that likely doesn't exist
+deploy-production→ 🎭 STUB — same: echoes kubectl, doesn't execute it
 ```
 
-### 5.2 On Push to `staging`
+> ⚠️ **Real bug found while writing this doc:** the `test` job's `db:generate` and
+> `db:migrate:prod` steps target package `@cms/database` — but the package was renamed to
+> `@cap/database` during the rebrand (`packages/database/package.json`). `pnpm --filter
+> @cms/database ...` won't resolve to anything, so **CI likely fails or silently no-ops these two
+> steps** on every run. Combined with §4's finding (the two checked-in migrations don't match the
+> current schema even if `db:migrate:prod` did run), the `test` job's database is probably not in
+> the state the tests assume. The workflow also still says `maissaude`/`cms` throughout
+> (`POSTGRES_DB: maissaude_test`, `IMAGE_PREFIX: .../cms`) — cosmetic vs. the rebrand, but
+> consistent with this file not having been touched since before it.
 
-Automatically deploys to staging environment after CI passes.
-
-### 5.3 On Push to `main` (Production)
-
-Requires:
-1. CI passes
-2. Manual approval from lead developer
-3. Automated smoke tests pass on staging
-
-Then:
-1. Runs DB migrations on production
-2. Rolling update in K8s (zero downtime)
-3. Smoke tests run against production
-4. Rollback automatically triggered if smoke tests fail
+There is no branch called `staging`, no automatic staging deploy, no manual-approval gate, and no
+automatic rollback — `deploy-staging`/`deploy-production` are placeholders that print a command
+rather than run one.
 
 ---
 
 ## 6. Kubernetes Deployment
+
+❌ **Entirely aspirational.** No `infra/k8s/` directory, no Helm chart, and (per §5) the CI jobs
+that would apply these manifests only `echo` a command. Treat everything below as a future plan,
+not a running cluster.
 
 ### 6.1 Namespace
 
@@ -319,6 +303,10 @@ spec:
 
 ## 7. Backup Strategy
 
+❌ **Not implemented.** No backup CronJob, no S3 bucket, no restoration-test job was found
+anywhere in this repo. Treat this section as a plan, not a running process — production data today
+has no documented backup path.
+
 ### 7.1 PostgreSQL
 
 ```bash
@@ -347,22 +335,28 @@ Redis is used for ephemeral data (sessions, bot state, queues). No long-term bac
 
 ## 8. Health Checks
 
-Each service exposes `GET /health`:
+✅ `GET /health` is real (`apps/api/src/health/health.controller.ts`, public, uses NestJS
+Terminus). 🟡 It only pings the database — no Redis check, no uptime field — and returns
+Terminus's standard shape, not the custom one below:
 
 ```json
 {
   "status": "ok",
-  "database": "ok",
-  "redis": "ok",
-  "uptime": 86400
+  "info": { "database": { "status": "up" } },
+  "error": {},
+  "details": { "database": { "status": "up" } }
 }
 ```
 
-Kubernetes readiness and liveness probes poll `/health` every 10 seconds.
+❌ No Kubernetes probes poll it (§6) — nothing in this repo currently calls it on a schedule
+besides the CI smoke-test `curl` steps (§5).
 
 ---
 
 ## 9. Rollback Procedure
+
+❌ **Aspirational** — there's no live K8s deployment to roll back (§6). A real rollback today would
+mean reverting the git commit and re-running the (currently broken, §5) CI pipeline.
 
 ```bash
 # Rollback API to previous image
@@ -380,6 +374,10 @@ kubectl rollout status deployment/api -n maissaude-prod
 
 ## 10. Environment Variables (Production Secrets)
 
+❌ **Aspirational** — no Kubernetes Secrets, no Vault integration exists. Today, secrets are
+whatever's in each app's local `.env` file (never committed — `apps/api/.env`,
+`apps/web/.env.local`). The pattern below is a reasonable target for when a real cluster exists:
+
 All secrets stored in **Kubernetes Secrets** (backed by Vault in production):
 
 ```bash
@@ -393,4 +391,4 @@ Never commit `.env.production` to the repository. Use `1Password` or `Vault` for
 
 ---
 
-*Mais Saúde 360 · Deployment Guide v1.0 · June 2026*
+*CAP 360 · Deployment Guide v1.1 · updated 2026-08-30 against the current implementation*

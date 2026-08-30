@@ -1,7 +1,9 @@
-# Mais Saúde 360 — Security & Compliance
+# CAP 360 — Security & Compliance
 
-> **Version:** 1.0 · **Date:** June 2026
+> **Version:** 1.1 · **Date:** August 2026
 > Healthcare data security requirements for Cabo Verde context, with LGPD (Brazil) as compliance reference.
+> This document states the **target** security posture; inline notes mark what's actually
+> implemented today vs. still planned. See `REVIEW.md` for the full audit this pass is based on.
 
 ---
 
@@ -12,7 +14,7 @@
 | Unauthorised access to clinical records | Medium | Critical | RBAC + MFA + audit log |
 | Patient data breach (DB exfiltration) | Low | Critical | Encryption at rest + VPC isolation |
 | WhatsApp message interception | Low | High | TLS in transit; end-to-end via Meta |
-| Exam result link abuse | Medium | High | Token expiry (72h) + access logging |
+| Exam result link abuse | Medium | High | Token expiry (72h) + access logging — ❌ not applicable yet: M5 has no result-file field or download endpoint at all |
 | Brute-force login | Medium | Medium | Keycloak lockout policy + rate limiting |
 | SQL injection | Low | Critical | Prisma parameterised queries; no raw SQL |
 | Insider threat (staff) | Low | High | Audit log; RBAC; role-minimum access |
@@ -24,7 +26,7 @@
 
 ### 2.1 Keycloak Configuration
 
-- **Realm:** `maissaude`
+- **Realm:** `cap` (renamed from `maissaude` — see `Docs/ARCHITECTURE.md`, rebrand)
 - **Password policy:** min 10 chars, 1 uppercase, 1 digit
 - **Brute force protection:** 5 failed attempts → 60-second lockout (exponential backoff)
 - **Session timeout:** 8 hours (active); 15 minutes (idle)
@@ -48,6 +50,13 @@
 | patient | Optional | SMS OTP |
 | corporate_hr | Mandatory | TOTP |
 
+✅ **Mandatory rows enforced for new accounts**: `KeycloakAdminService.createUser` sets
+`requiredActions: ["CONFIGURE_TOTP"]` for admin/doctor/corporate_hr specifically, forcing TOTP
+enrolment on first login. This only applies going forward — **existing accounts created before
+this was added are not retroactively enrolled**; that needs a one-time realm-admin action against
+a real (non-dev) Keycloak deployment, which doesn't exist yet. "Recommended"/"Optional" rows are
+not nudged or enforced anywhere — they're aspirational.
+
 ---
 
 ## 3. Authorisation (RBAC)
@@ -55,7 +64,10 @@
 - All API routes decorated with `@Roles(...)` guard in NestJS
 - Role claims extracted from JWT; no database lookup per request
 - Resource-level isolation enforced in service layer (not just route level)
-- Admin actions that bypass normal restrictions are logged with `is_admin_override: true` in audit log
+- 🟡 The one implemented "admin override" today — billing an invoice line item at a price other
+  than the service catalogue price — is admin-only and visible via a server `Logger.warn`, not a
+  dedicated `is_admin_override: true` field in `audit_log` (the request is still captured as a
+  normal audited mutation, just without that specific flag)
 
 See `ROLES-PERMISSIONS.md` for full permission matrix.
 
@@ -83,12 +95,15 @@ See `ROLES-PERMISSIONS.md` for full permission matrix.
 
 The following fields are encrypted at the application layer (in addition to disk encryption) using AES-256-GCM before storage:
 
-- `patients.nif`
-- `patients.date_of_birth`
-- `clinical_notes.*` (all fields)
-- `prescriptions.*`
+- ✅ `patients.nif` — with a separate HMAC-SHA256 blind-index column for exact-match lookup, since AES-GCM ciphertext isn't searchable
+- ✅ `patients.dateOfBirth`
+- ❌ `clinical_notes.*`, `prescriptions.*` — not applicable yet: these tables don't exist (M7 is a UI mockup with no backend; see `DATABASE-SCHEMA.md` §8)
 
-Encryption key stored in HashiCorp Vault (never in environment variables directly).
+Encryption is `EncryptionService` (Node's built-in `crypto`, AES-256-GCM, format
+`ivHex:authTagHex:dataHex`). **Key management does not match this section's target**: the key is
+read from the `FIELD_ENCRYPTION_KEY` environment variable, not HashiCorp Vault — no Vault
+deployment exists in this stack. Rotate/secure it the same way other secrets in `.env` are
+handled until a real secrets manager is in place.
 
 ---
 
@@ -96,12 +111,16 @@ Encryption key stored in HashiCorp Vault (never in environment variables directl
 
 ### 5.1 Rate Limiting
 
-| Endpoint Group | Limit | Tool |
-|---|---|---|
-| Public (booking widget) | 60 req/min per IP | Redis-backed rate limiter |
-| Authenticated API | 300 req/min per user | Redis-backed rate limiter |
-| Auth endpoints | 10 req/min per IP | Keycloak + NGINX |
-| WhatsApp webhook | 1000 req/min | No IP limit (Meta IPs whitelisted) |
+| Endpoint Group | Limit | Tool | Status |
+|---|---|---|---|
+| Everything (global default) | 300 req/min per IP | `@nestjs/throttler`, in-memory storage | ✅ Enforced |
+| Public (booking widget) | 60 req/min per IP | Same, `@Throttle` override | ✅ Enforced |
+| Auth endpoints | 10 req/min per IP | Keycloak + NGINX | ❌ Not applicable — no custom `/auth/*` endpoints exist; the frontend talks to Keycloak directly |
+| WhatsApp webhook | 1000 req/min | No IP limit (Meta IPs whitelisted) | ❌ Not applicable — no WhatsApp webhook exists (M3 is a UI mockup) |
+
+Rate limiting is per-IP, in-memory, and per-process — it resets on restart and doesn't share state
+across multiple API instances. Fine for a single dev/staging instance; revisit (Redis-backed
+storage) before running more than one API replica in production.
 
 ### 5.2 Input Validation
 
@@ -111,9 +130,11 @@ Encryption key stored in HashiCorp Vault (never in environment variables directl
 
 ### 5.3 CORS
 
-- Allowed origins: `https://maissaudecv.com`, `https://app.maissaudecv.com`
-- Methods: GET, POST, PATCH, DELETE, OPTIONS
-- Credentials: true (for JWT cookie handling)
+- Allowed origins: configured via the `ALLOWED_ORIGINS` env var (comma-separated), defaulting to
+  `http://localhost:3000` in dev. No production domain is hardcoded anywhere — set
+  `ALLOWED_ORIGINS` per environment when a real domain exists (the `maissaudecv.com` domain from
+  the original design predates the CAP rebrand and was never actually wired in).
+- Credentials: true
 
 ### 5.4 HTTPS & Headers
 
@@ -130,23 +151,29 @@ add_header Referrer-Policy "no-referrer-when-downgrade" always;
 
 ## 6. Audit Logging
 
-Every sensitive action is written to `audit_log`:
+Every mutating request (and any GET route explicitly marked `@AuditView()`) is written to
+`audit_log` at the HTTP-request level — one row per request, with `action` = HTTP method and
+`resource`/`resourceId` from the route, not the original design's one-row-per-DB-change shape:
 
-| Action Type | Logged Fields |
+| Action Type | Status |
 |---|---|
-| Patient record viewed | staff_id, patient_id, timestamp, IP |
-| Clinical note created/edited | staff_id, note_id, before/after values |
-| Prescription created | staff_id, patient_id |
-| Admin role escalation | staff_id, resource, reason |
-| Login success/failure | user_id, IP, timestamp |
-| File downloaded (exam result) | token, IP, timestamp |
-| Invoice created/modified | staff_id, invoice_id, delta |
-| Patient record deleted | staff_id, patient_id, reason |
+| Patient record viewed | ✅ One route: `GET /patients/:id`, via `@AuditView()`. Not every read is logged — only this one, deliberately, to avoid auditing every list/search query |
+| Patients + Financeiro mutations get a before/after diff | ✅ `metadata.diff: { before, after }`, only the fields actually submitted — not a full-record dump |
+| Clinical note / prescription created | ❌ Not applicable — these tables don't exist (M7 mockup) |
+| Admin role escalation | ❌ Not implemented as a distinct action |
+| Login success/failure | ❌ Not captured in `audit_log` at all. Keycloak has its own separate internal event log (unrelated to this table) which is currently **disabled** in dev (`infra/keycloak/*-realm.json`) because the dev in-memory Keycloak DB lacks the table Keycloak needs to record events, causing a 500 on every login. Nothing in this app forwards Keycloak events into `audit_log` regardless |
+| File downloaded (exam result) | ❌ Not applicable — no exam-result download exists yet |
+| Invoice created/modified | 🟡 Creation and cancellation are logged as generic mutating requests; no line-item delta beyond that |
+| Patient record deleted (erasure) | ✅ Logged as the mutating `DELETE /patients/:id` request |
 
 Audit logs are:
-- Append-only (no update/delete operations on `audit_log` table)
-- Retained for 7 years (regulatory requirement)
-- Exportable for compliance audits
+- ✅ **Genuinely append-only at the database level**, not just application convention: a
+  `BEFORE UPDATE OR DELETE` trigger rejects any modification, enforced even against the app's own
+  Postgres role (which is a superuser and would otherwise bypass a plain `REVOKE`). See
+  `packages/database/prisma/manual-sql/audit-log-immutable.sql` — not reapplied by
+  `prisma db push`/`migrate`, so it must be re-run by hand on any fresh database.
+- ❌ Retention for 7 years — not implemented; no partitioning or purge policy exists
+- ❌ Exportable for compliance audits — no export endpoint exists; would currently mean a direct DB query
 
 ---
 
@@ -154,45 +181,52 @@ Audit logs are:
 
 ### 7.1 Consent
 
-- Explicit consent form signed at registration (stored as patient document)
-- Consent records: purpose, date, version
-- Separate consent for: data processing, marketing communications, data sharing
+- 🟡 **Simpler than this section's target**: consent is a single `consentGiven` boolean + optional
+  `consentGivenAt` timestamp on the patient record — not a signed document, no purpose/version
+  fields, no separation between data-processing/marketing/sharing consent.
+- ✅ The value is real everywhere it's collected: the reception "New Patient" form requires the
+  checkbox, and the public self-service booking flow (`findOrCreateByPhone`) requires the same
+  literal-`true` `consentGiven` field on `PublicBookingSchema` — it no longer silently assumes
+  consent on that path (previously hardcoded `true` regardless of what the caller sent).
 
 ### 7.2 Data Subject Rights
 
 | Right | Implementation |
 |---|---|
-| Right to access | Admin exports full patient data as JSON/PDF on request |
-| Right to rectification | Patient can request corrections; receptionist applies |
-| Right to erasure | Soft-delete clears PII; billing records retained (legal) |
-| Right to portability | JSON export of all patient data |
-| Right to withdraw consent | Unsubscribe from communications; restrictions applied |
+| Right to access | ❌ Not implemented — no export endpoint exists |
+| Right to rectification | 🟡 `PATCH /patients/:id` lets staff correct any field; no patient-initiated request flow |
+| Right to erasure | ✅ Soft-delete nulls every direct-PII field (not just `deletedAt`); billing/appointment records retained. Live-verified against the real database |
+| Right to portability | ❌ Not implemented — same gap as "right to access" |
+| Right to withdraw consent | ❌ Not implemented as a distinct flow — `consentGiven` can be set to `false` via `PATCH`, but nothing downstream (reminders, communications) currently checks it before sending |
 
 ### 7.3 Data Minimisation
 
 - Only collect data necessary for clinical care and billing
-- Optional fields (NIF, nationality) only requested when needed (e.g., invoice generation)
-- Marketing tracking (booking source) anonymised in analytics
+- `nif` is optional; there is no `nationality` field at all (never implemented)
+- Booking `source` (web/whatsapp/phone/walk_in) is stored per-appointment, not anonymised anywhere in reporting — there is no analytics module yet for this to flow into (M10 is a mockup)
 
 ---
 
 ## 8. WhatsApp Security
 
-- Webhook verify token validated on every incoming webhook
-- Inbound messages processed asynchronously — webhook returns 200 immediately
-- Meta-approved templates only for outbound messages outside 24h window
-- No patient clinical data included in WhatsApp messages (links only)
-- Download links are tokens — not direct S3 URLs
+❌ **Entirely not applicable today.** M3 (WhatsApp Integration Hub) has no backend at all — no
+webhook handler, no bot, no agent inbox (see `DATABASE-SCHEMA.md` §10). Outbound WhatsApp sending
+exists only for appointment reminders/confirmations (`NotificationsProcessor.sendWhatsApp`),
+which calls the Meta Cloud API directly with plain text bodies — no template management, no 24h-
+window handling.
 
 ---
 
 ## 9. File Security
 
-- All files stored in Cloudflare R2 (not publicly accessible by default)
-- Patient access via signed URLs (time-limited, 72 hours)
-- Staff access via presigned URLs generated server-side on request
-- File access logged in `audit_log`
-- Bucket policy: no public read; only authenticated service account can write
+- ✅ Files stored in Cloudflare R2, presigned server-generated download URLs (`R2Service`) —
+  matches this section for the one place file storage is actually used today (billing receipts,
+  expense receipts)
+- 🟡 Patient-facing 72-hour signed URLs — not applicable yet, since there's no patient-facing
+  download flow (right to portability isn't implemented; exam results don't exist)
+- ❌ File access logged in `audit_log` — not implemented; R2 downloads aren't currently audited
+- There is a download-URL endpoint for `PatientDocument` but **no upload endpoint** — nothing in
+  the running app can populate that table via the API today
 
 ---
 
@@ -221,4 +255,4 @@ See also: Cabo Verde data protection authority notification requirements (consul
 
 ---
 
-*Mais Saúde 360 · Security & Compliance v1.0 · June 2026*
+*CAP 360 · Security & Compliance v1.1 · updated 2026-08-30 against the current implementation*

@@ -1,8 +1,17 @@
-# Mais Saúde 360 — Roles & Permissions (RBAC)
+# CAP 360 — Roles & Permissions (RBAC)
 
-> **Auth Provider:** Keycloak (self-hosted)
+> **Auth Provider:** Keycloak (self-hosted), realm `cap` (not `maissaude` — renamed in the
+> Cabo Verde rebrand)
 > Roles are assigned per user in Keycloak and embedded in the JWT `realm_access.roles` claim.
 > All API routes are guarded by `RolesGuard` in NestJS.
+
+> **Implementation status:** the actual RBAC is **coarse, route-level `@Roles()` guards** — one
+> role list per controller/route, checked against the JWT. None of the fine-grained distinctions
+> below ("assigned only", "own schedule", per-field/tag visibility, row-level company scoping) are
+> real unless explicitly called out — a role either can or cannot call a given route, in full. Every
+> row referencing M3 (WhatsApp), M5 (Exams), M7 (Clinical Records), M9 (Home Visits), or M10
+> (Analytics) describes access to **features that don't exist at all** (see those modules' own
+> docs) — those rows are pure fiction, not a permissions gap.
 
 ---
 
@@ -95,29 +104,39 @@
 ## 4. Data Isolation Rules
 
 ### 4.1 Clinical Data Isolation
-- Doctors can only access clinical notes for patients assigned to their appointments
-- Exception: `admin` can read (not edit) all clinical records for auditing
-- Notes are locked 24 hours after creation — only `admin` can unlock
+
+❌ **Not real.** M7 (clinical notes) doesn't exist (see its module doc). What does exist —
+`patient_notes` on the Patient CRM — is visible identically to admin, receptionist, doctor, *and*
+nurse; there is no "assigned patients only" filter for any role, and no 24h lock/admin-unlock
+mechanism.
 
 ### 4.2 Corporate HR Isolation
-- `corporate_hr` users see only members and utilisation data for their own company
-- Filter enforced at the API query level: `WHERE company_id = :user.company_id`
-- Billing access limited to corporate plan invoices, not individual patient invoices
+
+❌ **Not enforced — confirmed gap.** `GET /health-plans?companyId=...` takes the company ID as a
+**caller-supplied query parameter**, not one derived from the JWT. A `corporate_hr` user can pass
+any `companyId` (or omit it) and read subscription data for **any** company, not just their own.
+There is no membership/utilisation data to isolate in the first place (§3.2 of `M4-health-plan-management.md`),
+and no billing-scope restriction either.
 
 ### 4.3 Patient Self-Service Isolation
-- `patient` users have a strict row-level security filter on `patient_id = auth.patient_id`
-- Cannot access other patients' data under any circumstance
-- Exam result download links are token-based, expiring, and logged
+
+✅ **Real.** `GET /patients/me` resolves strictly from the JWT's own `patient_id` claim — a patient
+cannot pass an arbitrary ID to read another patient's record this way. ❌ Exam result download
+tokens: moot, M5 has no result/download feature at all.
 
 ---
 
 ## 5. Keycloak Configuration
 
-### 5.1 Realm: `maissaude`
+🟡 This section is illustrative and has not been re-verified line-by-line against the live realm
+export (`infra/cap-realm.json`) — treat specific field values below with caution. The realm name
+itself is confirmed real.
+
+### 5.1 Realm: `cap`
 
 ```json
 {
-  "realm": "maissaude",
+  "realm": "cap",
   "enabled": true,
   "internationalizationEnabled": true,
   "supportedLocales": ["pt", "en"],
@@ -172,6 +191,11 @@ getClinicalNotes(@Param('id') patientId: string) { ... }
 
 ## 6. MFA Policy
 
+🟡 Not verified as actually configured in the realm — dev-environment Keycloak has event logging
+disabled entirely (see `SECURITY.md`), and no MFA-related code or config was found during this
+review.
+
+
 | Role | MFA Required | Method |
 |---|---|---|
 | admin | ✅ Mandatory | TOTP (Google Authenticator) |
@@ -183,4 +207,4 @@ getClinicalNotes(@Param('id') patientId: string) { ... }
 
 ---
 
-*Mais Saúde 360 · Roles & Permissions v1.0 · June 2026*
+*CAP 360 · Roles & Permissions v1.1 · updated 2026-08-30 against the current implementation*
