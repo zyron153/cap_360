@@ -76,7 +76,7 @@ Mais Saúde 360 is a cloud-native, multi-tenant Healthcare ERP/CRM. The architec
 | Payment Gateway | Vinti4 (Phase 4) | Local Cabo Verde payments |
 | Authentication | Keycloak (self-hosted) | RBAC; MFA; GDPR audit logs; SSO |
 | Maps | Google Maps API | Home visit address validation + routing |
-| Imaging | DICOM viewer (Cornerstone.js) | In-browser ultrasound/ECG file rendering (Phase 4) |
+| ~~Imaging~~ | ~~DICOM viewer (Cornerstone.js)~~ | **Cut** — client is now CAP, a psychology clinic; no ultrasound/ECG use case (see `Docs/PRD.md` F-18) |
 
 ---
 

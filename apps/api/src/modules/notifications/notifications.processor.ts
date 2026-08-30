@@ -135,7 +135,7 @@ export class NotificationsProcessor {
 
     const rows = appointments.map(a => {
       const t = a.scheduledAt.toLocaleTimeString("pt-CV", { hour: "2-digit", minute: "2-digit" });
-      return `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${t}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${a.patient.fullName}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${a.service.name}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${a.staff.fullName}</td></tr>`;
+      return `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${t}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${a.patient.fullName ?? "Paciente removido"}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${a.service.name}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${a.staff.fullName}</td></tr>`;
     }).join("");
 
     const html = `<h2 style="font-family:sans-serif">Resumo do dia — ${today.toLocaleDateString("pt-CV")}</h2><p style="font-family:sans-serif">${appointments.length} consulta(s) agendada(s)</p><table style="border-collapse:collapse;font-family:sans-serif;font-size:13px"><thead><tr style="background:#f5f5f5"><th style="padding:8px 12px;text-align:left">Hora</th><th style="padding:8px 12px;text-align:left">Paciente</th><th style="padding:8px 12px;text-align:left">Serviço</th><th style="padding:8px 12px;text-align:left">Médico/a</th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -172,6 +172,14 @@ export class NotificationsProcessor {
 
   @Process("overdue-invoices")
   async handleOverdueInvoices(_job: Job) {
+    // InvoiceStatus.overdue existed as an enum value with nothing that ever set it — this is a
+    // data-correctness step, not a notification, so it runs regardless of whether email is
+    // configured (unlike the digest below, which depends on it).
+    await this.prisma.invoice.updateMany({
+      where: { status: { in: ["issued", "partially_paid"] }, dueDate: { lt: new Date() } },
+      data: { status: "overdue" },
+    });
+
     const smtp = await this.cfg<SmtpConfig>("integration_email_smtp");
     if (!smtp?.host) return;
 
@@ -185,7 +193,7 @@ export class NotificationsProcessor {
     const rows = invoices.map(inv => {
       const due = (Number(inv.total) - Number(inv.amountPaid)).toLocaleString("pt-CV");
       const date = inv.issuedAt ? inv.issuedAt.toLocaleDateString("pt-CV") : "—";
-      return `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${inv.invoiceNumber}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${inv.patient.fullName}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${date}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;color:#dc2626">${due} CVE</td></tr>`;
+      return `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee">${inv.invoiceNumber}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${inv.patient.fullName ?? "Paciente removido"}</td><td style="padding:6px 12px;border-bottom:1px solid #eee">${date}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;color:#dc2626">${due} CVE</td></tr>`;
     }).join("");
 
     const html = `<h2 style="font-family:sans-serif;color:#dc2626">Faturas Vencidas</h2><p style="font-family:sans-serif">${invoices.length} fatura(s) vencida(s) requerem atenção</p><table style="border-collapse:collapse;font-family:sans-serif;font-size:13px"><thead><tr style="background:#f5f5f5"><th style="padding:8px 12px;text-align:left">Nº Fatura</th><th style="padding:8px 12px;text-align:left">Paciente</th><th style="padding:8px 12px;text-align:left">Data</th><th style="padding:8px 12px;text-align:left">Em Dívida</th></tr></thead><tbody>${rows}</tbody></table>`;

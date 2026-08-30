@@ -60,6 +60,11 @@ export class BillingController {
     return this.service.recordPayment(id, dto);
   }
 
+  @Post(":id/cancel")
+  cancel(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.cancel(id);
+  }
+
   @Get(":id/efatura")
   getEFaturaStatus(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.getEFaturaStatus(id);

@@ -308,7 +308,7 @@ We propose developing **Mais Saúde 360**, a cloud-based, Portuguese-language He
 | F-15 | Member Self-Service Portal | Patient/member login to view history, results, plan | 🟡 Low | L |
 | F-16 | Corporate HR Portal | HR admin view for corporate health plan management | 🟡 Low | M |
 | F-17 | Vinti4 Payment Integration | Local payment gateway for online deposits and billing | 🟡 Low | XL |
-| F-18 | DICOM Viewer | In-browser imaging viewer for ultrasound/ECG files | 🟡 Low | XL |
+| F-18 | ~~DICOM Viewer~~ | ~~In-browser imaging viewer for ultrasound/ECG files~~ | ❌ Cut | — |
 
 **Effort Scale:** S = 1–2 weeks · M = 2–4 weeks · L = 1–2 months · XL = 2–3 months
 
@@ -361,7 +361,7 @@ Phase 4 │                                             │    Growth    │
 - Corporate HR portal for health plan administration
 - Vinti4 payment gateway integration
 - Advanced analytics & BI exports
-- DICOM/imaging viewer for ultrasound and ECG files
+- ~~DICOM/imaging viewer for ultrasound and ECG files~~ — **cut** (F-18): the client is now CAP, a psychology clinic (rebrand, see `Docs/ARCHITECTURE.md`); there is no ultrasound/ECG imaging use case to support
 
 ---
 

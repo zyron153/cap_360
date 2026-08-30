@@ -1,4 +1,5 @@
 import { Test } from "@nestjs/testing";
+import { BadRequestException } from "@nestjs/common";
 import { BillingRepository } from "./billing.repository";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
@@ -61,6 +62,23 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
       expect(tx.invoice.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ status: "partially_paid", amountPaid: 500 }) })
       );
+    });
+
+    it("rejects a payment that would push the running total above the invoice total", async () => {
+      // The post-insert sum already reflects this payment — nothing stopped it from exceeding
+      // the invoice total before this fix, leaving amountPaid > total on a "paid" invoice.
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: "2500" } });
+      await expect(
+        repo.recordPaymentAtomic("inv-1", { amount: 500, method: "cash" as never, paidAt: new Date() }, 2000)
+      ).rejects.toThrow(BadRequestException);
+      expect(tx.invoice.update).not.toHaveBeenCalled();
+    });
+
+    it("allows a payment that lands exactly on the invoice total", async () => {
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: "2000" } });
+      await expect(
+        repo.recordPaymentAtomic("inv-1", { amount: 2000, method: "cash" as never, paidAt: new Date() }, 2000)
+      ).resolves.toBeDefined();
     });
   });
 

@@ -290,6 +290,70 @@ describe("BillingService", () => {
     });
   });
 
+  describe("cancel", () => {
+    it("throws NotFoundException for an unknown invoice", async () => {
+      repo.findByIdLite.mockResolvedValue(null);
+      await expect(service.cancel("inv-x")).rejects.toThrow(NotFoundException);
+    });
+
+    it("throws BadRequestException when the invoice is already fully paid", async () => {
+      repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "paid" });
+      await expect(service.cancel("inv-1")).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it("is idempotent — returns the invoice as-is when already cancelled, without re-cancelling", async () => {
+      const cancelled = { ...INVOICE, status: "cancelled" };
+      repo.findByIdLite.mockResolvedValue(cancelled);
+      expect(await service.cancel("inv-1")).toEqual(cancelled);
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("sets status to cancelled for an issued invoice with no E-Factura submission", async () => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
+      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
+
+      await service.cancel("inv-1");
+
+      expect(repo.update).toHaveBeenCalledWith("inv-1", { status: "cancelled" });
+      expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("also enqueues an E-Factura cancel job when the invoice was already accepted there", async () => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue({
+        invoiceId: "inv-1",
+        status: "accepted",
+        efaturaRef: "REF123",
+      });
+      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
+
+      await service.cancel("inv-1");
+
+      expect(efaturaQueue.add).toHaveBeenCalledWith(
+        "cancel",
+        { invoiceId: "inv-1", efaturaRef: "REF123" },
+        expect.objectContaining({ attempts: 3 })
+      );
+    });
+
+    it("does not enqueue an E-Factura cancel job when the submission was never accepted (still pending/rejected)", async () => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue({
+        invoiceId: "inv-1",
+        status: "pending",
+        efaturaRef: null,
+      });
+      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
+
+      await service.cancel("inv-1");
+
+      expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
   describe("getReceiptUrl — clinic data on generated receipts", () => {
     const FULL_INVOICE = {
       id: "inv-1",

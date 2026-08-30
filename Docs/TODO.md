@@ -242,7 +242,7 @@
 ### M7 — Clinical Records (EMR-lite)
 
 **Backend (NestJS) — `apps/api/src/modules/clinical/`**
-- [ ] Prisma tables: `clinical_notes`, `prescriptions`, `referrals` (already in schema, add module)
+- [ ] Prisma tables: `clinical_notes`, `prescriptions`, `referrals` — **do not exist yet**, despite this line previously claiming otherwise (verified against `packages/database/prisma/schema.prisma`; only the generic, unstructured `PatientNote` model exists). Given the client is now CAP, a psychology clinic, this module's shape (session notes, treatment plans) likely needs a fresh spec pass rather than resuming the old SOAP/ICD-10/prescription design written for a medical clinic — see `REVIEW.md` §6
 - [ ] `POST /v1/appointments/:id/clinical-note` — create SOAP note (doctor only)
 - [ ] `GET /v1/appointments/:id/clinical-note`
 - [ ] `PATCH /v1/clinical-notes/:id` — edit within 24h window, admin override
@@ -288,7 +288,7 @@
 ### M9 — Home Visit Manager
 
 **Backend (NestJS) — `apps/api/src/modules/home-visits/`**
-- [ ] Prisma table: `home_visits` (already in schema)
+- [ ] Prisma table: `home_visits` — **does not exist yet**, despite this line previously claiming otherwise (verified against `packages/database/prisma/schema.prisma`)
 - [ ] `POST /v1/home-visits` — patient or receptionist creates request
 - [ ] `GET /v1/home-visits` — list (pending / assigned / completed)
 - [ ] `PATCH /v1/home-visits/:id/assign` — assign nurse/doctor

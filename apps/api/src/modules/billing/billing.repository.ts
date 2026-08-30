@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 import { Prisma, PaymentMethod, InvoiceStatus } from "@cap/database";
@@ -110,6 +110,15 @@ export class BillingRepository {
 
       const { _sum } = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amount: true } });
       const totalPaid = Number(_sum.amount ?? 0);
+
+      // Nothing previously stopped a payment from pushing amountPaid past the invoice total —
+      // throwing inside the transaction rolls back the payment insert above along with it.
+      if (totalPaid > invoiceTotal) {
+        throw new BadRequestException(
+          `This payment would bring the total paid (${totalPaid}) above the invoice total (${invoiceTotal})`
+        );
+      }
+
       const amountDue = invoiceTotal - totalPaid;
       const status: InvoiceStatus = amountDue <= 0 ? "paid" : totalPaid > 0 ? "partially_paid" : "issued";
 

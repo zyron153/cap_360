@@ -161,6 +161,29 @@ export class BillingService {
     return { queued: true };
   }
 
+  async cancel(invoiceId: string) {
+    const invoice = await this.repo.findByIdLite(invoiceId);
+    if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
+
+    if (invoice.status === "cancelled") return invoice; // idempotent — already cancelled
+    if (invoice.status === "paid") {
+      throw new BadRequestException("Cannot cancel a fully paid invoice");
+    }
+
+    // Already reported to the tax authority — cancel it there too, via the same async
+    // queue+processor the submit/retry flow already uses.
+    const submission = await this.prisma.eFaturaSubmission.findUnique({ where: { invoiceId } });
+    if (submission?.status === "accepted" && submission.efaturaRef) {
+      await this.efaturaQueue.add(
+        "cancel",
+        { invoiceId, efaturaRef: submission.efaturaRef },
+        { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
+      );
+    }
+
+    return this.repo.update(invoiceId, { status: "cancelled" });
+  }
+
   async recordPayment(invoiceId: string, dto: RecordPaymentDto) {
     // Checked first, before the invoice even loads: a retried request (double-click, client
     // timeout retry) must replay the original outcome, not re-validate against state that the
@@ -253,7 +276,12 @@ export class BillingService {
       clinic,
       invoiceNumber: invoice.invoiceNumber,
       issuedAt: invoice.issuedAt,
-      patient: invoice.patient,
+      // patient fields can be null here — right-to-erasure nulls them on soft-delete while the
+      // invoice itself is retained for legal/billing reasons (see PatientsRepository.softDelete).
+      patient: {
+        fullName: invoice.patient.fullName ?? "Paciente removido",
+        phone: invoice.patient.phone ?? "—",
+      },
       items: invoice.items.map((item) => ({
         description: item.description,
         quantity: item.quantity,

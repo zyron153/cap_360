@@ -13,12 +13,14 @@ import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
 import {
   CreateAppointmentSchema,
+  CreateAppointmentSeriesSchema,
   UpdateAppointmentStatusSchema,
   RescheduleAppointmentSchema,
   AvailabilityQuerySchema,
   AppointmentCalendarQuerySchema,
   JoinWaitlistSchema,
   CreateAppointmentDto,
+  CreateAppointmentSeriesDto,
   UpdateAppointmentStatusDto,
   RescheduleAppointmentDto,
   AvailabilityQuery,
@@ -62,6 +64,14 @@ export class AppointmentsController {
     dto: CreateAppointmentDto
   ) {
     return this.service.create(dto);
+  }
+
+  @Post("series")
+  createSeries(
+    @Body(new ZodValidationPipe(CreateAppointmentSeriesSchema))
+    dto: CreateAppointmentSeriesDto
+  ) {
+    return this.service.createSeries(dto);
   }
 
   @Post("waitlist")

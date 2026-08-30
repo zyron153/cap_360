@@ -348,7 +348,7 @@ The following are documented but explicitly deferred to Phase 4 — do not attem
 - Vinti4 payment gateway (F-17)
 - Patient self-service portal (F-15)
 - Corporate HR portal (F-16)
-- DICOM imaging viewer (F-18)
+- ~~DICOM imaging viewer (F-18)~~ — **cut entirely**, not just deferred: the client is now CAP, a psychology clinic, with no ultrasound/ECG imaging use case (see `Docs/PRD.md` §7)
 - Mobile app (React Native) — Phase 3 is first use
 - Advanced BI/analytics exports
 

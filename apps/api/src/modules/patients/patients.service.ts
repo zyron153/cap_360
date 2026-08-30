@@ -2,9 +2,11 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from "@nestjs/common";
 import { PatientsRepository } from "./patients.repository";
 import { RequestContext } from "../../common/context/request-context";
+import { Prisma } from "@cap/database";
 import {
   CreatePatientDto,
   UpdatePatientDto,
@@ -92,12 +94,33 @@ export class PatientsService {
       );
     }
 
-    return this.repo.create({
-      ...dto,
-      phone: normalizedPhone,
-      dateOfBirth: new Date(dto.dateOfBirth),
-      consentGivenAt: dto.consentGiven ? new Date() : null,
-    });
+    try {
+      return await this.repo.create({
+        ...dto,
+        phone: normalizedPhone,
+        consentGivenAt: dto.consentGiven ? new Date() : null,
+      });
+    } catch (err) {
+      this.rethrowAsFriendlyConflict(err, dto.nif, normalizedPhone);
+    }
+  }
+
+  // The findByPhone/findByNif pre-checks (in create() and, implicitly, none at all in update())
+  // are a friendly fast path, not a guarantee — two concurrent writes for the same phone/NIF can
+  // both pass them and race to the DB's unique constraint. Without this, the loser gets a raw,
+  // unhandled Prisma error (500) instead of the same friendly ConflictException the pre-check
+  // would have given it.
+  private rethrowAsFriendlyConflict(err: unknown, nif: string | null | undefined, phone: string | undefined): never {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      const target = (err.meta?.target as string[] | undefined) ?? [];
+      if (target.includes("nifHash")) {
+        throw new ConflictException(`A patient with NIF ${nif} already exists`);
+      }
+      if (target.includes("phone")) {
+        throw new ConflictException(`A patient with phone ${phone} already exists`);
+      }
+    }
+    throw err;
   }
 
   async update(id: string, dto: UpdatePatientDto) {
@@ -105,9 +128,13 @@ export class PatientsService {
 
     const data: Record<string, unknown> = { ...dto };
     if (dto.phone) data.phone = this.normalizePhone(dto.phone);
-    if (dto.dateOfBirth) data.dateOfBirth = new Date(dto.dateOfBirth);
 
-    const updated = await this.repo.update(id, data);
+    let updated;
+    try {
+      updated = await this.repo.update(id, data);
+    } catch (err) {
+      this.rethrowAsFriendlyConflict(err, dto.nif, data.phone as string | undefined);
+    }
 
     // Only the fields actually submitted in this update — not the whole record — so the diff
     // reads as "what changed" rather than a noisy full dump of an unrelated record.
@@ -171,12 +198,16 @@ export class PatientsService {
     );
   }
 
+  // consentGiven is required, not defaulted: this method must never manufacture consent on a
+  // caller's behalf. Whoever calls this (currently only the public booking flow, which is
+  // Zod-gated on a real checkbox — see PublicBookingSchema) asserts the real value here.
   async findOrCreateByPhone(dto: {
     fullName: string;
     phone: string;
     dateOfBirth: string;
     email?: string;
     gender: "male" | "female" | "other";
+    consentGiven: boolean;
   }) {
     const normalizedPhone = this.normalizePhone(dto.phone);
     const existing = await this.repo.findByPhone(normalizedPhone);
@@ -187,12 +218,26 @@ export class PatientsService {
       dateOfBirth: dto.dateOfBirth,
       email: dto.email,
       gender: dto.gender,
-      consentGiven: true,
+      consentGiven: dto.consentGiven,
     });
   }
 
+  // Cabo Verde numbers are +238 followed by exactly 7 local digits. Previously this just
+  // stripped non-digits and prepended "+" with no country-code check at all — a number typed
+  // without +238 silently became a broken one that would never receive a WhatsApp reminder.
   private normalizePhone(phone: string): string {
     const digits = phone.replace(/\D/g, "");
-    return `+${digits}`;
+    const local =
+      digits.startsWith("238") && digits.length === 10
+        ? digits.slice(3)
+        : digits.length === 7
+        ? digits
+        : null;
+    if (!local) {
+      throw new BadRequestException(
+        "Número de telefone inválido — use um número de Cabo Verde com 7 dígitos (com ou sem +238)"
+      );
+    }
+    return `+238${local}`;
   }
 }

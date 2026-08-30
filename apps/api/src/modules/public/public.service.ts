@@ -47,6 +47,7 @@ export class PublicService {
       dateOfBirth: dto.dateOfBirth,
       email: dto.email,
       gender: dto.gender,
+      consentGiven: dto.consentGiven,
     });
 
     const appointment = await this.appointmentsService.create({

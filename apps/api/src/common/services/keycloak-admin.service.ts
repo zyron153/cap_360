@@ -81,4 +81,11 @@ export class KeycloakAdminService {
 
     return userId;
   }
+
+  /** Best-effort cleanup for a Keycloak user created earlier in the same flow whose later step
+   * (e.g. the local DB write) failed — callers should catch a delete failure themselves rather
+   * than let it mask the original error. */
+  async deleteUser(keycloakId: string): Promise<void> {
+    await this.adminFetch(`/users/${keycloakId}`, { method: "DELETE" });
+  }
 }

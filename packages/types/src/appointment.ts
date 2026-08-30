@@ -92,6 +92,36 @@ export type AppointmentCalendarQuery = z.infer<
   typeof AppointmentCalendarQuerySchema
 >;
 
+export const CreateAppointmentSeriesSchema = z
+  .object({
+    patientId: z.string().uuid(),
+    staffId: z.string().uuid(),
+    serviceId: z.string().uuid(),
+    roomId: z.string().uuid().optional(),
+    scheduledAt: z.string().datetime({ offset: true }),
+    notes: z.string().max(500).optional(),
+    source: z.enum(["web", "whatsapp", "phone", "walk_in"]).default("web"),
+    frequency: z.enum(["daily", "weekly", "monthly"]),
+    interval: z.number().int().positive().default(1),
+    // Exactly one of these two must be provided — see the refine below.
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD").optional(),
+    occurrenceCount: z.number().int().positive().max(104).optional(),
+    // Client-generated once per form-open — a retried request with the same key returns the
+    // original series instead of creating a duplicate.
+    idempotencyKey: z.string().max(100).optional(),
+  })
+  .refine((d) => (d.endDate ? 1 : 0) + (d.occurrenceCount ? 1 : 0) === 1, {
+    message: "Provide exactly one of endDate or occurrenceCount",
+    path: ["endDate"],
+  });
+export type CreateAppointmentSeriesDto = z.infer<typeof CreateAppointmentSeriesSchema>;
+
+export interface AppointmentSeriesResult {
+  seriesId: string;
+  created: Appointment[];
+  skipped: { date: string; reason: string }[];
+}
+
 export const JoinWaitlistSchema = z.object({
   patientId: z.string().uuid(),
   serviceId: z.string().uuid(),

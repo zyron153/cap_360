@@ -43,6 +43,12 @@ enum AppointmentSource {
   walk_in
 }
 
+enum RecurrenceFrequency {
+  daily
+  weekly
+  monthly
+}
+
 enum InvoiceStatus {
   draft
   issued
@@ -100,15 +106,24 @@ enum ExpenseStatus {
 
 model Patient {
   id                    String    @id @default(uuid())
-  fullName              String    @db.VarChar(150)
-  dateOfBirth           DateTime  @db.Date
+  /// Nullable so right-to-erasure (softDelete) can null it out; every real patient still has one
+  /// (enforced by CreatePatientSchema, not the DB) — null only ever means "erased".
+  fullName              String?   @db.VarChar(150)
+  /// AES-256-GCM encrypted at application layer (EncryptionService) — "ivHex:authTagHex:dataHex".
+  /// Was DateTime @db.Date; stored as ciphertext of "YYYY-MM-DD" now, so it's a plain string.
+  /// No lookup hash needed — nothing searches or range-filters by date of birth today.
+  /// Nullable so right-to-erasure (softDelete) can null it out — see fullName above.
+  dateOfBirth           String?   @db.VarChar(255)
   gender                Gender
   /// AES-256-GCM encrypted at application layer (EncryptionService) — "ivHex:authTagHex:dataHex"
   nif                   String?   @db.VarChar(255)
   /// HMAC-SHA256 blind index of the plaintext NIF — encrypted `nif` above can't be looked up
   /// or uniqueness-checked directly, since AES-GCM ciphertext differs per call (random IV)
   nifHash               String?   @db.VarChar(64)
-  phone                 String    @db.VarChar(30)
+  /// Nullable so right-to-erasure (softDelete) can null it out — see fullName above. The unique
+  /// constraint below still holds: Postgres allows unlimited NULLs in a unique column, so an
+  /// erased patient's old number is freed up for a future patient to use.
+  phone                 String?   @db.VarChar(30)
   email                 String?   @db.VarChar(150)
   address               String?   @db.VarChar(300)
   emergencyContactName  String?   @db.VarChar(150)
@@ -121,6 +136,7 @@ model Patient {
   updatedAt             DateTime  @updatedAt
 
   appointments      Appointment[]
+  appointmentSeries AppointmentSeries[]
   documents         PatientDocument[]
   notes             PatientNote[]
   communicationLogs CommunicationLog[]
@@ -149,6 +165,7 @@ model Staff {
   updatedAt     DateTime  @updatedAt
 
   appointments      Appointment[]
+  appointmentSeries AppointmentSeries[]
   shifts            StaffShift[]
   availability      StaffAvailability[]
   leaveRequests     LeaveRequest[]
@@ -193,6 +210,7 @@ model Service {
   updatedAt       DateTime @updatedAt
 
   appointments  Appointment[]
+  appointmentSeries AppointmentSeries[]
   invoiceItems  InvoiceItem[]
   waitlistItems Waitlist[]
   examRequests  ExamRequest[]
@@ -211,6 +229,7 @@ model Room {
   updatedAt   DateTime @updatedAt
 
   appointments Appointment[]
+  appointmentSeries AppointmentSeries[]
 
   @@map("rooms")
 }
@@ -234,6 +253,10 @@ model Appointment {
   /// Client-supplied dedup key — a retried "create appointment" request (double-click, timeout
   /// retry) with the same key returns the existing appointment instead of creating a duplicate.
   idempotencyKey     String?           @db.VarChar(100)
+  /// The recurring series this occurrence belongs to, if it was created as part of one.
+  seriesId           String?
+  /// 1-based position within the series (e.g. "Sessão 3 de 8") — display only, not used for logic.
+  seriesIndex        Int?
   deletedAt          DateTime?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
@@ -242,6 +265,7 @@ model Appointment {
   staff     Staff    @relation(fields: [staffId], references: [id])
   service   Service  @relation(fields: [serviceId], references: [id])
   room      Room?    @relation(fields: [roomId], references: [id])
+  series    AppointmentSeries? @relation(fields: [seriesId], references: [id])
   reminders AppointmentReminder[]
   invoices  Invoice[]
   examRequests ExamRequest[]
@@ -252,9 +276,40 @@ model Appointment {
   @@index([scheduledAt])
   @@index([status])
   @@index([deletedAt])
+  @@index([seriesId])
   @@index([patientId, deletedAt])   // BFF patient-screen: appointments WHERE patientId AND deletedAt IS NULL
   @@index([scheduledAt, deletedAt]) // calendar query: WHERE scheduledAt BETWEEN x AND y AND deletedAt IS NULL
   @@map("appointments")
+}
+
+/// A recurring booking template. Occurrences are pre-generated at creation time as normal
+/// Appointment rows (linked via seriesId) — each one goes through the exact same booking checks
+/// (business hours, holidays, leave, staff/room conflicts) as a manually-created appointment, so
+/// nothing else in the system needs to know a series exists at all.
+model AppointmentSeries {
+  id              String              @id @default(uuid())
+  patientId       String
+  staffId         String
+  serviceId       String
+  roomId          String?
+  frequency       RecurrenceFrequency
+  interval        Int                 @default(1)
+  /// Exactly one of endDate / occurrenceCount is set — enforced at the application layer, since
+  /// Prisma has no XOR constraint.
+  endDate         DateTime?           @db.Date
+  occurrenceCount Int?
+  /// Client-supplied dedup key — a retried "create series" request (double-click, slow-network
+  /// retry) with the same key returns the existing series instead of creating a duplicate.
+  idempotencyKey  String?             @unique @db.VarChar(100)
+  createdAt       DateTime            @default(now())
+
+  patient      Patient       @relation(fields: [patientId], references: [id])
+  staff        Staff         @relation(fields: [staffId], references: [id])
+  service      Service       @relation(fields: [serviceId], references: [id])
+  room         Room?         @relation(fields: [roomId], references: [id])
+  appointments Appointment[]
+
+  @@map("appointment_series")
 }
 
 model AppointmentReminder {
@@ -650,6 +705,9 @@ model Parametrizacao {
   @@map("parametrizacoes")
 }
 
+/// Append-only at the DB level via a trigger, not just app convention — see
+/// prisma/manual-sql/audit-log-immutable.sql (must be re-run by hand on a fresh database; not
+/// something `db push`/`migrate` can express or reapply).
 model AuditLog {
   id         String   @id @default(uuid())
   actorId    String?  @db.VarChar(36)

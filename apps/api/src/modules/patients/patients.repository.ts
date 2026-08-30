@@ -3,7 +3,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 import { Prisma } from "@cap/database";
 
-type MaybeNif = { nif?: string | null };
+type MaybeEncrypted = { nif?: string | null; dateOfBirth?: string | null };
 
 @Injectable()
 export class PatientsRepository {
@@ -18,21 +18,22 @@ export class PatientsRepository {
     return { nif: this.encryption.encrypt(nif), nifHash: this.encryption.blindIndex(nif) };
   }
 
-  private decrypted<T extends MaybeNif>(patient: T): T {
+  private decrypted<T extends MaybeEncrypted>(patient: T): T {
     // nifHash is an internal lookup detail with no client-side use — never return it, since it's
     // brute-forceable in practice given how small the NIF keyspace is.
-    const { nifHash: _nifHash, ...rest } = patient as MaybeNif & { nifHash?: unknown };
-    if (!rest.nif) return rest as T;
-    return { ...rest, nif: this.encryption.decrypt(rest.nif) } as T;
+    const { nifHash: _nifHash, ...rest } = patient as MaybeEncrypted & { nifHash?: unknown };
+    if (rest.nif) rest.nif = this.encryption.decrypt(rest.nif);
+    if (rest.dateOfBirth) rest.dateOfBirth = this.encryption.decrypt(rest.dateOfBirth);
+    return rest as T;
   }
 
-  private decryptedList<T extends MaybeNif>(patients: T[]): T[] {
+  private decryptedList<T extends MaybeEncrypted>(patients: T[]): T[] {
     return patients.map((p) => this.decrypted(p));
   }
 
   async findMany(args: Prisma.PatientFindManyArgs) {
     const rows = await this.prisma.patient.findMany(args);
-    return this.decryptedList(rows as MaybeNif[]) as typeof rows;
+    return this.decryptedList(rows as MaybeEncrypted[]) as typeof rows;
   }
 
   count(args: Prisma.PatientCountArgs) {
@@ -60,25 +61,44 @@ export class PatientsRepository {
   }
 
   async create(data: Prisma.PatientCreateInput) {
-    const { nif, ...rest } = data as Prisma.PatientCreateInput & MaybeNif;
+    const { nif, dateOfBirth, ...rest } = data as Prisma.PatientCreateInput & MaybeEncrypted;
     const patient = await this.prisma.patient.create({
-      data: { ...rest, ...this.nifFieldsFor(nif) },
+      data: { ...rest, ...this.nifFieldsFor(nif), dateOfBirth: this.encryption.encrypt(dateOfBirth as string) },
     });
     return this.decrypted(patient);
   }
 
   async update(id: string, data: Prisma.PatientUpdateInput) {
-    const { nif, ...rest } = data as Prisma.PatientUpdateInput & MaybeNif;
-    const patch = "nif" in data ? { ...rest, ...this.nifFieldsFor(nif as string | null | undefined) } : rest;
+    const { nif, dateOfBirth, ...rest } = data as Prisma.PatientUpdateInput & MaybeEncrypted;
+    const patch = {
+      ...rest,
+      ...("nif" in data ? this.nifFieldsFor(nif as string | null | undefined) : {}),
+      ...(dateOfBirth ? { dateOfBirth: this.encryption.encrypt(dateOfBirth as string) } : {}),
+    };
     const patient = await this.prisma.patient.update({ where: { id }, data: patch });
     return this.decrypted(patient);
   }
 
-  softDelete(id: string) {
-    return this.prisma.patient.update({
+  // Right to erasure: clears direct PII, not just deletedAt. gender/healthPlanId and every related
+  // record (appointments, invoices, notes, documents) are kept — they're not the identity itself,
+  // and billing/clinical history is retained for legal reasons (SECURITY.md).
+  async softDelete(id: string) {
+    const patient = await this.prisma.patient.update({
       where: { id },
-      data: { deletedAt: new Date() },
+      data: {
+        deletedAt: new Date(),
+        fullName: null,
+        dateOfBirth: null,
+        nif: null,
+        nifHash: null,
+        phone: null,
+        email: null,
+        address: null,
+        emergencyContactName: null,
+        emergencyContactPhone: null,
+      },
     });
+    return this.decrypted(patient);
   }
 
   createNote(data: Prisma.PatientNoteCreateInput) {

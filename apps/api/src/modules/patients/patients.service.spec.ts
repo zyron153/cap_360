@@ -1,5 +1,6 @@
 import { Test } from "@nestjs/testing";
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, BadRequestException } from "@nestjs/common";
+import { Prisma } from "@cap/database";
 import { PatientsService } from "./patients.service";
 import { PatientsRepository } from "./patients.repository";
 import { RequestContext } from "../../common/context/request-context";
@@ -66,6 +67,25 @@ describe("PatientsService", () => {
         expect.objectContaining({ phone: "+2389912345" })
       );
     });
+
+    it("adds the +238 country code when given a bare 7-digit local number", async () => {
+      // Previously this silently became "+9912345" — a broken number that would never
+      // receive a WhatsApp reminder, since nothing checked for a missing country code.
+      await service.create({ ...BASE_DTO, phone: "9912345" });
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ phone: "+2389912345" })
+      );
+    });
+
+    it("rejects a number that's too short to be a Cabo Verde number", async () => {
+      await expect(service.create({ ...BASE_DTO, phone: "12345" })).rejects.toThrow(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects a number with a non-Cabo-Verde country code instead of silently mangling it", async () => {
+      await expect(service.create({ ...BASE_DTO, phone: "+351912345678" })).rejects.toThrow(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
   });
 
   describe("NIF uniqueness check", () => {
@@ -77,6 +97,44 @@ describe("PatientsService", () => {
         service.create({ ...BASE_DTO, nif: "123456789" })
       ).rejects.toThrow(ConflictException);
       expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("translates a NIF unique-constraint race at the DB into a friendly ConflictException", async () => {
+      // The findByNif pre-check above is a nice-error fast path, not a guarantee — two
+      // concurrent creates for the same NIF can both pass it and race to the DB's unique
+      // constraint on nifHash. Without this, the loser gets a raw, unhandled Prisma error (500).
+      repo.findByPhone.mockResolvedValue(null);
+      repo.findByNif.mockResolvedValue(null);
+      repo.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`nifHash`)", {
+          code: "P2002",
+          clientVersion: "6.19.3",
+          meta: { target: ["nifHash"] },
+        })
+      );
+
+      await expect(service.create({ ...BASE_DTO, nif: "123456789" })).rejects.toThrow(ConflictException);
+    });
+
+    it("translates a phone unique-constraint race at the DB into a friendly ConflictException", async () => {
+      repo.findByPhone.mockResolvedValue(null);
+      repo.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`phone`)", {
+          code: "P2002",
+          clientVersion: "6.19.3",
+          meta: { target: ["phone"] },
+        })
+      );
+
+      await expect(service.create(BASE_DTO)).rejects.toThrow(ConflictException);
+    });
+
+    it("re-throws an unrelated database error unchanged", async () => {
+      repo.findByPhone.mockResolvedValue(null);
+      const dbError = new Error("connection reset");
+      repo.create.mockRejectedValue(dbError);
+
+      await expect(service.create(BASE_DTO)).rejects.toBe(dbError);
     });
 
     it("skips NIF check when NIF is not provided", async () => {
@@ -93,6 +151,34 @@ describe("PatientsService", () => {
 
       await expect(service.create(BASE_DTO)).rejects.toThrow(ConflictException);
       expect(repo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("update — unique-constraint race", () => {
+    it("translates a NIF unique-constraint race at the DB into a friendly ConflictException", async () => {
+      repo.findById.mockResolvedValue({ id: "p1", fullName: "Ana Costa" });
+      repo.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`nifHash`)", {
+          code: "P2002",
+          clientVersion: "6.19.3",
+          meta: { target: ["nifHash"] },
+        })
+      );
+
+      await expect(service.update("p1", { nif: "123456789" })).rejects.toThrow(ConflictException);
+    });
+
+    it("translates a phone unique-constraint race at the DB into a friendly ConflictException", async () => {
+      repo.findById.mockResolvedValue({ id: "p1", fullName: "Ana Costa" });
+      repo.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`phone`)", {
+          code: "P2002",
+          clientVersion: "6.19.3",
+          meta: { target: ["phone"] },
+        })
+      );
+
+      await expect(service.update("p1", { phone: "9912345" })).rejects.toThrow(ConflictException);
     });
   });
 
@@ -142,6 +228,59 @@ describe("PatientsService", () => {
         { deletedAt: new Date("2026-08-28T00:00:00Z") }
       );
       diffSpy.mockRestore();
+    });
+  });
+
+  describe("findOrCreateByPhone — consent", () => {
+    it("records the caller's real consentGiven value, not a hardcoded true", async () => {
+      repo.findByPhone.mockResolvedValue(null);
+      repo.findByNif.mockResolvedValue(null);
+      repo.create.mockResolvedValue({ id: "p1" });
+
+      await service.findOrCreateByPhone({
+        fullName: "Ana Costa",
+        phone: "+2389912345",
+        dateOfBirth: "1990-06-15",
+        gender: "female",
+        consentGiven: false,
+      });
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ consentGiven: false, consentGivenAt: null })
+      );
+    });
+
+    it("passes true through and timestamps it when the caller asserts real consent was captured", async () => {
+      repo.findByPhone.mockResolvedValue(null);
+      repo.findByNif.mockResolvedValue(null);
+      repo.create.mockResolvedValue({ id: "p1" });
+
+      await service.findOrCreateByPhone({
+        fullName: "Ana Costa",
+        phone: "+2389912345",
+        dateOfBirth: "1990-06-15",
+        gender: "female",
+        consentGiven: true,
+      });
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.consentGiven).toBe(true);
+      expect(call.consentGivenAt).toBeInstanceOf(Date);
+    });
+
+    it("does not create a second patient for an existing phone, regardless of consent passed", async () => {
+      repo.findByPhone.mockResolvedValue({ id: "existing" });
+
+      const result = await service.findOrCreateByPhone({
+        fullName: "Ana Costa",
+        phone: "+2389912345",
+        dateOfBirth: "1990-06-15",
+        gender: "female",
+        consentGiven: false,
+      });
+
+      expect(result).toEqual({ id: "existing" });
+      expect(repo.create).not.toHaveBeenCalled();
     });
   });
 });

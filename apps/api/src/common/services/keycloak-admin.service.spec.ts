@@ -65,3 +65,36 @@ describe("KeycloakAdminService.createUser — MFA enrollment", () => {
     }
   );
 });
+
+describe("KeycloakAdminService.deleteUser", () => {
+  let fetchMock: jest.Mock;
+  let service: KeycloakAdminService;
+
+  beforeEach(() => {
+    service = new KeycloakAdminService();
+    fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("/protocol/openid-connect/token")) {
+        return Promise.resolve(jsonResponse({ access_token: "tok", expires_in: 300 }));
+      }
+      if (init?.method === "DELETE" && url.endsWith("/users/kc-user-1")) {
+        return Promise.resolve(jsonResponse({}, { status: 204 }));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("sends a DELETE to the user's admin endpoint", async () => {
+    await service.deleteUser("kc-user-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/users/kc-user-1"),
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+});

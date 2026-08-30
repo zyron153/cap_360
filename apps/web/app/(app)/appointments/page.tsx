@@ -104,7 +104,11 @@ const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rg
 
 const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)]";
 
-const BLANK_APPT = { patientId: "", serviceId: "", staffId: "", apptDate: "", apptTime: "", notes: "" };
+const BLANK_APPT = {
+  patientId: "", serviceId: "", staffId: "", apptDate: "", apptTime: "", notes: "",
+  recurring: false, frequency: "weekly" as "daily" | "weekly" | "monthly", interval: "1",
+  endType: "count" as "count" | "date", occurrenceCount: "8", endDate: "",
+};
 
 export default function AppointmentsPage() {
   const { isLoading: permLoading, can, canDo } = usePermissions();
@@ -142,6 +146,29 @@ export default function AppointmentsPage() {
     onError: (err: Error) => addMessage("Error", err.message),
   });
 
+  const rescheduleMutation = useMutation({
+    mutationFn: ({ id, scheduledAt }: { id: string; scheduledAt: string }) =>
+      fetch(`/api/appointments/${id}/reschedule`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduledAt }),
+      }).then(async (r) => {
+        if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      addMessage("Success", "Marcação reagendada com sucesso!");
+    },
+  });
+
+  function handleEventDrop(id: string, newStart: Date, revert: () => void) {
+    rescheduleMutation.mutate(
+      { id, scheduledAt: newStart.toISOString() },
+      { onError: (err: Error) => { revert(); addMessage("Error", err.message); } }
+    );
+  }
+
   const { data: patients } = useQuery<{ data: { id: string; fullName: string }[] }>({
     queryKey: ["patients-list"],
     queryFn: () => fetch("/api/patients?limit=100").then((r) => r.json()),
@@ -164,7 +191,7 @@ export default function AppointmentsPage() {
     enabled: !!selectedId,
   });
 
-  function set(k: keyof typeof BLANK_APPT, v: string) { setForm((f) => ({ ...f, [k]: v })); }
+  function set<K extends keyof typeof BLANK_APPT>(k: K, v: (typeof BLANK_APPT)[K]) { setForm((f) => ({ ...f, [k]: v })); }
 
   function handleDateClick(dateStr: string, isTimeGrid: boolean) {
     setForm(f => ({
@@ -177,6 +204,8 @@ export default function AppointmentsPage() {
 
   async function addAppt() {
     if (!form.patientId || !form.staffId || !form.serviceId || !form.apptDate || !form.apptTime) return;
+    if (form.recurring && form.endType === "count" && !form.occurrenceCount) return;
+    if (form.recurring && form.endType === "date" && !form.endDate) return;
 
     const scheduledAt = `${form.apptDate}T${form.apptTime}`;
     const scheduleError = validateScheduledAt(scheduledAt);
@@ -187,6 +216,41 @@ export default function AppointmentsPage() {
 
     setSubmitting(true);
     try {
+      if (form.recurring) {
+        const res = await fetch("/api/appointments/series", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId: form.patientId,
+            staffId: form.staffId,
+            serviceId: form.serviceId,
+            scheduledAt: new Date(scheduledAt).toISOString(),
+            notes: form.notes || undefined,
+            source: "web",
+            frequency: form.frequency,
+            interval: Number(form.interval) || 1,
+            ...(form.endType === "count"
+              ? { occurrenceCount: Number(form.occurrenceCount) }
+              : { endDate: form.endDate }),
+            idempotencyKey: apptIdempotencyKey,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.message ?? "Erro ao criar marcações recorrentes");
+        }
+        const data = await res.json();
+        setForm(BLANK_APPT);
+        setNewOpen(false);
+        setApptIdempotencyKey(crypto.randomUUID());
+        queryClient.invalidateQueries({ queryKey: ["appointments"] });
+        const skippedNote = data.skipped?.length
+          ? ` (${data.skipped.length} não puderam ser criadas — conflito de horário ou feriado)`
+          : "";
+        addMessage("Success", `${data.created.length} marcações recorrentes criadas com sucesso!${skippedNote}`);
+        return;
+      }
+
       const res = await fetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -267,6 +331,14 @@ export default function AppointmentsPage() {
     backgroundColor: STATUS_COLORS[a.status] ?? "#8E8EA8",
     borderColor: "transparent",
     textColor: "#ffffff",
+    // Mirrors the backend's own rule (only pending/confirmed can be rescheduled) so dragging an
+    // already-completed/cancelled appointment is visibly not offered, instead of letting the user
+    // drag it and only finding out it's rejected after the fact.
+    editable: ["pending", "confirmed"].includes(a.status),
+    // Per-event `editable: true` overrides the calendar's global eventDurationEditable={false} —
+    // FullCalendar treats it as "fully editable" unless durationEditable is also set here, so
+    // resize (duration change, which reschedule has no concept of) has to be disabled per event too.
+    durationEditable: false,
   }));
 
   const sortedList = [...filteredAppts].sort(
@@ -371,7 +443,7 @@ export default function AppointmentsPage() {
       {/* Calendar view */}
       {view === "calendar" && (
         <div className={CARD}>
-          <CalendarView events={events} onEventClick={setSelectedId} onDateClick={handleDateClick} />
+          <CalendarView events={events} onEventClick={setSelectedId} onDateClick={handleDateClick} onEventDrop={handleEventDrop} />
         </div>
       )}
 
@@ -494,14 +566,61 @@ export default function AppointmentsPage() {
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
           <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Observações opcionais…" className={`${inputCls} resize-none`} />
         </div>
+        <div className="col-span-2">
+          <label className="flex items-center gap-2 text-[13px] font-medium text-dim-800 cursor-pointer">
+            <input type="checkbox" checked={form.recurring} onChange={(e) => set("recurring", e.target.checked)} className="w-4 h-4 rounded border-dim-300 text-brand-700 focus:ring-brand-500" />
+            Tornar recorrente
+          </label>
+        </div>
+        {form.recurring && (
+          <>
+            <div>
+              <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Repetir</label>
+              <select value={form.frequency} onChange={(e) => set("frequency", e.target.value as typeof form.frequency)} className={inputCls}>
+                <option value="daily">Diariamente</option>
+                <option value="weekly">Semanalmente</option>
+                <option value="monthly">Mensalmente</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">A cada</label>
+              <input type="number" min={1} value={form.interval} onChange={(e) => set("interval", e.target.value)} className={inputCls} />
+            </div>
+            <div className="col-span-2 flex gap-4 text-[13px] text-dim-700">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="endType" checked={form.endType === "count"} onChange={() => set("endType", "count")} />
+                Nº de sessões
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="radio" name="endType" checked={form.endType === "date"} onChange={() => set("endType", "date")} />
+                Até uma data
+              </label>
+            </div>
+            {form.endType === "count" ? (
+              <div>
+                <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Nº de sessões *</label>
+                <input type="number" min={1} max={104} value={form.occurrenceCount} onChange={(e) => set("occurrenceCount", e.target.value)} className={inputCls} />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Até *</label>
+                <input type="date" value={form.endDate} onChange={(e) => set("endDate", e.target.value)} className={inputCls} />
+              </div>
+            )}
+          </>
+        )}
       </div>
       <div className="px-6 py-4 border-t border-dim-100 flex items-center gap-3">
         <button
           onClick={addAppt}
-          disabled={submitting || !form.patientId || !form.staffId || !form.serviceId || !form.apptDate || !form.apptTime}
+          disabled={
+            submitting || !form.patientId || !form.staffId || !form.serviceId || !form.apptDate || !form.apptTime ||
+            (form.recurring && form.endType === "count" && !form.occurrenceCount) ||
+            (form.recurring && form.endType === "date" && !form.endDate)
+          }
           className="bg-brand-700 hover:bg-brand-800 disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors"
         >
-          {submitting ? "A guardar…" : "Guardar Marcação"}
+          {submitting ? "A guardar…" : form.recurring ? "Guardar Marcações" : "Guardar Marcação"}
         </button>
         <button onClick={() => setNewOpen(false)} className="border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 font-medium px-5 py-2.5 rounded-[10px] text-[13px] transition-colors">
           Cancelar

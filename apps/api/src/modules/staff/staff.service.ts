@@ -91,15 +91,27 @@ export class StaffService {
       role: invite.role,
     });
 
-    const staff = await this.repo.create(keycloakId, {
-      fullName: dto.fullName.trim(),
-      email: invite.email,
-      role: invite.role,
-      jobTitle: invite.jobTitle,
-      phone: invite.phone,
-      specialtyCode: invite.specialtyCode,
-      availability: (invite.availability as { dayOfWeek: number; startTime: string; endTime: string }[] | null) ?? undefined,
-    });
+    let staff;
+    try {
+      staff = await this.repo.create(keycloakId, {
+        fullName: dto.fullName.trim(),
+        email: invite.email,
+        role: invite.role,
+        jobTitle: invite.jobTitle,
+        phone: invite.phone,
+        specialtyCode: invite.specialtyCode,
+        availability: (invite.availability as { dayOfWeek: number; startTime: string; endTime: string }[] | null) ?? undefined,
+      });
+    } catch (err) {
+      // The Keycloak user above was already created — if the local write fails, clean it up
+      // rather than leave an orphaned Keycloak account with no app-side record. Best-effort:
+      // a delete failure here must not mask the original error. Scoped to just this call —
+      // if create() succeeds but markInvitationAccepted below fails, the staff row is valid and
+      // deleting its Keycloak account would be wrong; that failure is self-recoverable instead
+      // (the invitation stays unaccepted, retrying just hits Keycloak's 409 on the same email).
+      await this.keycloak.deleteUser(keycloakId).catch(() => undefined);
+      throw err;
+    }
 
     await this.repo.markInvitationAccepted(invite.id);
     return staff;

@@ -56,9 +56,12 @@ export class EFaturaProcessor {
     }
 
     try {
-      // patient.nif is stored encrypted — decrypt before it ever reaches the tax authority payload
+      // patient.nif is stored encrypted — decrypt before it ever reaches the tax authority payload.
+      // fullName can be null if the patient was erased (right to erasure) since this invoice was
+      // issued — "Consumidor final" mirrors how e-invoicing systems report anonymous customers.
       const patient = {
         ...invoice.patient,
+        fullName: invoice.patient.fullName ?? "Consumidor final",
         nif: invoice.patient.nif ? this.encryption.decrypt(invoice.patient.nif) : invoice.patient.nif,
       };
       const payload = this.efatura.buildPayload(cfg, {
