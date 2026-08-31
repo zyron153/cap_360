@@ -1,12 +1,11 @@
 import { createParamDecorator, ExecutionContext } from "@nestjs/common";
 
+/** The request principal attached by SessionAuthGuard — `sub` is the Staff id directly (no
+ * external identity provider indirection). */
 export interface JwtUser {
   sub: string;
   email: string;
-  preferred_username: string;
-  realm_access: { roles: string[] };
-  /** Present only when the Keycloak user is a patient (set via patient-id-mapper protocol mapper) */
-  patient_id?: string;
+  roles: string[];
 }
 
 export const CurrentUser = createParamDecorator(

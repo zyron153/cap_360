@@ -1,30 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/activate"];
+const PUBLIC_PATHS = ["/login", "/activate", "/forgot-password", "/reset-password"];
+const SESSION_COOKIE = "cap_session";
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Our own OAuth route handlers manage cookies directly — never touch them here
-  if (pathname.startsWith("/api/auth/")) return NextResponse.next();
+  // /api/* is proxied straight to the API by next.config.ts's rewrite — the session cookie
+  // travels with the request automatically (same browser-facing origin), and SessionAuthGuard
+  // enforces auth server-side. Nothing for this middleware to add here.
+  if (pathname.startsWith("/api/")) return NextResponse.next();
 
-  const accessToken = req.cookies.get("access_token")?.value;
+  const hasSession = Boolean(req.cookies.get(SESSION_COOKIE)?.value);
 
-  // Calls proxied to the backend API (see next.config.ts rewrites) — attach the bearer token
-  if (pathname.startsWith("/api/")) {
-    if (!accessToken) return NextResponse.next(); // let it through; API will 401 on its own
-    const headers = new Headers(req.headers);
-    headers.set("Authorization", `Bearer ${accessToken}`);
-    return NextResponse.next({ request: { headers } });
-  }
-
-  // Protect the app shell
-  // ponytail: Keycloak is flaky in dev (H2 in-memory db loses tables on restart) — skip the
-  // gate outside production, same condition JwtAuthGuard already uses on the API side.
-  // Fail-safe by default: bypass requires an explicit opt-in, not just an unset var.
+  // ponytail: mirrors SessionAuthGuard's own dev-only bypass so `pnpm dev` doesn't require a
+  // real login. Fail-safe by default: requires explicit opt-in, not just an unset var.
   const devBypass = process.env.NODE_ENV !== "production" && process.env.AUTH_BYPASS === "true";
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-  if (!isPublic && !accessToken && !devBypass) {
+  if (!isPublic && !hasSession && !devBypass) {
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);

@@ -170,6 +170,27 @@ export class NotificationsProcessor {
     });
   }
 
+  @Process("send-password-reset")
+  async handlePasswordReset(job: Job<{ email: string; fullName: string; token: string }>) {
+    const smtp = await this.cfg<SmtpConfig>("integration_email_smtp");
+    if (!smtp?.host) return;
+
+    const { email, fullName, token } = job.data;
+    const resetUrl = `${process.env.WEB_URL ?? "http://localhost:3000"}/reset-password?token=${token}`;
+
+    const html = `<div style="font-family:sans-serif;max-width:480px">
+      <h2>Recuperação de Palavra-passe — CAP</h2>
+      <p>Olá ${fullName},</p>
+      <p>Recebemos um pedido para repor a palavra-passe da sua conta. Clique no botão abaixo para definir uma nova.</p>
+      <p style="margin:24px 0"><a href="${resetUrl}" style="background:#0D8080;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Repor Palavra-passe</a></p>
+      <p style="color:#666;font-size:12px">Este link expira em 1 hora. Se não fez este pedido, ignore este email — a sua palavra-passe atual continua válida.</p>
+    </div>`;
+
+    await this.createTransport(smtp).sendMail({
+      from: this.from(smtp), to: email, subject: "Recuperação de Palavra-passe — CAP", html,
+    });
+  }
+
   @Process("overdue-invoices")
   async handleOverdueInvoices(_job: Job) {
     // InvoiceStatus.overdue existed as an enum value with nothing that ever set it — this is a

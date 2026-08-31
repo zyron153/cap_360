@@ -656,19 +656,6 @@ type FieldDef = { key: string; label: string; placeholder: string; type?: string
 
 const INTEGRATIONS_DEF = [
   {
-    key: "keycloak",
-    name: "Keycloak SSO",
-    desc: "Autenticação e gestão de identidades",
-    icon: Shield, color: "text-brand-600", bg: "bg-brand-50",
-    defaultStatus: "connected" as IntgStatus,
-    fields: [
-      { key: "serverUrl",     label: "Server URL",     placeholder: "https://auth.cap.cv",  type: "url"      },
-      { key: "realm",         label: "Realm",          placeholder: "cap"                                    },
-      { key: "clientId",      label: "Client ID",      placeholder: "cms-api"                                      },
-      { key: "clientSecret",  label: "Client Secret",  placeholder: "••••••••",                   type: "password" },
-    ] as FieldDef[],
-  },
-  {
     key: "whatsapp",
     name: "WhatsApp Business",
     desc: "Mensagens automáticas aos pacientes",
@@ -1100,11 +1087,39 @@ function IntegrationConfigModal({
   );
 }
 
-/* ── Security Tab (static — auth managed by Keycloak) ────── */
+/* ── Security Tab ─────────────────────────────────────────── */
 
 function SecurityTab() {
   const [showPw, setShowPw] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const { addMessage } = useMessage();
+
+  const changePw = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/staff/me/password", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.message ?? "Não foi possível atualizar a palavra-passe.");
+      }
+    },
+    onSuccess: () => {
+      addMessage("Success", "Palavra-passe atualizada com sucesso.");
+      setCurrentPassword(""); setNewPassword(""); setConfirmPassword("");
+    },
+    onError: (e: Error) => addMessage("Error", e.message),
+  });
+
+  function submitPasswordChange() {
+    if (!currentPassword || !newPassword) { addMessage("Error", "Preencha todos os campos."); return; }
+    if (newPassword !== confirmPassword) { addMessage("Error", "As palavras-passe novas não coincidem."); return; }
+    changePw.mutate();
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -1115,24 +1130,25 @@ function SecurityTab() {
         <div className="px-5 py-5 flex flex-col gap-4 max-w-md">
           <Field label="Palavra-passe actual">
             <div className="relative">
-              <input type={showPw ? "text" : "password"} className={inputCls} placeholder="••••••••" />
+              <input type={showPw ? "text" : "password"} className={inputCls} placeholder="••••••••" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" />
               <button type="button" onClick={() => setShowPw(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-dim-400 hover:text-dim-700 transition-colors">
                 {showPw ? <EyeOff style={{ width: 14, height: 14 }} /> : <Eye style={{ width: 14, height: 14 }} />}
               </button>
             </div>
           </Field>
           <Field label="Nova palavra-passe">
-            <input type="password" className={inputCls} placeholder="••••••••" />
+            <input type="password" className={inputCls} placeholder="Mín. 10 caracteres, maiúscula e número" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
           </Field>
           <Field label="Confirmar nova palavra-passe">
-            <input type="password" className={inputCls} placeholder="••••••••" />
+            <input type="password" className={inputCls} placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
           </Field>
           <button
-            onClick={() => addMessage("Info", "Alteração de palavra-passe gerida pelo Keycloak SSO.")}
-            className="flex items-center gap-2 w-fit bg-brand-700 hover:bg-brand-800 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors"
+            onClick={submitPasswordChange}
+            disabled={changePw.isPending}
+            className="flex items-center gap-2 w-fit bg-brand-700 hover:bg-brand-800 disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors"
           >
             <Key className="w-3.5 h-3.5" />
-            Actualizar Palavra-passe
+            {changePw.isPending ? "A atualizar…" : "Actualizar Palavra-passe"}
           </button>
         </div>
       </div>
@@ -1149,15 +1165,15 @@ function SecurityTab() {
             <div>
               <p className="text-[13px] font-semibold text-dim-900">2FA via aplicação autenticadora</p>
               <p className="text-[11px] text-dim-400 mt-0.5">Proteja a sua conta com TOTP (Google Authenticator, Authy, etc.)</p>
-              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-600 font-medium">
+              <div className="mt-2 flex items-center gap-1.5 text-[11px] text-dim-400 font-medium">
                 <AlertCircle style={{ width: 12, height: 12 }} />
-                Gerido pelo Keycloak SSO
+                Em breve
               </div>
             </div>
           </div>
           <button
-            onClick={() => addMessage("Info", "Configure o 2FA no portal Keycloak da clínica.")}
-            className="text-[12px] font-semibold px-3.5 py-2 rounded-[10px] border border-brand-400 text-brand-700 hover:bg-brand-50 transition-colors shrink-0"
+            disabled
+            className="text-[12px] font-semibold px-3.5 py-2 rounded-[10px] border border-dim-200 text-dim-400 cursor-not-allowed shrink-0"
           >
             Configurar 2FA
           </button>
@@ -1167,12 +1183,11 @@ function SecurityTab() {
       <div className={CARD}>
         <div className="px-5 py-4 border-b border-dim-100">
           <h3 className="font-display text-[14px] font-semibold text-dim-900">Sessões Activas</h3>
+          <p className="text-[11px] text-dim-400 mt-1">Gestão detalhada de sessões (por dispositivo) ainda não disponível — cada sessão expira automaticamente ao fim de 8h de inactividade.</p>
         </div>
         <div className="divide-y divide-dim-100">
           {[
-            { device: "Chrome · Windows 11", location: "Praia, Cabo Verde", time: "Agora",       current: true  },
-            { device: "Safari · iPhone 15",  location: "Praia, Cabo Verde", time: "Há 2 horas",  current: false },
-            { device: "Chrome · macOS",      location: "Lisboa, Portugal",  time: "Ontem",       current: false },
+            { device: "Esta sessão", location: "Praia, Cabo Verde", time: "Agora",       current: true  },
           ].map(s => (
             <div key={s.device} className="px-5 py-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -1185,10 +1200,7 @@ function SecurityTab() {
                   </div>
                 </div>
               </div>
-              {s.current
-                ? <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Esta sessão</span>
-                : <button onClick={() => addMessage("Info", "Gestão de sessões disponível no portal Keycloak.")} className="text-[11px] font-semibold text-red-500 hover:text-red-700 transition-colors">Terminar</button>
-              }
+              <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Esta sessão</span>
             </div>
           ))}
         </div>

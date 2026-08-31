@@ -13,7 +13,8 @@
     "db:reset": "prisma migrate reset --force"
   },
   "dependencies": {
-    "@prisma/client": "^6.0.0"
+    "@prisma/client": "^6.0.0",
+    "argon2": "^0.41.1"
   },
   "devDependencies": {
     "@cap/config": "workspace:*",

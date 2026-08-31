@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Req } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Req, HttpCode, HttpStatus } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto } from "@cap/types";
+import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto, ChangePasswordSchema, ChangePasswordDto } from "@cap/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")
@@ -11,7 +11,20 @@ export class StaffController {
 
   @Get("me")
   findMe(@Req() req: { user: { sub: string; email?: string } }) {
-    return this.service.findMe(req.user.sub);
+    return this.service.findById(req.user.sub);
+  }
+
+  // Overrides the controller's role list — every real StaffRole (including lab_tech,
+  // corporate_hr) may change their own password, not just the 4 roles listed above.
+  @Patch("me/password")
+  @Roles("admin", "receptionist", "doctor", "nurse", "lab_tech", "corporate_hr")
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @Req() req: { user: { sub: string } },
+    @Body(new ZodValidationPipe(ChangePasswordSchema)) dto: ChangePasswordDto,
+  ) {
+    await this.service.changePassword(req.user.sub, dto);
+    return { message: "Palavra-passe atualizada com sucesso." };
   }
 
   @Get()

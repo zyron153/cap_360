@@ -28,7 +28,7 @@ const repo = {
   paymentsInRange: jest.fn(),
 };
 const r2 = { upload: jest.fn(), signedUrl: jest.fn() };
-const staff = { findMe: jest.fn() };
+const staff = { findById: jest.fn() };
 
 const EXPENSE = { id: "exp-1", status: "pending", amount: "1500" };
 
@@ -50,7 +50,7 @@ describe("FinanceiroService", () => {
 
   describe("createExpense", () => {
     it("links requestedBy when the caller resolves to a real staff record", async () => {
-      staff.findMe.mockResolvedValue({ id: "staff-1", fullName: "Ana" });
+      staff.findById.mockResolvedValue({ id: "staff-1", fullName: "Ana" });
       repo.createExpense.mockResolvedValue({});
       await service.createExpense(
         { description: "Material", category: "Fornecimentos", amount: 500, date: "2026-08-27", method: "cash" },
@@ -59,17 +59,6 @@ describe("FinanceiroService", () => {
       expect(repo.createExpense).toHaveBeenCalledWith(
         expect.objectContaining({ requestedBy: { connect: { id: "staff-1" } } })
       );
-    });
-
-    it("omits requestedBy when findMe falls back to a dev-bypass user with no id", async () => {
-      staff.findMe.mockResolvedValue({ id: null, fullName: "Dev Admin" });
-      repo.createExpense.mockResolvedValue({});
-      await service.createExpense(
-        { description: "Material", category: "Fornecimentos", amount: 500, date: "2026-08-27", method: "cash" },
-        "kc-dev"
-      );
-      const call = repo.createExpense.mock.calls[0][0];
-      expect(call).not.toHaveProperty("requestedBy");
     });
   });
 
@@ -96,23 +85,13 @@ describe("FinanceiroService", () => {
   describe("decideExpense — approval status machine", () => {
     it("approves a pending expense and links the approver", async () => {
       repo.findExpenseById.mockResolvedValue(EXPENSE);
-      staff.findMe.mockResolvedValue({ id: "staff-2", fullName: "Admin" });
+      staff.findById.mockResolvedValue({ id: "staff-2", fullName: "Admin" });
       repo.updateExpense.mockResolvedValue({});
       await service.decideExpense("exp-1", { status: "approved" }, "kc-2");
       expect(repo.updateExpense).toHaveBeenCalledWith(
         "exp-1",
         expect.objectContaining({ status: "approved", approvedBy: { connect: { id: "staff-2" } } })
       );
-    });
-
-    it("omits approvedBy when the approver has no staff id", async () => {
-      repo.findExpenseById.mockResolvedValue(EXPENSE);
-      staff.findMe.mockResolvedValue({ id: null, fullName: "Dev Admin" });
-      repo.updateExpense.mockResolvedValue({});
-      await service.decideExpense("exp-1", { status: "rejected" }, "kc-dev");
-      const call = repo.updateExpense.mock.calls[0][1];
-      expect(call).not.toHaveProperty("approvedBy");
-      expect(call.status).toBe("rejected");
     });
 
     it("throws BadRequestException when the expense was already decided", async () => {
@@ -145,7 +124,7 @@ describe("FinanceiroService", () => {
 
     it("decideExpense records the status transition", async () => {
       repo.findExpenseById.mockResolvedValue(EXPENSE);
-      staff.findMe.mockResolvedValue({ id: "staff-2", fullName: "Admin" });
+      staff.findById.mockResolvedValue({ id: "staff-2", fullName: "Admin" });
       repo.updateExpense.mockResolvedValue({ ...EXPENSE, status: "approved" });
 
       await service.decideExpense("exp-1", { status: "approved" }, "kc-2");

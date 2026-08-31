@@ -1,17 +1,30 @@
 import { PrismaClient } from "@prisma/client";
+import * as argon2 from "argon2";
+import { createCipheriv, createHmac, randomBytes } from "crypto";
 
 const prisma = new PrismaClient();
 
-// Fixed Keycloak UUIDs — must match infra/keycloak/cap-realm.json user `id` fields
-const KEYCLOAK_IDS = {
-  admin:        "a0000000-0000-0000-0000-000000000001",
-  drSilva:      "a0000000-0000-0000-0000-000000000002",
-  drCosta:      "a0000000-0000-0000-0000-000000000003",
-  nurseAndrade: "a0000000-0000-0000-0000-000000000004",
-  recepAna:     "a0000000-0000-0000-0000-000000000005",
-  recepJoao:    "a0000000-0000-0000-0000-000000000006",
-  labPedro:     "a0000000-0000-0000-0000-000000000007",
-};
+// Same algorithm as apps/api's EncryptionService, duplicated here rather than imported —
+// packages/database can't depend on apps/api (that's the wrong direction of the dependency
+// graph). Only used to seed encrypted columns (Patient.dateOfBirth/nif) with data the API can
+// actually decrypt back.
+const ENCRYPTION_KEY = Buffer.from(process.env.FIELD_ENCRYPTION_KEY ?? "", "hex");
+function encryptField(plaintext: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", ENCRYPTION_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${encrypted.toString("hex")}`;
+}
+function blindIndex(plaintext: string): string {
+  return createHmac("sha256", ENCRYPTION_KEY).update(`blind-index:${plaintext}`).digest("hex");
+}
+
+// Dev/seed login for every staff account below — obviously not for production use.
+const SEED_PASSWORD = "Teste@1234";
+
+// Fixed id for the admin only, so it matches SessionAuthGuard's AUTH_BYPASS dev-admin fallback
+// sub (see common/guards/session-auth.guard.ts) — every other staff member gets a fresh uuid.
+const ADMIN_ID = "65093d59-792a-4792-bfc3-300c37725ac9";
 
 const COMPANY_IDS = {
   impar:    "c0000000-0000-0000-0000-000000000001",
@@ -21,6 +34,7 @@ const COMPANY_IDS = {
 
 async function main() {
   console.warn("Seeding database...");
+  const passwordHash = await argon2.hash(SEED_PASSWORD, { type: argon2.argon2id });
 
   // ─── Services ──────────────────────────────────────────────────────────────
   const services = await Promise.all([
@@ -183,13 +197,14 @@ async function main() {
   ]);
 
   // ─── Staff ─────────────────────────────────────────────────────────────────
+  // Every account below logs in with email + SEED_PASSWORD ("Teste@1234") — dev/seed data only.
   const [drSilva, drCosta, nurseAndrade, recepAna, recepJoao, labPedro, adminUser] =
     await Promise.all([
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.drSilva },
-        update: {},
+        where: { email: "dr.silva@cap.cv" },
+        update: { passwordHash }, // backfills existing rows that predate this column
         create: {
-          keycloakId: KEYCLOAK_IDS.drSilva,
+          passwordHash,
           fullName: "Dr. Carlos Silva",
           email: "dr.silva@cap.cv",
           role: "doctor",
@@ -198,10 +213,10 @@ async function main() {
         },
       }),
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.drCosta },
-        update: {},
+        where: { email: "dr.costa@cap.cv" },
+        update: { passwordHash }, // backfills existing rows that predate this column
         create: {
-          keycloakId: KEYCLOAK_IDS.drCosta,
+          passwordHash,
           fullName: "Dra. Ana Costa",
           email: "dr.costa@cap.cv",
           role: "doctor",
@@ -210,10 +225,10 @@ async function main() {
         },
       }),
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.nurseAndrade },
-        update: {},
+        where: { email: "maria.nurse@cap.cv" },
+        update: { passwordHash }, // backfills existing rows that predate this column
         create: {
-          keycloakId: KEYCLOAK_IDS.nurseAndrade,
+          passwordHash,
           fullName: "Maria Andrade",
           email: "maria.nurse@cap.cv",
           role: "nurse",
@@ -221,10 +236,10 @@ async function main() {
         },
       }),
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.recepAna },
-        update: {},
+        where: { email: "ana.recepcao@cap.cv" },
+        update: { passwordHash }, // backfills existing rows that predate this column
         create: {
-          keycloakId: KEYCLOAK_IDS.recepAna,
+          passwordHash,
           fullName: "Ana Lopes",
           email: "ana.recepcao@cap.cv",
           role: "receptionist",
@@ -232,10 +247,10 @@ async function main() {
         },
       }),
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.recepJoao },
-        update: {},
+        where: { email: "joao.recepcao@cap.cv" },
+        update: { passwordHash }, // backfills existing rows that predate this column
         create: {
-          keycloakId: KEYCLOAK_IDS.recepJoao,
+          passwordHash,
           fullName: "João Monteiro",
           email: "joao.recepcao@cap.cv",
           role: "receptionist",
@@ -243,10 +258,10 @@ async function main() {
         },
       }),
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.labPedro },
-        update: {},
+        where: { email: "pedro.lab@cap.cv" },
+        update: { passwordHash }, // backfills existing rows that predate this column
         create: {
-          keycloakId: KEYCLOAK_IDS.labPedro,
+          passwordHash,
           fullName: "Pedro Ferreira",
           email: "pedro.lab@cap.cv",
           role: "lab_tech",
@@ -254,10 +269,11 @@ async function main() {
         },
       }),
       prisma.staff.upsert({
-        where: { keycloakId: KEYCLOAK_IDS.admin },
+        where: { id: ADMIN_ID },
         update: {},
         create: {
-          keycloakId: KEYCLOAK_IDS.admin,
+          id: ADMIN_ID,
+          passwordHash,
           fullName: "Administrador Sistema",
           email: "capjacobvicente@gmail.com",
           role: "admin",
@@ -290,11 +306,12 @@ async function main() {
       update: {},
       create: {
         fullName: "João Barros",
-        dateOfBirth: new Date("1985-03-15"),
+        dateOfBirth: encryptField("1985-03-15"),
         gender: "male",
         phone: "+2389800001",
         email: "joao.barros@email.com",
-        nif: "123456789",
+        nif: encryptField("123456789"),
+        nifHash: blindIndex("123456789"),
         consentGiven: true,
         consentGivenAt: new Date(),
       },
@@ -304,7 +321,7 @@ async function main() {
       update: {},
       create: {
         fullName: "Maria Tavares",
-        dateOfBirth: new Date("1992-07-22"),
+        dateOfBirth: encryptField("1992-07-22"),
         gender: "female",
         phone: "+2389800002",
         email: "maria.tavares@email.com",
@@ -317,7 +334,7 @@ async function main() {
       update: {},
       create: {
         fullName: "António Fonseca",
-        dateOfBirth: new Date("1978-11-08"),
+        dateOfBirth: encryptField("1978-11-08"),
         gender: "male",
         phone: "+2389800003",
         consentGiven: true,
@@ -329,7 +346,7 @@ async function main() {
       update: {},
       create: {
         fullName: "Carla Neves",
-        dateOfBirth: new Date("2001-05-30"),
+        dateOfBirth: encryptField("2001-05-30"),
         gender: "female",
         phone: "+2389800004",
         email: "carla.neves@email.com",
@@ -342,7 +359,7 @@ async function main() {
       update: {},
       create: {
         fullName: "Pedro Gonçalves",
-        dateOfBirth: new Date("1955-09-12"),
+        dateOfBirth: encryptField("1955-09-12"),
         gender: "male",
         phone: "+2389800005",
         consentGiven: true,
@@ -354,7 +371,7 @@ async function main() {
       update: {},
       create: {
         fullName: "João Duarte",
-        dateOfBirth: new Date("2006-01-02"),
+        dateOfBirth: encryptField("2006-01-02"),
         gender: "male",
         phone: "+9656565",
         email: "teste@mail.com",
@@ -494,6 +511,8 @@ async function main() {
   console.warn(
     `Seeded 3 companies, 8 health plan products, ${services.length} services, ${rooms.length} rooms, 7 staff, 6 patients, ${appointmentsData.length} appointments, ${holidays.length} public holidays, ${totalParams} parametrizações.`
   );
+  console.warn(`All staff accounts log in with password: ${SEED_PASSWORD}`);
+  console.warn(`Admin: capjacobvicente@gmail.com`);
 }
 
 main()

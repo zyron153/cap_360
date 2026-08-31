@@ -52,8 +52,10 @@ export class FinanceiroService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async createExpense(dto: CreateExpenseDto, keycloakId: string) {
-    const requester = await this.staff.findMe(keycloakId);
+  async createExpense(dto: CreateExpenseDto, staffId: string) {
+    // A session's staffId always resolves to a real Staff row (sessions are only ever created
+    // for one) — findById throwing here would mean a session outlived its own staff record.
+    const requester = await this.staff.findById(staffId);
     return this.repo.createExpense({
       description: dto.description,
       category: dto.category,
@@ -63,7 +65,7 @@ export class FinanceiroService {
       method: dto.method,
       reference: dto.reference ?? null,
       notes: dto.notes ?? null,
-      ...(requester.id ? { requestedBy: { connect: { id: requester.id } } } : {}),
+      requestedBy: { connect: { id: requester.id } },
     });
   }
 
@@ -79,15 +81,15 @@ export class FinanceiroService {
     return updated;
   }
 
-  async decideExpense(id: string, dto: ExpenseDecisionDto, keycloakId: string) {
+  async decideExpense(id: string, dto: ExpenseDecisionDto, staffId: string) {
     const existing = await this.repo.findExpenseById(id);
     if (!existing) throw new NotFoundException(`Expense ${id} not found`);
     if (existing.status !== "pending") throw new BadRequestException("Esta despesa já foi decidida");
-    const approver = await this.staff.findMe(keycloakId);
+    const approver = await this.staff.findById(staffId);
     const updated = await this.repo.updateExpense(id, {
       status: dto.status,
       approvedAt: new Date(),
-      ...(approver.id ? { approvedBy: { connect: { id: approver.id } } } : {}),
+      approvedBy: { connect: { id: approver.id } },
     });
     RequestContext.setAuditDiff({ status: existing.status }, { status: dto.status });
     return updated;

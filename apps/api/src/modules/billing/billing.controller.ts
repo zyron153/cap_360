@@ -49,7 +49,7 @@ export class BillingController {
     @Body(new ZodValidationPipe(CreateInvoiceSchema)) dto: CreateInvoiceDto,
     @CurrentUser() user: JwtUser
   ) {
-    return this.service.create(dto, user.realm_access.roles);
+    return this.service.create(dto, user.roles);
   }
 
   @Post(":id/payments")

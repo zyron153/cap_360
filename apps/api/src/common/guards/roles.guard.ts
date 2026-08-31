@@ -14,8 +14,7 @@ export class RolesGuard implements CanActivate {
     if (!requiredRoles || requiredRoles.length === 0) return true;
 
     const { user } = context.switchToHttp().getRequest();
-    const userRoles: string[] =
-      user?.realm_access?.roles ?? user?.resource_access?.api?.roles ?? [];
+    const userRoles: string[] = user?.roles ?? [];
 
     return requiredRoles.some((role) => userRoles.includes(role));
   }

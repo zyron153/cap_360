@@ -1,5 +1,6 @@
 import { NestFactory } from "@nestjs/core";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { ZodValidationPipe } from "./common/pipes/zod-validation.pipe";
@@ -10,6 +11,7 @@ async function bootstrap() {
   });
 
   app.use(helmet());
+  app.use(cookieParser());
   app.setGlobalPrefix("v1");
 
   app.enableCors({

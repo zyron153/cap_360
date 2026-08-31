@@ -25,7 +25,8 @@ export type UpdateStaffDto = z.infer<typeof UpdateStaffSchema>;
 export const InviteStaffSchema = CreateStaffSchema;
 export type InviteStaffDto = z.infer<typeof InviteStaffSchema>;
 
-// Mirrors the Keycloak realm's passwordPolicy: length(10) and upperCase(1) and digits(1)
+// Password policy: minimum 10 chars, at least one uppercase letter and one digit (see auth.ts's
+// ResetPasswordSchema/ChangePasswordSchema, which reuse the same policy).
 export const ActivateInvitationSchema = z.object({
   fullName: z.string().min(2).max(150),
   password: z.string().min(10).max(72).regex(/[A-Z]/, "password must contain an uppercase letter").regex(/\d/, "password must contain a digit"),

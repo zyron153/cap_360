@@ -42,15 +42,28 @@ export class StaffRepository {
     });
   }
 
-  findByKeycloakId(keycloakId: string) {
+  findByEmail(email: string) {
+    return this.prisma.staff.findFirst({ where: { email, deletedAt: null } });
+  }
+
+  /** Only the login path needs the hash — every other read goes through STAFF_SELECT, which omits it. */
+  findByEmailWithPassword(email: string) {
     return this.prisma.staff.findFirst({
-      where: { keycloakId, deletedAt: null },
-      select: STAFF_SELECT,
+      where: { email, deletedAt: null },
+      select: { ...STAFF_SELECT, passwordHash: true },
     });
   }
 
-  findByEmail(email: string) {
-    return this.prisma.staff.findFirst({ where: { email, deletedAt: null } });
+  /** Only the change-password path needs the hash — see findByEmailWithPassword above. */
+  findByIdWithPassword(id: string) {
+    return this.prisma.staff.findFirst({
+      where: { id, deletedAt: null },
+      select: { ...STAFF_SELECT, passwordHash: true },
+    });
+  }
+
+  updatePasswordHash(id: string, passwordHash: string) {
+    return this.prisma.staff.update({ where: { id }, data: { passwordHash } });
   }
 
   update(id: string, dto: UpdateStaffDto) {
@@ -81,12 +94,12 @@ export class StaffRepository {
     });
   }
 
-  /** Creates the real Staff row once a Keycloak account exists — called only from invitation activation. */
-  create(keycloakId: string, dto: { fullName: string; email: string; role: StaffRole; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; availability?: CreateStaffDto["availability"] }) {
+  /** Creates the real Staff row — called only from invitation activation, once the invitee has set a password. */
+  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; availability?: CreateStaffDto["availability"] }) {
     const avail = dto.availability ?? [];
     return this.prisma.staff.create({
       data: {
-        keycloakId,
+        passwordHash: dto.passwordHash,
         fullName: dto.fullName,
         email: dto.email,
         role: dto.role,

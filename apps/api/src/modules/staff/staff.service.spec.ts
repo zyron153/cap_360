@@ -1,16 +1,18 @@
 import { Test } from "@nestjs/testing";
-import { GoneException, NotFoundException } from "@nestjs/common";
+import { GoneException, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { StaffRepository } from "./staff.repository";
-import { KeycloakAdminService } from "../../common/services/keycloak-admin.service";
+import { PasswordService } from "../../common/services/password.service";
 import { NotificationsService } from "../notifications/notifications.service";
 
 const repo = {
   findInvitationByToken: jest.fn(),
   create: jest.fn(),
   markInvitationAccepted: jest.fn(),
+  findByIdWithPassword: jest.fn(),
+  updatePasswordHash: jest.fn(),
 };
-const keycloak = { createUser: jest.fn(), deleteUser: jest.fn() };
+const password = { hash: jest.fn(), verify: jest.fn() };
 const notifications = { sendInvite: jest.fn() };
 
 const INVITE = {
@@ -33,14 +35,14 @@ describe("StaffService — activateInvitation", () => {
       providers: [
         StaffService,
         { provide: StaffRepository, useValue: repo },
-        { provide: KeycloakAdminService, useValue: keycloak },
+        { provide: PasswordService, useValue: password },
         { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
     service = mod.get(StaffService);
     jest.clearAllMocks();
     repo.findInvitationByToken.mockResolvedValue(INVITE);
-    keycloak.createUser.mockResolvedValue("kc-user-1");
+    password.hash.mockResolvedValue("$argon2id$hashed");
   });
 
   it("throws NotFoundException for an unknown or already-used invitation", async () => {
@@ -55,36 +57,73 @@ describe("StaffService — activateInvitation", () => {
     await expect(service.activateInvitation("tok", { fullName: "Ana Costa", password: "x" })).rejects.toThrow(
       GoneException
     );
-    expect(keycloak.createUser).not.toHaveBeenCalled();
+    expect(password.hash).not.toHaveBeenCalled();
   });
 
-  it("creates the Keycloak user, the local staff row, and marks the invitation accepted, in that order", async () => {
-    repo.create.mockResolvedValue({ id: "staff-1", keycloakId: "kc-user-1" });
+  it("hashes the chosen password, creates the local staff row, and marks the invitation accepted", async () => {
+    repo.create.mockResolvedValue({ id: "staff-1", email: "ana@cap.cv" });
 
-    const result = await service.activateInvitation("tok", { fullName: "Ana Costa", password: "x" });
+    const result = await service.activateInvitation("tok", { fullName: "Ana Costa", password: "S3cret!!!!" });
 
-    expect(keycloak.createUser).toHaveBeenCalledWith(expect.objectContaining({ email: "ana@cap.cv" }));
-    expect(repo.create).toHaveBeenCalledWith("kc-user-1", expect.objectContaining({ fullName: "Ana Costa" }));
+    expect(password.hash).toHaveBeenCalledWith("S3cret!!!!");
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ fullName: "Ana Costa", email: "ana@cap.cv", passwordHash: "$argon2id$hashed" })
+    );
     expect(repo.markInvitationAccepted).toHaveBeenCalledWith("invite-1");
-    expect(result).toEqual({ id: "staff-1", keycloakId: "kc-user-1" });
+    expect(result).toEqual({ id: "staff-1", email: "ana@cap.cv" });
   });
 
-  it("deletes the just-created Keycloak user when the local staff row fails to create — no orphaned account", async () => {
-    const dbError = new Error("connection reset");
-    repo.create.mockRejectedValue(dbError);
-    keycloak.deleteUser.mockResolvedValue(undefined);
+  it("never stores the plaintext password anywhere in the create() call", async () => {
+    repo.create.mockResolvedValue({ id: "staff-1" });
+    await service.activateInvitation("tok", { fullName: "Ana Costa", password: "S3cret!!!!" });
 
-    await expect(service.activateInvitation("tok", { fullName: "Ana Costa", password: "x" })).rejects.toBe(dbError);
+    const createArg = repo.create.mock.calls[0][0];
+    expect(JSON.stringify(createArg)).not.toContain("S3cret");
+  });
+});
 
-    expect(keycloak.deleteUser).toHaveBeenCalledWith("kc-user-1");
-    expect(repo.markInvitationAccepted).not.toHaveBeenCalled();
+describe("StaffService — changePassword", () => {
+  let service: StaffService;
+
+  beforeEach(async () => {
+    const mod = await Test.createTestingModule({
+      providers: [
+        StaffService,
+        { provide: StaffRepository, useValue: repo },
+        { provide: PasswordService, useValue: password },
+        { provide: NotificationsService, useValue: notifications },
+      ],
+    }).compile();
+    service = mod.get(StaffService);
+    jest.clearAllMocks();
   });
 
-  it("still surfaces the original DB error even if the Keycloak cleanup delete itself fails", async () => {
-    const dbError = new Error("connection reset");
-    repo.create.mockRejectedValue(dbError);
-    keycloak.deleteUser.mockRejectedValue(new Error("keycloak unreachable"));
+  it("verifies the current password before hashing and storing the new one", async () => {
+    repo.findByIdWithPassword.mockResolvedValue({ id: "s1", passwordHash: "$argon2id$old" });
+    password.verify.mockResolvedValue(true);
+    password.hash.mockResolvedValue("$argon2id$new");
 
-    await expect(service.activateInvitation("tok", { fullName: "Ana Costa", password: "x" })).rejects.toBe(dbError);
+    await service.changePassword("s1", { currentPassword: "old-pw", newPassword: "NewPass123" });
+
+    expect(password.verify).toHaveBeenCalledWith("$argon2id$old", "old-pw");
+    expect(password.hash).toHaveBeenCalledWith("NewPass123");
+    expect(repo.updatePasswordHash).toHaveBeenCalledWith("s1", "$argon2id$new");
+  });
+
+  it("rejects with UnauthorizedException when the current password is wrong, without changing anything", async () => {
+    repo.findByIdWithPassword.mockResolvedValue({ id: "s1", passwordHash: "$argon2id$old" });
+    password.verify.mockResolvedValue(false);
+
+    await expect(
+      service.changePassword("s1", { currentPassword: "wrong", newPassword: "NewPass123" })
+    ).rejects.toThrow(UnauthorizedException);
+    expect(repo.updatePasswordHash).not.toHaveBeenCalled();
+  });
+
+  it("throws NotFoundException for an unknown staff id", async () => {
+    repo.findByIdWithPassword.mockResolvedValue(null);
+    await expect(
+      service.changePassword("ghost", { currentPassword: "x", newPassword: "NewPass123" })
+    ).rejects.toThrow(NotFoundException);
   });
 });

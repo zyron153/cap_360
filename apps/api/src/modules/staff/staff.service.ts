@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException, ConflictException, GoneException } from "@nestjs/common";
+import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException } from "@nestjs/common";
 import { randomBytes } from "crypto";
-import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto } from "@cap/types";
+import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto } from "@cap/types";
 import { StaffRepository } from "./staff.repository";
-import { KeycloakAdminService } from "../../common/services/keycloak-admin.service";
+import { PasswordService } from "../../common/services/password.service";
 import { NotificationsService } from "../notifications/notifications.service";
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -11,7 +11,7 @@ const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 export class StaffService {
   constructor(
     private readonly repo: StaffRepository,
-    private readonly keycloak: KeycloakAdminService,
+    private readonly password: PasswordService,
     private readonly notifications: NotificationsService,
   ) {}
 
@@ -25,16 +25,21 @@ export class StaffService {
     return staff;
   }
 
-  async findMe(keycloakId: string) {
-    const staff = await this.repo.findByKeycloakId(keycloakId);
-    // Fallback for dev hardcoded sub that has no real staff record
-    return staff ?? { id: null, fullName: "Dev Admin", email: "admin@dev", role: "admin", jobTitle: null, specialtyCode: null, phone: null, availability: [] };
-  }
-
   async update(id: string, dto: UpdateStaffDto) {
     const staff = await this.repo.findById(id);
     if (!staff) throw new NotFoundException(`Staff ${id} not found`);
     return this.repo.update(id, dto);
+  }
+
+  async changePassword(id: string, dto: ChangePasswordDto): Promise<void> {
+    const staff = await this.repo.findByIdWithPassword(id);
+    if (!staff) throw new NotFoundException(`Staff ${id} not found`);
+
+    const ok = await this.password.verify(staff.passwordHash, dto.currentPassword);
+    if (!ok) throw new UnauthorizedException("Palavra-passe atual incorreta.");
+
+    const passwordHash = await this.password.hash(dto.newPassword);
+    await this.repo.updatePasswordHash(id, passwordHash);
   }
 
   // ─── Invitations ───────────────────────────────────────────────────────────
@@ -82,36 +87,17 @@ export class StaffService {
     if (!invite || invite.acceptedAt) throw new NotFoundException("Convite inválido ou já utilizado");
     if (invite.expiresAt.getTime() < Date.now()) throw new GoneException("Este convite expirou");
 
-    const [firstName, ...rest] = dto.fullName.trim().split(/\s+/);
-    const keycloakId = await this.keycloak.createUser({
+    const passwordHash = await this.password.hash(dto.password);
+    const staff = await this.repo.create({
+      fullName: dto.fullName.trim(),
       email: invite.email,
-      firstName: firstName ?? invite.fullName,
-      lastName: rest.join(" ") || firstName || invite.fullName,
-      password: dto.password,
       role: invite.role,
+      passwordHash,
+      jobTitle: invite.jobTitle,
+      phone: invite.phone,
+      specialtyCode: invite.specialtyCode,
+      availability: (invite.availability as { dayOfWeek: number; startTime: string; endTime: string }[] | null) ?? undefined,
     });
-
-    let staff;
-    try {
-      staff = await this.repo.create(keycloakId, {
-        fullName: dto.fullName.trim(),
-        email: invite.email,
-        role: invite.role,
-        jobTitle: invite.jobTitle,
-        phone: invite.phone,
-        specialtyCode: invite.specialtyCode,
-        availability: (invite.availability as { dayOfWeek: number; startTime: string; endTime: string }[] | null) ?? undefined,
-      });
-    } catch (err) {
-      // The Keycloak user above was already created — if the local write fails, clean it up
-      // rather than leave an orphaned Keycloak account with no app-side record. Best-effort:
-      // a delete failure here must not mask the original error. Scoped to just this call —
-      // if create() succeeds but markInvitationAccepted below fails, the staff row is valid and
-      // deleting its Keycloak account would be wrong; that failure is self-recoverable instead
-      // (the invitation stays unaccepted, retrying just hits Keycloak's 409 on the same email).
-      await this.keycloak.deleteUser(keycloakId).catch(() => undefined);
-      throw err;
-    }
 
     await this.repo.markInvitationAccepted(invite.id);
     return staff;

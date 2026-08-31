@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
-import { JwtModule } from "@nestjs/jwt";
 import { BullModule } from "@nestjs/bull";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { HealthModule } from "./health/health.module";
+import { AuthModule } from "./modules/auth/auth.module";
 import { PatientsModule } from "./modules/patients/patients.module";
 import { AppointmentsModule } from "./modules/appointments/appointments.module";
 import { BillingModule } from "./modules/billing/billing.module";
@@ -19,7 +19,7 @@ import { SettingsModule } from "./modules/settings/settings.module";
 import { ParametrizacaoModule } from "./modules/parametrizacao/parametrizacao.module";
 import { EFaturaModule } from "./modules/efatura/efatura.module";
 import { FinanceiroModule } from "./modules/financeiro/financeiro.module";
-import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
+import { SessionAuthGuard } from "./common/guards/session-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
 import { PerformanceInterceptor } from "./common/interceptors/performance.interceptor";
@@ -30,7 +30,6 @@ import { RedisModule } from "./common/redis/redis.module";
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
-    JwtModule.register({ global: true }),
     BullModule.forRoot({
       redis: {
         host: process.env.REDIS_HOST ?? "localhost",
@@ -40,6 +39,7 @@ import { RedisModule } from "./common/redis/redis.module";
     PrismaModule,
     RedisModule,
     HealthModule,
+    AuthModule,
     PatientsModule,
     AppointmentsModule,
     BillingModule,
@@ -57,7 +57,7 @@ import { RedisModule } from "./common/redis/redis.module";
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: SessionAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_INTERCEPTOR, useClass: PerformanceInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },

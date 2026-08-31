@@ -153,7 +153,9 @@ model Patient {
 
 model Staff {
   id            String    @id @default(uuid())
-  keycloakId    String    @unique @db.VarChar(36)
+  /// argon2id hash (see PasswordService) — never selected in a normal find; only the login path
+  /// reads it explicitly.
+  passwordHash  String    @db.VarChar(255)
   fullName      String    @db.VarChar(150)
   email         String    @unique @db.VarChar(150)
   role          StaffRole

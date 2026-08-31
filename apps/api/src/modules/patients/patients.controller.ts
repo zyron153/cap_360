@@ -10,7 +10,6 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
-  UnauthorizedException,
 } from "@nestjs/common";
 import { PatientsService } from "./patients.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -40,14 +39,8 @@ export class PatientsController {
     return this.service.findAll(query);
   }
 
-  @Get("me")
-  @Roles("patient")
-  getMe(@CurrentUser() user: JwtUser) {
-    if (!user.patient_id) {
-      throw new UnauthorizedException("patient_id claim missing from token");
-    }
-    return this.service.findById(user.patient_id);
-  }
+  // "GET /patients/me" (patient self-service) removed — this auth system is staff-only; there is
+  // no patient-facing login and no `patient` role can ever be granted a session.
 
   @Get(":id")
   @AuditView() // SECURITY.md: "patient record viewed" must be audit-logged, not just edits
@@ -56,6 +49,7 @@ export class PatientsController {
   }
 
   @Get(":id/timeline")
+  @AuditView() // same rationale as GET /patients/:id — this surfaces clinical/contact history too
   getTimeline(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.getTimeline(id);
   }

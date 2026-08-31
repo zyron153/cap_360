@@ -199,9 +199,19 @@ export function Sidebar() {
             <strong className="block text-[12px] text-dim-200 font-medium truncate">{me?.fullName ?? "Dev Admin"}</strong>
             <span className="text-[10px] text-dim-500">{ROLE_LABELS[displayRole] ?? displayRole}</span>
           </div>
-          <a href="/api/auth/logout" title="Terminar sessão" className="ml-auto shrink-0 text-dim-500 hover:text-red-400 transition-colors">
+          <button
+            type="button"
+            onClick={() => {
+              fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+                router.push("/login");
+                router.refresh();
+              });
+            }}
+            title="Terminar sessão"
+            className="ml-auto shrink-0 text-dim-500 hover:text-red-400 transition-colors"
+          >
             <LogOut className="w-3.5 h-3.5" />
-          </a>
+          </button>
         </div>
       </div>
     </aside>
