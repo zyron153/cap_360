@@ -60,7 +60,8 @@ Fields present in the original design but never implemented: `nationality`, `pho
 ```sql
 CREATE TABLE staff (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "keycloakId"    VARCHAR(36) NOT NULL UNIQUE,
+  "passwordHash"  VARCHAR(255) NOT NULL,  -- argon2id, via PasswordService — never selected in a
+                                           -- normal find, only the login/change-password paths
   "fullName"      VARCHAR(150) NOT NULL,
   email           VARCHAR(150) NOT NULL UNIQUE,
   role            VARCHAR(30) NOT NULL,   -- admin | doctor | nurse | receptionist | lab_tech | corporate_hr
@@ -99,9 +100,13 @@ CREATE INDEX ON staff_invitations(email);
 CREATE INDEX ON staff_invitations(token);
 ```
 
-Activation (`StaffService.activateInvitation`) creates the Keycloak user first, then the local
-`staff` row; if the local write fails, the just-created Keycloak user is deleted (best-effort) so
-a failed activation never leaves an orphaned Keycloak account with no app-side record.
+Activation (`StaffService.activateInvitation`) hashes the invitee's own chosen password
+(argon2id) and creates the local `staff` row directly — no external identity provider is involved,
+so there's nothing that can be left orphaned on a partial failure (that used to be a real concern
+when this created a Keycloak user first; removed along with Keycloak).
+
+No auth session data lives in Postgres at all: sessions, login-lockout counters, and
+password-reset tokens are all Redis-only (`SessionService`) — see `SECURITY.md` §2.1.
 
 ### 1.4 `services`
 
@@ -742,4 +747,4 @@ admin-configurable dropdown option lists.
 
 ---
 
-*CAP 360 · Database Schema · regenerated from `schema.prisma` — 2026-08-30*
+*CAP 360 · Database Schema · regenerated from `schema.prisma` — 2026-08-31 (Keycloak removal)*

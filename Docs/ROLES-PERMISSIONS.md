@@ -1,12 +1,13 @@
 # CAP 360 — Roles & Permissions (RBAC)
 
-> **Auth Provider:** Keycloak (self-hosted), realm `cap` (not `maissaude` — renamed in the
-> Cabo Verde rebrand)
-> Roles are assigned per user in Keycloak and embedded in the JWT `realm_access.roles` claim.
+> **Auth Provider:** none — self-hosted (Keycloak was removed 2026-08-31; see `SECURITY.md` §2).
+> Roles are assigned per `Staff` row (`StaffRole` enum in Postgres) and captured into the Redis
+> session at login time (`SessionService`) — not re-checked against the database per request, and
+> not live-updated if a role changes mid-session (see below).
 > All API routes are guarded by `RolesGuard` in NestJS.
 
 > **Implementation status:** the actual RBAC is **coarse, route-level `@Roles()` guards** — one
-> role list per controller/route, checked against the JWT. None of the fine-grained distinctions
+> role list per controller/route, checked against the session. None of the fine-grained distinctions
 > below ("assigned only", "own schedule", per-field/tag visibility, row-level company scoping) are
 > real unless explicitly called out — a role either can or cannot call a given route, in full. Every
 > row referencing M3 (WhatsApp), M5 (Exams), M7 (Clinical Records), M9 (Home Visits), or M10
@@ -126,75 +127,45 @@ tokens: moot, M5 has no result/download feature at all.
 
 ---
 
-## 5. Keycloak Configuration
+## 5. How Roles Actually Reach a Guard Check
 
-🟡 This section is illustrative and has not been re-verified line-by-line against the live realm
-export (`infra/cap-realm.json`) — treat specific field values below with caution. The realm name
-itself is confirmed real.
+No realm, no client config, no external identity provider — this whole section used to describe a
+Keycloak realm that has since been deleted (`infra/keycloak/`) and is not coming back. The real
+flow:
 
-### 5.1 Realm: `cap`
-
-```json
-{
-  "realm": "cap",
-  "enabled": true,
-  "internationalizationEnabled": true,
-  "supportedLocales": ["pt", "en"],
-  "defaultLocale": "pt",
-  "passwordPolicy": "length(10) and upperCase(1) and digits(1)",
-  "bruteForceProtected": true,
-  "failureFactor": 5,
-  "waitIncrementSeconds": 60
-}
-```
-
-### 5.2 Client: `api-server`
-
-```json
-{
-  "clientId": "api-server",
-  "protocol": "openid-connect",
-  "publicClient": false,
-  "directAccessGrantsEnabled": false,
-  "serviceAccountsEnabled": true,
-  "authorizationServicesEnabled": true
-}
-```
-
-### 5.3 Client: `web-app`
-
-```json
-{
-  "clientId": "web-app",
-  "protocol": "openid-connect",
-  "publicClient": true,
-  "redirectUris": [
-    "https://app.maissaudecv.com/*",
-    "https://maissaudecv.com/*"
-  ],
-  "webOrigins": ["+"]
-}
-```
-
-### 5.4 Role Mapper
-
-Each role in Keycloak maps to a NestJS guard check:
+1. `POST /auth/login` looks up the `Staff` row by email, verifies the password (argon2id), and
+   builds a session object `{ staffId, email, roles: [staff.role] }` — a **single-element roles
+   array**, since each `Staff` row has exactly one `StaffRole`, not a set of roles
+2. `SessionService.create()` stores that object in Redis under a random session id, returned to
+   the browser as the `cap_session` cookie
+3. On every subsequent request, `SessionAuthGuard` reads the cookie, looks up the session in
+   Redis, and sets `request.user = { sub: staffId, email, roles }`
+4. `RolesGuard` reads `request.user.roles` and checks it against the route's `@Roles(...)` list:
 
 ```typescript
-// NestJS decorator usage
-@Roles('doctor', 'admin')
-@Get('/patients/:id/clinical-notes')
-getClinicalNotes(@Param('id') patientId: string) { ... }
+// Real, current guard check — apps/api/src/common/guards/roles.guard.ts
+const userRoles: string[] = user?.roles ?? [];
+return requiredRoles.some((role) => userRoles.includes(role));
 ```
+
+```typescript
+// Real, current decorator usage — apps/api/src/modules/patients/patients.controller.ts
+@Roles("admin", "receptionist", "doctor", "nurse")
+@Get(":id")
+findOne(@Param("id", ParseUUIDPipe) id: string) { ... }
+```
+
+Because the role is captured once at login and never re-checked against Postgres, changing a
+staff member's role (`PATCH /staff/:id`) doesn't take effect until they log out and back in — a
+real, if minor, operational gotcha worth knowing.
 
 ---
 
 ## 6. MFA Policy
 
-🟡 Not verified as actually configured in the realm — dev-environment Keycloak has event logging
-disabled entirely (see `SECURITY.md`), and no MFA-related code or config was found during this
-review.
-
+❌ **Not implemented at all**, for any role — see `SECURITY.md` §2.3. The table below is the
+original design's target, kept only for reference; it assumed a Keycloak-provided mechanism that
+no longer exists and has no replacement.
 
 | Role | MFA Required | Method |
 |---|---|---|
@@ -207,4 +178,4 @@ review.
 
 ---
 
-*CAP 360 · Roles & Permissions v1.1 · updated 2026-08-30 against the current implementation*
+*CAP 360 · Roles & Permissions v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*

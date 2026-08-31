@@ -74,7 +74,8 @@ Mais Saúde 360 is a cloud-native, multi-tenant Healthcare ERP/CRM. The architec
 | Email (transactional) | SendGrid | Booking confirmations; result notifications |
 | SMS | Africa's Talking | SMS fallback for CV/Africa numbers |
 | Payment Gateway | Vinti4 (Phase 4) | Local Cabo Verde payments |
-| Authentication | Keycloak (self-hosted) | RBAC; MFA; GDPR audit logs; SSO |
+| Authentication | Self-hosted (argon2id + Redis sessions) | 🔄 **Changed 2026-08-31** — originally Keycloak (below the original rationale is kept for context); removed and replaced in-house because the original design's SSO/MFA/GDPR-audit-log value never materialised — see `SECURITY.md` §2 |
+| ~~Authentication (original)~~ | ~~Keycloak (self-hosted)~~ | ~~RBAC; MFA; GDPR audit logs; SSO~~ |
 | Maps | Google Maps API | Home visit address validation + routing |
 | ~~Imaging~~ | ~~DICOM viewer (Cornerstone.js)~~ | **Cut** — client is now CAP, a psychology clinic; no ultrasound/ECG use case (see `Docs/PRD.md` F-18) |
 
@@ -99,11 +100,15 @@ Mais Saúde 360 is a cloud-native, multi-tenant Healthcare ERP/CRM. The architec
                                │
           ┌────────────────────┼──────────────────────┐
           ▼                    ▼                       ▼
-┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│  NestJS API      │  │  WhatsApp Hub    │  │  Keycloak Auth   │
-│  (REST + WS)     │  │  (Webhook +Bot)  │  │  Server          │
-│  Port 3001       │  │  Port 3002       │  │  Port 8080       │
-└────────┬─────────┘  └────────┬─────────┘  └──────────────────┘
+┌──────────────────┐  ┌──────────────────┐
+│  NestJS API      │  │  WhatsApp Hub    │
+│  (REST + WS)     │  │  (Webhook +Bot)  │
+│  Port 3001       │  │  Port 3002       │
+│  incl. its own   │  └────────┬─────────┘
+│  auth (§6) — no  │           │
+│  separate auth   │           │
+│  server exists   │           │
+└────────┬─────────┘           │
          │                     │
          ▼                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -178,24 +183,54 @@ Patient (WhatsApp/Web)
 
 ## 6. Authentication & Authorisation Flow
 
+✅ **Real, current** (not aspirational, unlike most of this document) — Keycloak was removed
+2026-08-31; there is no external identity provider or separate auth server. Full detail in
+`SECURITY.md` §2 and `API-SPEC.md`'s Authentication section.
+
 ```
-User requests protected route
-  │
-  ▼
-NGINX → NestJS AuthGuard
-  │
-  ▼
-JWT validation (signed by Keycloak)
-  │
-  ├─ Valid? → Extract roles from JWT claims
-  │               │
-  │               ▼
-  │           RolesGuard checks required role
-  │               │
-  │               ├─ Authorised? → Controller proceeds
-  │               └─ Denied?     → 403 Forbidden
-  │
-  └─ Invalid? → 401 Unauthorised → Client refreshes token via Keycloak
+Login:
+  Browser → POST /auth/login { email, password }
+              │
+              ▼
+        SessionAuthGuard: route is @Public(), skips straight through
+              │
+              ▼
+        AuthService.login(): per-account Redis lockout check
+              │              → locked? 401, stop here
+              ▼
+        PasswordService.verify() — argon2id, real hash or a dummy
+        one for an unknown email (constant-time-ish, no enumeration)
+              │
+              ├─ Wrong? → SessionService.recordFailure() → 401
+              │
+              └─ Correct → SessionService.create() writes
+                            session:<id> = {staffId, email, roles}
+                            to Redis, 8h TTL
+                              │
+                              ▼
+                       Set-Cookie: cap_session=<id>
+                       (httpOnly, Secure in prod, SameSite=Lax)
+
+Every subsequent request:
+  Browser → any route, cookie sent automatically
+              │
+              ▼
+        SessionAuthGuard reads cap_session, looks up Redis
+              │
+              ├─ Missing/expired? → 401, no session
+              │
+              └─ Found → request.user = {sub, email, roles}
+                          session TTL slides forward another 8h
+                              │
+                              ▼
+                        RolesGuard checks @Roles(...) against
+                        request.user.roles
+                              │
+                              ├─ Authorised? → Controller proceeds
+                              └─ Denied?     → 403 Forbidden
+
+Logout: POST /auth/logout deletes the Redis key and clears the cookie —
+instant, unlike a JWT (which stays valid until it expires on its own).
 ```
 
 ---
@@ -209,11 +244,8 @@ JWT validation (signed by Keycloak)
 DATABASE_URL=postgresql://user:pass@host:5432/maissaude360
 REDIS_URL=redis://host:6379
 
-# Auth
-KEYCLOAK_URL=https://auth.maissaude360.cv
-KEYCLOAK_REALM=maissaude
-KEYCLOAK_CLIENT_ID=api-server
-KEYCLOAK_CLIENT_SECRET=<secret>
+# Auth — no external provider; sessions live in Redis (REDIS_HOST/REDIS_PORT above cover it)
+AUTH_BYPASS=true   # dev only — fails safe if unset; SessionAuthGuard refuses this outside dev
 
 # WhatsApp
 WHATSAPP_API_URL=https://waba.360dialog.io/v1
@@ -406,4 +438,4 @@ Frontend (`apps/web/app/(app)/patients/page.tsx`): `planFilter` is now a URL par
 
 ---
 
-*CAP 360 · Architecture Document v1.3 · spot-corrected 2026-08-30 against the current implementation*
+*CAP 360 · Architecture Document v1.4 · spot-corrected 2026-08-31 — Keycloak removed, self-hosted auth*

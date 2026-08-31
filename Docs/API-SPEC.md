@@ -1,16 +1,48 @@
 # CAP 360 — API Specification
 
 > **Base path:** `/v1` (e.g. `http://localhost:4001/v1` in dev; the web app proxies `/api/*` → `${API_URL}/v1/*`)
-> **Auth:** Bearer JWT, issued directly by Keycloak (there is no custom `/auth/*` proxy in the API —
-> the frontend talks to Keycloak's own OIDC token endpoint). Include `Authorization: Bearer <token>`.
+> **Auth:** self-hosted session cookie (no external identity provider — Keycloak was removed).
+> `POST /auth/login` sets an httpOnly, `SameSite=Lax` cookie (`cap_session`, `Secure` in
+> production); every other route reads that cookie via `SessionAuthGuard`, no `Authorization`
+> header involved. See the **Authentication** section below.
 > **Content-Type:** `application/json` (all bodies are validated with Zod via a shared `ZodValidationPipe`)
 > **Error format:** `{ "statusCode": 400, "message": "...", "error": "Bad Request" }`
 > **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) skips
-> JWT verification entirely for local development.
+> session verification entirely for local development.
 
 This document reflects the routes and body shapes that actually exist in
 `apps/api/src/modules/*/*.controller.ts` and `packages/types/src/*.ts`. Field names are the real
 camelCase used by the Zod schemas — not the snake_case of the original design.
+
+---
+
+## Authentication — `/auth`
+
+Staff-only (no patient-facing login exists). All routes below are `@Public()` — no session cookie
+required to call them, since a session doesn't exist yet at login and shouldn't be required to
+recover one.
+
+```
+POST /auth/login             body: { email, password }
+                              → 200 { staff: { id, email, fullName, role } }, sets cap_session cookie
+                              → 401 wrong credentials or unknown email (identical message either way)
+                              → 401 account locked (5 failed attempts / 15min → 15min lock, per email, in Redis)
+                              throttled: 5 req/min per IP (tighter than the 300/min global default)
+
+POST /auth/logout            no body — reads the session cookie itself
+                              → 204, clears cap_session regardless of whether it was valid
+
+POST /auth/forgot-password   body: { email }
+                              → 200 always, same message, whether or not the email exists
+                              → emails a reset link if it does (1h single-use Redis token)
+                              throttled: 5 req/min per IP
+
+POST /auth/reset-password    body: { token, password }
+                              → 200 on a valid token; 410 Gone if invalid/expired/already used
+```
+
+`PATCH /staff/me/password` (§7) is the separate "change my password while logged in" route —
+it requires a real session and the caller's *current* password, unlike the routes above.
 
 ---
 
@@ -138,9 +170,8 @@ Response 200:
   "total": 120, "page": 1, "limit": 20, "totalPages": 6 }
 ```
 
-### GET `/patients/me`
-**Roles:** patient
-Dev-only fallback path; there is no real patient-facing login yet (`Patient` has no `keycloakId`).
+❌ There is no `GET /patients/me` — it was removed along with Keycloak. This auth system is
+staff-only; no `patient` role can ever be granted a session, so the route was unreachable dead code.
 
 ### GET `/patients/:id`
 **Roles:** admin, receptionist, doctor, nurse — logged via `@AuditView()` (every view of a full
@@ -341,7 +372,8 @@ DELETE /services/:id       roles: admin
 **Controller roles (default):** admin, receptionist, doctor, nurse
 
 ```
-GET    /staff/me                                    — resolves the caller's own staff record from the JWT
+GET    /staff/me                                    — resolves the caller's own staff record from the session
+PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below
 GET    /staff                                       — active staff list
 GET    /staff/invitations         roles: admin       — pending invitations
 DELETE /staff/invitations/:id     roles: admin
@@ -359,12 +391,10 @@ Invite body:
 }
 ```
 
-Activation (public, token-based — see §9) creates the Keycloak user **then** the local `staff`
-row, transactionally safe: if the local write fails, the just-created Keycloak user is deleted
-(best-effort) rather than left as an orphaned account with no app-side record. `admin`, `doctor`,
-and `corporate_hr` accounts are required to set up TOTP MFA on first login
-(`requiredActions: ["CONFIGURE_TOTP"]`) — this only applies to accounts created after this was
-added; existing accounts need a one-time realm-admin action.
+Activation (public, token-based — see §9) hashes the password the invitee chose (argon2id) and
+creates the local `staff` row directly — no external system is involved, so there's nothing to
+leave orphaned on a partial failure. ❌ No MFA/TOTP of any kind exists — that was a Keycloak
+feature (never actually enforced for pre-existing accounts even then) and has no replacement.
 
 There is no `POST /staff/:id/shifts` or `POST /staff/:id/leave` endpoint — `StaffShift` and
 `LeaveRequest` rows exist in the schema and are honoured by the appointments-availability logic,
@@ -497,10 +527,13 @@ globally, so every route gets a default limit unless overridden per-route.
 |---|---|---|
 | Everything (global default) | 300 req/min per IP | ✅ Enforced |
 | Public (`/public/*`) | 60 req/min per IP | ✅ Enforced (`@Throttle` override, stricter than the default) |
+| `POST /auth/login`, `POST /auth/forgot-password` | 5 req/min per IP | ✅ Enforced — plus a separate, per-account Redis lockout (5 failed logins / 15min → 15min lock) that isn't IP-based at all |
 
-The original design's "10 req/min auth endpoints" and "1000 req/min WhatsApp webhook" rows
-described infrastructure that doesn't exist (no custom `/auth/*` endpoints, no WhatsApp webhook).
+The original design's "1000 req/min WhatsApp webhook" row described infrastructure that doesn't
+exist (no WhatsApp webhook — M3 is a UI mockup). The "10 req/min auth endpoints" row is now real,
+at a stricter 5 req/min, since real `/auth/*` endpoints exist (see the **Authentication** section
+above) — this replaced the original design's assumption that Keycloak/NGINX would handle it.
 
 ---
 
-*CAP 360 · API Specification · regenerated from the actual controllers — 2026-08-30*
+*CAP 360 · API Specification · regenerated from the actual controllers — 2026-08-31 (Keycloak removal)*

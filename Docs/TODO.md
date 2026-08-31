@@ -5,6 +5,7 @@
 > Reconciled against the actual codebase 2026-08-30 — most of this file predated real
 > implementation and had drifted badly (wrong package names, "missing" endpoints that have long
 > existed, a mobile app scaffold that was never created). See `REVIEW.md` for the full audit.
+> Updated again 2026-08-31: Keycloak was removed and replaced with self-hosted auth.
 
 ---
 
@@ -21,10 +22,10 @@
 - [x] Shared packages: `@cap/config`, `@cap/types`, `@cap/database` (renamed from `@cms/*` in the CAP rebrand)
 - [x] Root `.env.example` with all required variables
 - [x] `packages/database` — Prisma schema, seed, client export
-- [x] Docker Compose dev stack (postgres:16 on 5434, redis:7, keycloak:24)
+- [x] Docker Compose dev stack (postgres:16 on 5434, redis:7 — no `keycloak` service since 2026-08-31)
 - [x] `infra/docker/api.Dockerfile` + `web.Dockerfile`
 - [x] GitHub Actions CI/CD pipeline (`.github/workflows/ci.yml`)
-- [x] Keycloak realm import file (`infra/keycloak/cap-realm.json`, renamed from `maissaude-realm.json`)
+- [x] ~~Keycloak realm import file~~ — moot; `infra/keycloak/` deleted along with Keycloak itself
 - [ ] Kubernetes manifests (`infra/k8s/`) — not started; no production deployment target yet
 - [ ] `docker-compose.prod.yml` — not started
 - [ ] Pre-commit hooks (lint + typecheck) — no `husky`/`lint-staged` configured
@@ -123,9 +124,13 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `@cap/types` — `Staff`, `Service`, `Room`/appointment types and Zod schemas all exist
 - [x] API rate limiting (`@nestjs/throttler`) — global default 300 req/min, public routes overridden to 60 req/min
 - [x] Request/performance logging (`PerformanceInterceptor`)
-- [x] Unit test suite (Jest) — 225+ tests across guards, interceptors, services, repositories
-- [x] Keycloak dev realm (`cap`), dev-bypass auth (`AUTH_BYPASS=true`, fails safe — requires the literal value, not just "unset")
-- [x] Auth flow in Next.js (`middleware.ts`, same dev-bypass semantics as the API)
+- [x] Unit test suite (Jest) — 251 tests across guards, interceptors, services, repositories
+- [x] **Self-hosted auth (2026-08-31, replaces Keycloak)**: argon2id password hashing, Redis-backed
+  sessions (httpOnly/Secure/SameSite=Lax cookie), per-IP + per-account login rate-limiting/lockout,
+  forgot/reset/change-password flows — `AUTH_BYPASS=true` dev bypass preserved, fails safe (requires
+  the literal value, not just "unset")
+- [x] Auth flow in Next.js (`middleware.ts`, checks the session cookie directly — no more
+  Authorization-header translation, since the API now reads the cookie itself)
 - [x] API client in Next.js (`/api/*` rewrite proxy to the NestJS API)
 - [ ] Integration test suite against a real test DB (`supertest`) — today's tests mock the repository layer; live-verification this project has relied on has been manual (via a running dev server), not an automated integration suite
 - [ ] Sentry integration — not wired in `main.ts`
@@ -177,9 +182,12 @@ for a medical clinic.
 ### M8 — Staff & Resource Scheduler
 
 **Backend**
-- [x] Staff CRUD, invitations with Keycloak user provisioning, weekly recurring availability
+- [x] Staff CRUD, invitations, weekly recurring availability
 - [x] `StaffShift`, `LeaveRequest` models with repository methods
-- [x] Invitation activation is transactionally safe — a failed local `Staff`-row write now deletes the just-created Keycloak user instead of leaving an orphaned account
+- [x] Invitation activation hashes the invitee's own chosen password (argon2id) directly — no
+  external identity provider is involved anymore, so the transactional-rollback machinery this
+  used to need (delete an orphaned Keycloak user if the local `Staff` write failed) is gone;
+  there's nothing external left to get out of sync with
 - [x] Room/equipment conflict detection (see M1 — same underlying fix)
 - [ ] Leave request submission/approval endpoints (see M1 note — schema and availability-logic support exist, no way to create one via the API)
 - [ ] Shift-planner calendar UI (drag-to-assign)
@@ -200,10 +208,12 @@ analytics anywhere in the app — worth treating as the template for what this m
 actually look like.
 
 ### Self-Service Portals — not started
-No patient-facing login path exists at all (`Patient` has no `keycloakId`). One isolated,
-unreachable RBAC check exists in `documents.controller.ts` (checks `user.patient_id`) with nothing
-upstream that could ever produce such a JWT. Corporate HR portal: `corporate_hr` is a valid role
-in a few role lists, but no company-scoped data isolation exists in any query.
+No patient-facing login path exists at all — the auth system built 2026-08-31 (replacing
+Keycloak) is deliberately staff-only. The old unreachable "patient" RBAC branches (`GET
+/patients/me`, the patient-ownership check in `documents.controller.ts`) were removed as dead
+code rather than kept around. Corporate HR portal: `corporate_hr` is a valid role in a few role
+lists, but no company-scoped data isolation exists in any query — see `GET /health-plans`'s
+caller-supplied `companyId` param in `ROLES-PERMISSIONS.md` §4.2 for a concrete instance.
 
 ### Vinti4 Payment Gateway — not started
 
@@ -231,7 +241,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, keycloak-admin, audit interceptor, request context, JWT guard
+- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 251 tests total
 - [ ] Integration tests against a real test DB
 - [ ] E2E tests (Playwright) — `apps/web/e2e/booking-flow.spec.ts` exists as a starting point, not a full suite
 - [ ] Performance/load tests (k6)

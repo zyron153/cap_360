@@ -12,6 +12,10 @@
 > those documents' contents have since been found to describe aspirational designs that were
 > simplified or never built (see each doc's own "Implementation status" note, added in this pass).
 > For current, ground-truth gap tracking, see `TODO.md` and `REVIEW.md` instead of this file.
+> **2026-08-31 addendum:** Keycloak (row 26/33 below) was removed entirely and replaced with
+> self-hosted auth — see `SECURITY.md` §2. Row 33 is the one line in this snapshot that was still
+> describing present-tense reality as of yesterday and is now flatly wrong; left uncorrected below
+> as-is, in keeping with this file's historical framing, except for this note.
 
 ---
 
@@ -362,4 +366,4 @@ The following are documented but explicitly deferred to Phase 4 — do not attem
 
 ---
 
-*CAP 360 · Coding Readiness Analysis v1.0 · June 2026 · annotated 2026-08-30 as a historical snapshot*
+*CAP 360 · Coding Readiness Analysis v1.0 · June 2026 · annotated 2026-08-30/31 as a historical snapshot*

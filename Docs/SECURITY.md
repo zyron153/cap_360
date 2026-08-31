@@ -15,7 +15,7 @@
 | Patient data breach (DB exfiltration) | Low | Critical | Encryption at rest + VPC isolation |
 | WhatsApp message interception | Low | High | TLS in transit; end-to-end via Meta |
 | Exam result link abuse | Medium | High | Token expiry (72h) + access logging — ❌ not applicable yet: M5 has no result-file field or download endpoint at all |
-| Brute-force login | Medium | Medium | Keycloak lockout policy + rate limiting |
+| Brute-force login | Medium | Medium | Per-account Redis lockout + per-IP rate limiting — ✅ real, see §2.1 |
 | SQL injection | Low | Critical | Prisma parameterised queries; no raw SQL |
 | Insider threat (staff) | Low | High | Audit log; RBAC; role-minimum access |
 | Account takeover | Low | High | MFA for admin/doctor; TOTP |
@@ -24,22 +24,50 @@
 
 ## 2. Authentication
 
-### 2.1 Keycloak Configuration
+> **2026-08-31: Keycloak has been removed entirely**, replaced with a self-hosted, staff-only
+> auth system (no external identity provider of any kind). Everything below in §2 describes the
+> real, current system, not a target — this is one of the few sections of this document where
+> "target" and "actual" are now the same thing.
 
-- **Realm:** `cap` (renamed from `maissaude` — see `Docs/ARCHITECTURE.md`, rebrand)
-- **Password policy:** min 10 chars, 1 uppercase, 1 digit
-- **Brute force protection:** 5 failed attempts → 60-second lockout (exponential backoff)
-- **Session timeout:** 8 hours (active); 15 minutes (idle)
-- **Refresh token rotation:** enabled
+### 2.1 Password & Session
 
-### 2.2 JWT Tokens
+- ✅ **Password hashing:** argon2id (`PasswordService`, via the `argon2` npm package's native
+  binding) — no plaintext or reversibly-encrypted password is ever stored
+- ✅ **Password policy:** min 10 chars, 1 uppercase, 1 digit (`ChangePasswordSchema`/
+  `ResetPasswordSchema`/`ActivateInvitationSchema`, enforced by Zod)
+- ✅ **Brute-force protection, real and two-layered:**
+  - Per-IP: `POST /auth/login` and `POST /auth/forgot-password` are throttled to 5 req/min
+    (stricter than the global 300/min default) via `@nestjs/throttler`
+  - Per-account: a Redis counter (`login:fail:<email>`) locks the account for 15 minutes after 5
+    failed attempts within a 15-minute window (`SessionService.recordFailure`/`isLocked`) —
+    independent of the IP a request comes from
+  - A login attempt against an unknown email still runs a real argon2 verify (against a fixed
+    dummy hash) before rejecting, so response timing can't reveal whether the account exists
+- ✅ **Session timeout:** 8 hours, sliding — every authenticated request that resolves a valid
+  session extends its Redis TTL by another 8 hours (`SessionService.get`)
+- ❌ No refresh-token rotation — there's no token to rotate; sessions are a single opaque
+  server-side identifier, revoked instantly by deleting the Redis key (logout, or a future
+  "revoke all sessions" feature that doesn't exist yet)
 
-- **Algorithm:** RS256 (asymmetric — Keycloak signs; API verifies with public key)
-- **Access token TTL:** 15 minutes
-- **Refresh token TTL:** 8 hours
-- Tokens carry: `sub` (user ID), `realm_access.roles`, `email`, `patient_id` (for patient role)
+### 2.2 Session Cookies
+
+- ✅ **Cookie:** `cap_session`, an opaque random 32-byte (64 hex char) id — nothing about the
+  staff member is derivable from the cookie value itself, unlike a JWT
+- ✅ **Flags:** `httpOnly` (not readable from JS — mitigates XSS token theft), `Secure` (HTTPS-only
+  in production; disabled in dev since local HTTP has no TLS), `SameSite=Lax` (sent on top-level
+  navigation, not on cross-site subresource/XHR requests — CSRF-resistant for this app's
+  same-origin, rewrite-proxied request pattern)
+- ✅ **Session data:** Redis only (`session:<id>` → `{ staffId, email, roles }`), never Postgres —
+  see `DATABASE-SCHEMA.md`
+- 🟡 **Single session per login, no multi-device tracking:** logging in elsewhere doesn't revoke
+  other sessions, and there's no "sessions" list a user can review/revoke individually (the
+  Settings page's Security tab says as much rather than pointing at a nonexistent portal)
 
 ### 2.3 Multi-Factor Authentication (MFA)
+
+❌ **Not implemented at all.** The table below is the *original design's* target — it required a
+Keycloak-specific mechanism (`requiredActions: ["CONFIGURE_TOTP"]`) that no longer exists, and no
+replacement (custom TOTP, WebAuthn, etc.) has been built. Treat every row as aspirational.
 
 | Role | Requirement | Method |
 |---|---|---|
@@ -50,19 +78,14 @@
 | patient | Optional | SMS OTP |
 | corporate_hr | Mandatory | TOTP |
 
-✅ **Mandatory rows enforced for new accounts**: `KeycloakAdminService.createUser` sets
-`requiredActions: ["CONFIGURE_TOTP"]` for admin/doctor/corporate_hr specifically, forcing TOTP
-enrolment on first login. This only applies going forward — **existing accounts created before
-this was added are not retroactively enrolled**; that needs a one-time realm-admin action against
-a real (non-dev) Keycloak deployment, which doesn't exist yet. "Recommended"/"Optional" rows are
-not nudged or enforced anywhere — they're aspirational.
-
 ---
 
 ## 3. Authorisation (RBAC)
 
 - All API routes decorated with `@Roles(...)` guard in NestJS
-- Role claims extracted from JWT; no database lookup per request
+- Roles come from the Redis session (`SessionService`), captured once at login time — not
+  re-queried from Postgres per request. A role change takes effect on that staff member's next
+  login, not immediately (no live session-role refresh exists)
 - Resource-level isolation enforced in service layer (not just route level)
 - 🟡 The one implemented "admin override" today — billing an invoice line item at a price other
   than the service catalogue price — is admin-only and visible via a server `Logger.warn`, not a
@@ -115,7 +138,7 @@ handled until a real secrets manager is in place.
 |---|---|---|---|
 | Everything (global default) | 300 req/min per IP | `@nestjs/throttler`, in-memory storage | ✅ Enforced |
 | Public (booking widget) | 60 req/min per IP | Same, `@Throttle` override | ✅ Enforced |
-| Auth endpoints | 10 req/min per IP | Keycloak + NGINX | ❌ Not applicable — no custom `/auth/*` endpoints exist; the frontend talks to Keycloak directly |
+| Auth endpoints (`/auth/login`, `/auth/forgot-password`) | 5 req/min per IP | `@Throttle` override | ✅ Enforced, plus a separate per-account Redis lockout independent of IP — see §2.1 |
 | WhatsApp webhook | 1000 req/min | No IP limit (Meta IPs whitelisted) | ❌ Not applicable — no WhatsApp webhook exists (M3 is a UI mockup) |
 
 Rate limiting is per-IP, in-memory, and per-process — it resets on restart and doesn't share state
@@ -157,11 +180,11 @@ Every mutating request (and any GET route explicitly marked `@AuditView()`) is w
 
 | Action Type | Status |
 |---|---|
-| Patient record viewed | ✅ One route: `GET /patients/:id`, via `@AuditView()`. Not every read is logged — only this one, deliberately, to avoid auditing every list/search query |
+| Patient record viewed | ✅ Two routes: `GET /patients/:id` and `GET /patients/:id/timeline`, via `@AuditView()`. Not every read is logged — only these, deliberately, to avoid auditing every list/search query |
 | Patients + Financeiro mutations get a before/after diff | ✅ `metadata.diff: { before, after }`, only the fields actually submitted — not a full-record dump |
 | Clinical note / prescription created | ❌ Not applicable — these tables don't exist (M7 mockup) |
 | Admin role escalation | ❌ Not implemented as a distinct action |
-| Login success/failure | ❌ Not captured in `audit_log` at all. Keycloak has its own separate internal event log (unrelated to this table) which is currently **disabled** in dev (`infra/keycloak/*-realm.json`) because the dev in-memory Keycloak DB lacks the table Keycloak needs to record events, causing a 500 on every login. Nothing in this app forwards Keycloak events into `audit_log` regardless |
+| Login success/failure | 🟡 Real, but low-value: `POST /auth/*` is a mutating request, so it hits the generic audit interceptor like any other route — but only on success. A **successful** login/logout/forgot-password writes a row (`resource: "auth", resourceId: "login"/"logout"/"forgot-password"`), verified live. A **failed** login (wrong password, locked account) writes **nothing** — the interceptor's `tap()` only fires on the success channel, and a rejected login throws. Even the successful rows carry no actor (`actorId`/`actorEmail` are empty — `request.user` is never set for `@Public()` routes). Genuinely capturing login attempts (especially failures, which matter most for security monitoring) would need a dedicated write inside `AuthService`, not a side-effect of the generic interceptor |
 | File downloaded (exam result) | ❌ Not applicable — no exam-result download exists yet |
 | Invoice created/modified | 🟡 Creation and cancellation are logged as generic mutating requests; no line-item delta beyond that |
 | Patient record deleted (erasure) | ✅ Logged as the mutating `DELETE /patients/:id` request |
@@ -233,8 +256,8 @@ window handling.
 ## 10. Infrastructure Security
 
 - PostgreSQL accessible only from within the private VPC (not publicly exposed)
-- Redis accessible only from within the private VPC
-- Keycloak admin console behind VPN or IP allowlist
+- Redis accessible only from within the private VPC — now holds real security-sensitive state
+  (sessions, login-lockout counters, password-reset tokens), not just job queues and slot locks
 - SSH access to servers via key pairs only (no password auth)
 - Automatic OS security patches enabled
 - Docker images: non-root user; read-only filesystem where possible
@@ -255,4 +278,4 @@ See also: Cabo Verde data protection authority notification requirements (consul
 
 ---
 
-*CAP 360 · Security & Compliance v1.1 · updated 2026-08-30 against the current implementation*
+*CAP 360 · Security & Compliance v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*

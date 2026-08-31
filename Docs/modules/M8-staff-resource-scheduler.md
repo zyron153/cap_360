@@ -27,15 +27,17 @@ Manages doctor and staff shifts, room/equipment calendars, and leave requests. F
 Each staff member has (`Staff` model):
 - ✅ Name, role (`StaffRole` enum: admin/doctor/nurse/receptionist/lab_tech/corporate_hr), job
   title, specialty code
-- ✅ Email — unique, doubles as the Keycloak login identity
+- ✅ Email — unique, doubles as the login identity (no external identity provider — see below)
 - ✅ Phone (optional)
 - 🟡 Active/inactive — implemented as a nullable `deletedAt` soft-delete timestamp, not a boolean
   flag
 - ✅ Default weekly availability template (relation to `StaffAvailability`, see §2.2)
-- ✅ **Invitation flow (not detailed in the original doc):** `POST /staff/invite` creates a
-  Keycloak user + a `StaffInvitation` token in one transaction; if the local `Staff` row insert
-  fails after the Keycloak user is created, the orphaned Keycloak user is best-effort deleted
-  before the error propagates
+- ✅ `passwordHash` — argon2id, set once at invitation activation or via a later
+  forgot/reset/change-password flow; see `SECURITY.md` §2 (Keycloak was removed 2026-08-31)
+- ✅ **Invitation flow (not detailed in the original doc):** `POST /staff/invite` creates only a
+  `StaffInvitation` token and emails it; the actual `Staff` row is created when the invitee visits
+  the activation link and sets their own password, hashed directly (no external system involved,
+  so there's nothing that can be left orphaned on a partial failure)
 
 ### 2.2 Weekly Availability Templates
 
@@ -144,4 +146,4 @@ See `API-SPEC.md` → Section 7 (Staff & Invitations)
 
 ---
 
-*Module M8 · v1.1 · updated 2026-08-30 against the current implementation*
+*Module M8 · v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*

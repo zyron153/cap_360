@@ -10,6 +10,9 @@
 > much smaller than described, and — a genuine bug found while writing this — **its test job
 > currently references the wrong package name**, likely breaking it. There is no
 > `apps/whatsapp-hub` and no `apps/mobile`; the monorepo has exactly two apps, `api` and `web`.
+> **2026-08-31: Keycloak has been removed** — no more `keycloak` service, no `infra/keycloak/`,
+> auth is now self-hosted (argon2id + Redis sessions, see `SECURITY.md` §2). All references to it
+> below have been updated.
 
 ---
 
@@ -45,12 +48,12 @@ Code/
 │                            no shared React component package exists
 ├── infra/                # not "infrastructure/"
 │   ├── docker/           # api.Dockerfile, web.Dockerfile only
-│   ├── keycloak/         # cap-realm.json
 │   └── nginx/            # nginx.conf
-│                            (no k8s/ directory — ❌ no manifests exist)
+│                            (no k8s/ directory — ❌ no manifests exist;
+│                             no keycloak/ either — removed 2026-08-31)
 ├── .github/
 │   └── workflows/        # ci.yml only — no separate security.yml
-└── docker-compose.yml    # postgres + redis + keycloak, dev only
+└── docker-compose.yml    # postgres + redis, dev only
 ```
 
 ---
@@ -71,8 +74,8 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env.local
 
-# Start infrastructure (PostgreSQL, Redis, Keycloak)
-docker compose up -d postgres redis keycloak
+# Start infrastructure (PostgreSQL, Redis)
+docker compose up -d postgres redis
 
 # Push the Prisma schema — this project uses `db push`, not migrations, for day-to-day
 # schema changes (see §4). One-time real migrations exist only for the initial two commits.
@@ -106,23 +109,17 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    # no --requirepass — dev Redis has no password at all
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:24.0
-    command: start-dev --import-realm
-    environment:
-      KC_DB: dev-mem   # in-memory H2 — realm/users reset on every container restart
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-    volumes:
-      - ./infra/keycloak/cap-realm.json:/opt/keycloak/data/import/cap-realm.json:ro
-    ports:
-      - "8080:8080"
+    # no --requirepass — dev Redis has no password at all; now also holds sessions and
+    # login-lockout state, not just BullMQ queues and slot locks (see SECURITY.md §10)
 
 volumes:
   pgdata:
 ```
+
+🔄 **Changed 2026-08-31:** this file used to also run a `keycloak` service (image
+`quay.io/keycloak/keycloak:24.0`, importing `./infra/keycloak/cap-realm.json`) — removed along
+with the rest of Keycloak. It had been reported "unhealthy" in this dev environment for 3+ days
+straight before removal, for what it's worth.
 
 ### 3.3 Dev URLs
 
@@ -130,7 +127,6 @@ volumes:
 |---|---|
 | Web App | http://localhost:3000 |
 | API | http://localhost:3001 |
-| Keycloak | http://localhost:8080 |
 | PostgreSQL | localhost:5434 (not 5432 — see compose file above) |
 | Redis | localhost:6379 |
 
@@ -391,4 +387,4 @@ Never commit `.env.production` to the repository. Use `1Password` or `Vault` for
 
 ---
 
-*CAP 360 · Deployment Guide v1.1 · updated 2026-08-30 against the current implementation*
+*CAP 360 · Deployment Guide v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
