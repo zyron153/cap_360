@@ -124,7 +124,10 @@ export class BillingRepository {
 
       return tx.invoice.update({
         where: { id: invoiceId },
-        data: { amountPaid: totalPaid, status },
+        // pdfR2Key: null invalidates any previously-cached receipt — getReceiptUrl only
+        // regenerates when it's unset, so a stale receipt showing the pre-payment balance would
+        // otherwise keep being served after this payment changes amountPaid/status.
+        data: { amountPaid: totalPaid, status, pdfR2Key: null },
         select: { id: true, status: true, amountPaid: true },
       });
     });

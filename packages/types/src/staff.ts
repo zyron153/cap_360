@@ -9,10 +9,16 @@ const AvailabilitySchema = z.object({
 export const CreateStaffSchema = z.object({
   fullName: z.string().min(2).max(150),
   email: z.string().email(),
-  role: z.enum(["admin", "doctor", "nurse", "receptionist", "lab_tech"]),
+  // corporate_hr added alongside its companyId field below — previously omitted here entirely,
+  // which meant no corporate_hr account could ever be created through the invite flow.
+  role: z.enum(["admin", "doctor", "nurse", "receptionist", "lab_tech", "corporate_hr"]),
   jobTitle: z.string().max(100).optional(),
   phone: z.string().max(30).optional(),
   specialtyCode: z.string().max(50).optional(),
+  /// Which Company a corporate_hr account is scoped to (see Staff.companyId). Meaningless for
+  /// every other role — not validated as required-when-corporate_hr here, since the invite flow
+  /// only warns/omits rather than hard-failing on a mismatched combination.
+  companyId: z.string().uuid().optional(),
   availability: z.array(AvailabilitySchema).optional(),
 });
 export type CreateStaffDto = z.infer<typeof CreateStaffSchema>;

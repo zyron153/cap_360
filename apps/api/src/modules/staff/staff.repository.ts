@@ -5,7 +5,7 @@ import { CreateStaffDto, UpdateStaffDto, InviteStaffDto } from "@cap/types";
 
 const INVITATION_SELECT = {
   id: true, email: true, fullName: true, role: true,
-  jobTitle: true, phone: true, specialtyCode: true,
+  jobTitle: true, phone: true, specialtyCode: true, companyId: true,
   expiresAt: true, createdAt: true,
 } as const;
 
@@ -17,6 +17,7 @@ const STAFF_SELECT = {
   jobTitle: true,
   specialtyCode: true,
   phone: true,
+  companyId: true,
   availability: {
     where: { active: true },
     select: { dayOfWeek: true, startTime: true, endTime: true },
@@ -77,6 +78,7 @@ export class StaffRepository {
         ...(dto.jobTitle !== undefined && { jobTitle: dto.jobTitle ?? null }),
         ...(dto.phone !== undefined && { phone: dto.phone ?? null }),
         ...(dto.specialtyCode !== undefined && { specialtyCode: dto.specialtyCode ?? null }),
+        ...(dto.companyId !== undefined && { companyId: dto.companyId ?? null }),
         ...(avail !== undefined && {
           availability: {
             deleteMany: {},
@@ -95,7 +97,7 @@ export class StaffRepository {
   }
 
   /** Creates the real Staff row — called only from invitation activation, once the invitee has set a password. */
-  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; availability?: CreateStaffDto["availability"] }) {
+  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; companyId?: string | null; availability?: CreateStaffDto["availability"] }) {
     const avail = dto.availability ?? [];
     return this.prisma.staff.create({
       data: {
@@ -106,6 +108,7 @@ export class StaffRepository {
         jobTitle: dto.jobTitle ?? null,
         phone: dto.phone ?? null,
         specialtyCode: dto.specialtyCode ?? null,
+        companyId: dto.companyId ?? null,
         ...(avail.length
           ? {
               availability: {
@@ -136,6 +139,7 @@ export class StaffRepository {
         jobTitle: dto.jobTitle ?? null,
         phone: dto.phone ?? null,
         specialtyCode: dto.specialtyCode ?? null,
+        companyId: dto.companyId ?? null,
         availability: dto.availability ?? undefined,
         invitedBy: invitedBy ?? null,
         expiresAt,

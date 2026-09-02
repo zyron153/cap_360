@@ -422,6 +422,7 @@ export class AppointmentsService {
     this.gateway.emitAppointmentUpdated(updated);
 
     if (dto.status === "cancelled") {
+      await this.cancelPendingReminders(id);
       await this.notifService.notifyCancel(id);
     }
 
@@ -451,8 +452,21 @@ export class AppointmentsService {
     }
 
     const newTime = new Date(dto.scheduledAt);
+    await this.cancelPendingReminders(id);
 
-    // Cancel existing reminder jobs — parallel to avoid N+1 queue lookups
+    const updated = await this.repo.update(id, {
+      scheduledAt: newTime,
+      status: "pending",
+    });
+    await this.enqueueReminders(id, newTime);
+    this.gateway.emitAppointmentUpdated(updated);
+    return updated;
+  }
+
+  /** Deletes an appointment's pending reminder rows and removes their BullMQ jobs — shared by
+   * reschedule() (which re-enqueues fresh ones after) and updateStatus()'s cancel branch (which
+   * doesn't: a cancelled appointment should never fire its 48h/24h/2h reminders). */
+  private async cancelPendingReminders(id: string): Promise<void> {
     const existingReminders = await this.repo.deleteReminders(id);
     await Promise.all(
       existingReminders
@@ -462,14 +476,6 @@ export class AppointmentsService {
           await job?.remove();
         })
     );
-
-    const updated = await this.repo.update(id, {
-      scheduledAt: newTime,
-      status: "pending",
-    });
-    await this.enqueueReminders(id, newTime);
-    this.gateway.emitAppointmentUpdated(updated);
-    return updated;
   }
 
   async joinWaitlist(dto: JoinWaitlistDto) {

@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@cap/database";
 import { HealthPlansRepository } from "./health-plans.repository";
+import { StaffRepository } from "../staff/staff.repository";
+import { JwtUser } from "../../common/decorators/current-user.decorator";
 import {
   CreateHealthPlanProductDto,
   UpdateHealthPlanProductDto,
@@ -9,7 +11,10 @@ import {
 
 @Injectable()
 export class HealthPlansService {
-  constructor(private readonly repo: HealthPlansRepository) {}
+  constructor(
+    private readonly repo: HealthPlansRepository,
+    private readonly staffRepo: StaffRepository,
+  ) {}
 
   // ─── Products ──────────────────────────────────────────────────────────────
 
@@ -46,13 +51,31 @@ export class HealthPlansService {
 
   // ─── Plans ─────────────────────────────────────────────────────────────────
 
-  findAllPlans(companyId?: string) {
+  /** A corporate_hr caller is always scoped to their own Staff.companyId, regardless of what
+   * companyId (if any) they pass in — a caller-supplied companyId used to be trusted outright,
+   * letting any corporate_hr account read any company's plans. admin/receptionist are unrestricted. */
+  async findAllPlans(companyId: string | undefined, user: JwtUser) {
+    if (user.roles.includes("corporate_hr")) {
+      const ownCompanyId = await this.resolveOwnCompanyId(user.sub);
+      if (!ownCompanyId) return []; // no company assigned yet — nothing to show, not everything
+      return this.repo.findAllPlans(ownCompanyId);
+    }
     return this.repo.findAllPlans(companyId);
   }
 
-  async findPlanById(id: string) {
+  async findPlanById(id: string, user: JwtUser) {
     const plan = await this.repo.findPlanById(id);
     if (!plan) throw new NotFoundException(`Health plan ${id} not found`);
+
+    if (user.roles.includes("corporate_hr")) {
+      const ownCompanyId = await this.resolveOwnCompanyId(user.sub);
+      // Same 404 either way (missing vs. someone else's) — a corporate_hr caller shouldn't be
+      // able to tell the two apart by response shape.
+      if (!ownCompanyId || plan.companyId !== ownCompanyId) {
+        throw new NotFoundException(`Health plan ${id} not found`);
+      }
+    }
+
     return plan;
   }
 
@@ -65,5 +88,10 @@ export class HealthPlansService {
       startDate: new Date(dto.startDate),
       endDate: dto.endDate ? new Date(dto.endDate) : undefined,
     });
+  }
+
+  private async resolveOwnCompanyId(staffId: string): Promise<string | undefined> {
+    const staff = await this.staffRepo.findById(staffId);
+    return staff?.companyId ?? undefined;
   }
 }

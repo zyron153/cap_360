@@ -80,6 +80,16 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
         repo.recordPaymentAtomic("inv-1", { amount: 2000, method: "cash" as never, paidAt: new Date() }, 2000)
       ).resolves.toBeDefined();
     });
+
+    it("invalidates any previously-cached receipt PDF on every payment, not just the final one", async () => {
+      // A receipt generated after a partial payment must not keep being served once amountPaid
+      // changes again — getReceiptUrl only regenerates when pdfR2Key is null.
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: "500" } });
+      await repo.recordPaymentAtomic("inv-1", { amount: 500, method: "cash" as never, paidAt: new Date() }, 2000);
+      expect(tx.invoice.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ pdfR2Key: null }) })
+      );
+    });
   });
 
   it("decrypts the joined patient's NIF — the invoice preview and receipt PDF must never show ciphertext", async () => {

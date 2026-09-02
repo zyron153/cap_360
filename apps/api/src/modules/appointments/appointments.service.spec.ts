@@ -547,4 +547,36 @@ describe("AppointmentsService", () => {
       expect(repo.create).not.toHaveBeenCalled();
     });
   });
+
+  describe("updateStatus — cancellation cleanup", () => {
+    beforeEach(() => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "pending", patientId: "p1", serviceId: "s1" });
+      repo.update.mockResolvedValue({ id: "appt-1", status: "cancelled" });
+      repo.deleteReminders.mockResolvedValue([]);
+    });
+
+    it("cancels pending reminder jobs on cancellation, same as reschedule already does", async () => {
+      repo.deleteReminders.mockResolvedValue([
+        { bullJobId: "job-48h" },
+        { bullJobId: "job-24h" },
+        { bullJobId: null }, // never actually enqueued — nothing to remove from the queue
+      ]);
+      const job = { remove: jest.fn() };
+      queue.getJob.mockResolvedValue(job);
+
+      await service.updateStatus("appt-1", { status: "cancelled" });
+
+      expect(repo.deleteReminders).toHaveBeenCalledWith("appt-1");
+      expect(queue.getJob).toHaveBeenCalledTimes(2); // only the two rows with a real bullJobId
+      expect(queue.getJob).toHaveBeenCalledWith("job-48h");
+      expect(queue.getJob).toHaveBeenCalledWith("job-24h");
+      expect(job.remove).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not touch reminders for a non-cancelling status update", async () => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "pending", patientId: "p1", serviceId: null });
+      await service.updateStatus("appt-1", { status: "confirmed" });
+      expect(repo.deleteReminders).not.toHaveBeenCalled();
+    });
+  });
 });

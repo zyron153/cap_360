@@ -12,9 +12,17 @@ const prisma = {
   setting: { findUnique: jest.fn() },
   invoice: { updateMany: jest.fn(), findMany: jest.fn() },
   staff: { findMany: jest.fn() },
+  appointment: { findUnique: jest.fn() },
 };
 
 const SMTP_CONFIGURED = { host: "smtp.cap.cv", port: "587", username: "u", password: "p", fromName: "CAP" };
+const WA_CONFIGURED = { phoneNumberId: "123", accessToken: "tok" };
+
+const APPT = {
+  scheduledAt: new Date("2026-09-01T09:00:00Z"),
+  patient: { fullName: "Ana Costa", phone: "+2389912345", consentGiven: true },
+  service: { name: "Consulta Geral" },
+};
 
 describe("NotificationsProcessor — overdue-invoices job", () => {
   let processor: NotificationsProcessor;
@@ -57,5 +65,46 @@ describe("NotificationsProcessor — overdue-invoices job", () => {
 
     expect(prisma.invoice.updateMany).toHaveBeenCalled();
     expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: "admin@cap.cv" }));
+  });
+});
+
+describe("NotificationsProcessor — WhatsApp confirm/cancel consent gate", () => {
+  let processor: NotificationsProcessor;
+  let fetchSpy: jest.SpyInstance;
+
+  beforeEach(async () => {
+    const mod = await Test.createTestingModule({
+      providers: [NotificationsProcessor, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+    processor = mod.get(NotificationsProcessor);
+    jest.clearAllMocks();
+    prisma.setting.findUnique.mockResolvedValue({ value: WA_CONFIGURED });
+    fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue({ ok: true } as Response);
+  });
+
+  afterEach(() => fetchSpy.mockRestore());
+
+  it("sends the confirmation when the patient has given consent", async () => {
+    prisma.appointment.findUnique.mockResolvedValue(APPT);
+    await processor.handleConfirm({ data: { appointmentId: "a1" } } as never);
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("does NOT send a confirmation once consent has been withdrawn", async () => {
+    prisma.appointment.findUnique.mockResolvedValue({ ...APPT, patient: { ...APPT.patient, consentGiven: false } });
+    await processor.handleConfirm({ data: { appointmentId: "a1" } } as never);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT send a cancellation notice once consent has been withdrawn", async () => {
+    prisma.appointment.findUnique.mockResolvedValue({ ...APPT, patient: { ...APPT.patient, consentGiven: false } });
+    await processor.handleCancel({ data: { appointmentId: "a1" } } as never);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("still sends a cancellation notice when consent is given", async () => {
+    prisma.appointment.findUnique.mockResolvedValue(APPT);
+    await processor.handleCancel({ data: { appointmentId: "a1" } } as never);
+    expect(fetchSpy).toHaveBeenCalled();
   });
 });

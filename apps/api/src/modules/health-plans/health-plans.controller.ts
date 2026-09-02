@@ -14,6 +14,7 @@ import {
 import { HealthPlansService } from "./health-plans.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decorator";
 import {
   CreateHealthPlanProductSchema,
   UpdateHealthPlanProductSchema,
@@ -72,14 +73,14 @@ export class HealthPlansController {
 
   @Get()
   @Roles("admin", "receptionist", "corporate_hr")
-  findAllPlans(@Query("companyId") companyId?: string) {
-    return this.service.findAllPlans(companyId);
+  findAllPlans(@Query("companyId") companyId: string | undefined, @CurrentUser() user: JwtUser) {
+    return this.service.findAllPlans(companyId, user);
   }
 
   @Get(":id")
   @Roles("admin", "receptionist", "corporate_hr")
-  findPlan(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.findPlanById(id);
+  findPlan(@Param("id", ParseUUIDPipe) id: string, @CurrentUser() user: JwtUser) {
+    return this.service.findPlanById(id, user);
   }
 
   @Post()

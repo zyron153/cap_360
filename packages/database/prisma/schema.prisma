@@ -162,10 +162,15 @@ model Staff {
   jobTitle      String?   @db.VarChar(100)
   specialtyCode String?   @db.VarChar(50)
   phone         String?   @db.VarChar(30)
+  /// Only meaningful for role = corporate_hr — scopes which Company's health plans they can see
+  /// (HealthPlansService derives this server-side; a corporate_hr caller can't override it via a
+  /// query param). Null for every other role.
+  companyId     String?   @db.VarChar(36)
   deletedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  company           Company?            @relation(fields: [companyId], references: [id])
   appointments      Appointment[]
   appointmentSeries AppointmentSeries[]
   shifts            StaffShift[]
@@ -177,6 +182,7 @@ model Staff {
 
   @@index([role])
   @@index([deletedAt])
+  @@index([companyId])
   @@map("staff")
 }
 
@@ -189,6 +195,9 @@ model StaffInvitation {
   jobTitle      String?   @db.VarChar(100)
   specialtyCode String?   @db.VarChar(50)
   phone         String?   @db.VarChar(30)
+  /// Copied onto the real Staff row at activation — see Staff.companyId. Not a real FK here,
+  /// same denormalized-until-activation style as the other fields above.
+  companyId     String?   @db.VarChar(36)
   availability  Json?
   invitedBy     String?   @db.VarChar(150)
   expiresAt     DateTime
@@ -418,6 +427,7 @@ model Company {
 
   healthPlans HealthPlan[]
   products    HealthPlanProduct[]
+  staff       Staff[]
 
   @@index([active])
   @@map("companies")

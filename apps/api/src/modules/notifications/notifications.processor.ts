@@ -65,7 +65,7 @@ export class NotificationsProcessor {
       where: { id: job.data.appointmentId },
       include: { patient: true, service: true },
     });
-    if (!appt?.patient.phone) return;
+    if (!appt?.patient.phone || !appt.patient.consentGiven) return;
 
     const date = appt.scheduledAt.toLocaleDateString("pt-CV", { day: "2-digit", month: "long", year: "numeric" });
     const time = appt.scheduledAt.toLocaleTimeString("pt-CV", { hour: "2-digit", minute: "2-digit" });
@@ -86,7 +86,7 @@ export class NotificationsProcessor {
       where: { id: job.data.appointmentId },
       include: { patient: true, service: true },
     });
-    if (!appt?.patient.phone) return;
+    if (!appt?.patient.phone || !appt.patient.consentGiven) return;
 
     const date = appt.scheduledAt.toLocaleDateString("pt-CV", { day: "2-digit", month: "long", year: "numeric" });
 

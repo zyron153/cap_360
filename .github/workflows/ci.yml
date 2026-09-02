@@ -85,10 +85,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma client
-        run: pnpm --filter @cms/database run db:generate
+        run: pnpm --filter @cap/database run db:generate
 
-      - name: Run migrations (test DB)
-        run: pnpm --filter @cms/database run db:migrate:prod
+      - name: Push schema (test DB)
+        # This project uses `prisma db push` for schema sync, not `migrate deploy` — the checked-in
+        # migrations predate most of schema.prisma and would leave the test DB badly out of date.
+        run: pnpm --filter @cap/database run db:push
 
       - name: Run tests
         run: pnpm turbo run test

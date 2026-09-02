@@ -96,6 +96,7 @@ export class StaffService {
       jobTitle: invite.jobTitle,
       phone: invite.phone,
       specialtyCode: invite.specialtyCode,
+      companyId: invite.companyId,
       availability: (invite.availability as { dayOfWeek: number; startTime: string; endTime: string }[] | null) ?? undefined,
     });
 
