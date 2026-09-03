@@ -191,6 +191,61 @@ export class NotificationsProcessor {
     });
   }
 
+  @Process("health-plan-expiring")
+  async handleHealthPlanExpiring(_job: Job) {
+    // @db.Date columns compare correctly against UTC-midnight Date objects regardless of the
+    // server's local timezone — local midnight (like handleDailySummary uses for a DateTime
+    // column below) can drift a day off a pure-date column near a UTC offset boundary.
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    const targets = [30, 15, 7].map((days) => {
+      const d = new Date(todayUtc);
+      d.setUTCDate(d.getUTCDate() + days);
+      return d;
+    });
+
+    const plans = await this.prisma.healthPlan.findMany({
+      where: { active: true, endDate: { in: targets } },
+      select: {
+        planNumber: true,
+        endDate: true,
+        holderPatientId: true,
+        product: { select: { name: true } },
+        company: { select: { name: true, email: true } },
+      },
+    });
+    if (plans.length === 0) return;
+
+    const wa = await this.cfg<WaConfig>("integration_whatsapp");
+    const smtp = await this.cfg<SmtpConfig>("integration_email_smtp");
+
+    for (const plan of plans) {
+      const daysLeft = Math.round((plan.endDate!.getTime() - todayUtc.getTime()) / 86_400_000);
+
+      if (plan.holderPatientId) {
+        if (!wa?.phoneNumberId || !wa?.accessToken) continue;
+        const patient = await this.prisma.patient.findUnique({
+          where: { id: plan.holderPatientId },
+          select: { fullName: true, phone: true, consentGiven: true },
+        });
+        if (!patient?.phone || !patient.consentGiven) continue;
+        await this.sendWhatsApp(
+          wa,
+          patient.phone,
+          `Olá ${patient.fullName}, o seu plano de saúde ${plan.product.name} expira em ${daysLeft} dias. Contacte-nos para renovar.`,
+        );
+      } else if (plan.company?.email) {
+        if (!smtp?.host) continue;
+        await this.createTransport(smtp).sendMail({
+          from: this.from(smtp),
+          to: plan.company.email,
+          subject: `Plano de saúde a expirar — ${plan.product.name}`,
+          html: `<p style="font-family:sans-serif">O plano <strong>${plan.planNumber}</strong> (${plan.product.name}) da ${plan.company.name} expira em ${daysLeft} dias.</p>`,
+        });
+      }
+    }
+  }
+
   @Process("overdue-invoices")
   async handleOverdueInvoices(_job: Job) {
     // InvoiceStatus.overdue existed as an enum value with nothing that ever set it — this is a

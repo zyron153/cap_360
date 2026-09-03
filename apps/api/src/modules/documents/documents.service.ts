@@ -1,14 +1,26 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { createHmac, randomBytes } from "crypto";
 import { DocumentsRepository } from "./documents.repository";
+import { R2Service } from "../../common/services/r2.service";
 
 const TOKEN_TTL_SECONDS = 3600;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB, matching M5's original design cap
+
+interface UploadedFile {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+  size: number;
+}
 
 @Injectable()
 export class DocumentsService {
   private readonly signingKey: string;
 
-  constructor(private readonly repo: DocumentsRepository) {
+  constructor(
+    private readonly repo: DocumentsRepository,
+    private readonly r2: R2Service,
+  ) {
     this.signingKey = process.env.FIELD_ENCRYPTION_KEY ?? randomBytes(32).toString("hex");
   }
 
@@ -16,6 +28,27 @@ export class DocumentsService {
     const doc = await this.repo.findById(id);
     if (!doc) throw new NotFoundException(`Document ${id} not found`);
     return doc;
+  }
+
+  listByPatient(patientId: string) {
+    return this.repo.findByPatient(patientId);
+  }
+
+  async upload(patientId: string, type: string, file: UploadedFile, uploadedBy: string) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new BadRequestException("O ficheiro excede o tamanho máximo de 20MB");
+    }
+    const key = `patient-documents/${patientId}/${Date.now()}-${file.originalname}`;
+    await this.r2.upload(key, file.buffer, file.mimetype);
+    return this.repo.create({
+      patientId,
+      type,
+      fileName: file.originalname,
+      r2Key: key,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      uploadedBy,
+    });
   }
 
   generateDownloadUrl(doc: { id: string; r2Key: string; fileName: string }) {

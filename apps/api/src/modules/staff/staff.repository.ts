@@ -175,4 +175,41 @@ export class StaffRepository {
   deleteInvitation(id: string) {
     return this.prisma.staffInvitation.delete({ where: { id } });
   }
+
+  // ─── Leave Requests ────────────────────────────────────────────────────────
+
+  createLeaveRequest(staffId: string, dto: { startDate: string; endDate: string; reason?: string }) {
+    return this.prisma.leaveRequest.create({
+      data: {
+        staffId,
+        startDate: new Date(dto.startDate),
+        endDate: new Date(dto.endDate),
+        reason: dto.reason ?? null,
+      },
+    });
+  }
+
+  findLeaveRequestsByStaffId(staffId: string) {
+    return this.prisma.leaveRequest.findMany({
+      where: { staffId },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  /** Admin queue — pending only, same convention as findPendingInvitations. */
+  findPendingLeaveRequests() {
+    return this.prisma.leaveRequest.findMany({
+      where: { status: "pending" },
+      include: { staff: { select: { id: true, fullName: true, role: true } } },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  findLeaveRequestById(id: string) {
+    return this.prisma.leaveRequest.findUnique({ where: { id } });
+  }
+
+  updateLeaveRequestStatus(id: string, status: "approved" | "rejected") {
+    return this.prisma.leaveRequest.update({ where: { id }, data: { status } });
+  }
 }

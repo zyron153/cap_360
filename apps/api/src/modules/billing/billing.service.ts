@@ -12,6 +12,7 @@ import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cap/database";
+import { RequestContext } from "../../common/context/request-context";
 import {
   CreateInvoiceDto,
   RecordPaymentDto,
@@ -32,6 +33,7 @@ export class BillingService {
   async create(dto: CreateInvoiceDto, callerRoles: string[] = []) {
     let subtotal = 0;
     const itemsData = [];
+    const overrides: { serviceId: string; cataloguePrice: number; billedPrice: number }[] = [];
 
     for (const item of dto.items) {
       // Custom/off-catalogue line items (no serviceId) aren't an "override" — there's no
@@ -46,6 +48,11 @@ export class BillingService {
               `Only an admin can bill service ${item.serviceId} at a price other than the catalogue price`
             );
           }
+          overrides.push({
+            serviceId: item.serviceId,
+            cataloguePrice: Number(catalogueService.price),
+            billedPrice: item.unitPrice,
+          });
           this.logger.warn(
             `Invoice price override for patient ${dto.patientId}: service ${item.serviceId} ` +
             `catalogue price ${catalogueService.price}, billed at ${item.unitPrice}`
@@ -64,6 +71,20 @@ export class BillingService {
       });
     }
 
+    // No hard price floor — an admin may still bill below catalogue — but underpricing must be
+    // explained, not silent. Overpricing needs no reason: raising a price isn't the risk here.
+    const underpriced = overrides.some((o) => o.billedPrice < o.cataloguePrice);
+    if (underpriced && !dto.priceOverrideReason) {
+      throw new BadRequestException(
+        "priceOverrideReason is required when billing a service below its catalogue price"
+      );
+    }
+    if (overrides.length > 0) {
+      // Not really a before/after (this is a create) — piggybacking on the same audit-metadata
+      // mechanism the rest of the app uses for mutations, with the override info in the "after" slot.
+      RequestContext.setAuditDiff(null, { priceOverrides: overrides, reason: dto.priceOverrideReason ?? null });
+    }
+
     const invoiceNumber = await this.repo.nextInvoiceNumber();
 
     const invoice = await this.repo.create({
@@ -71,6 +92,9 @@ export class BillingService {
       patient: { connect: { id: dto.patientId } },
       ...(dto.appointmentId
         ? { appointment: { connect: { id: dto.appointmentId } } }
+        : {}),
+      ...(dto.healthPlanId
+        ? { healthPlan: { connect: { id: dto.healthPlanId } } }
         : {}),
       subtotal,
       total: subtotal,

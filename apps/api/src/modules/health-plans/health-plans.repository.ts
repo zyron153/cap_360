@@ -62,4 +62,28 @@ export class HealthPlansRepository {
   createPlan(data: Prisma.HealthPlanCreateInput) {
     return this.prisma.healthPlan.create({ data, include: { product: true, company: true } });
   }
+
+  incrementUsage(id: string) {
+    return this.prisma.healthPlan.update({
+      where: { id },
+      data: { usageCount: { increment: 1 } },
+      select: { id: true, usageCount: true },
+    });
+  }
+
+  /** holderPatientId has no Prisma @relation (it's a soft reference, unlike companyId) — callers
+   * that need the holder's contact info must look the patient up separately by that id. */
+  findExpiringBetween(from: Date, to: Date) {
+    return this.prisma.healthPlan.findMany({
+      where: { active: true, endDate: { gte: from, lte: to } },
+      select: {
+        id: true,
+        planNumber: true,
+        endDate: true,
+        holderPatientId: true,
+        product: { select: { name: true } },
+        company: { select: { name: true, email: true } },
+      },
+    });
+  }
 }

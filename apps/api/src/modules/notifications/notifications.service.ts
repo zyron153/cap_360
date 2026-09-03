@@ -4,8 +4,9 @@ import { Queue } from "bull";
 import { PrismaService } from "../../prisma/prisma.service";
 
 const SCHEDULED = [
-  { key: "email_daily",   name: "daily-summary",   cron: "30 7 * * *" },
-  { key: "email_overdue", name: "overdue-invoices", cron: "0 9 * * 1"  },
+  { key: "email_daily",          name: "daily-summary",       cron: "30 7 * * *" },
+  { key: "email_overdue",        name: "overdue-invoices",    cron: "0 9 * * 1"  },
+  { key: "health_plan_expiring", name: "health-plan-expiring", cron: "0 8 * * *"  },
 ] as const;
 
 @Injectable()

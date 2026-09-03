@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException } from "@nestjs/common";
+import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException, BadRequestException } from "@nestjs/common";
 import { randomBytes } from "crypto";
-import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto } from "@cap/types";
+import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto, CreateLeaveRequestDto, LeaveRequestDecisionDto } from "@cap/types";
 import { StaffRepository } from "./staff.repository";
 import { PasswordService } from "../../common/services/password.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -102,5 +102,26 @@ export class StaffService {
 
     await this.repo.markInvitationAccepted(invite.id);
     return staff;
+  }
+
+  // ─── Leave Requests ────────────────────────────────────────────────────────
+
+  createLeaveRequest(staffId: string, dto: CreateLeaveRequestDto) {
+    return this.repo.createLeaveRequest(staffId, dto);
+  }
+
+  listOwnLeaveRequests(staffId: string) {
+    return this.repo.findLeaveRequestsByStaffId(staffId);
+  }
+
+  listPendingLeaveRequests() {
+    return this.repo.findPendingLeaveRequests();
+  }
+
+  async decideLeaveRequest(id: string, dto: LeaveRequestDecisionDto) {
+    const existing = await this.repo.findLeaveRequestById(id);
+    if (!existing) throw new NotFoundException(`Leave request ${id} not found`);
+    if (existing.status !== "pending") throw new BadRequestException("Este pedido já foi decidido");
+    return this.repo.updateLeaveRequestStatus(id, dto.status);
   }
 }

@@ -59,6 +59,24 @@ export interface PatientNote {
   createdAt: string;
 }
 
+export const DocumentTypeSchema = z.enum([
+  "national_id", "consent_form", "exam_result", "prescription", "referral", "other",
+]);
+export const UploadPatientDocumentSchema = z.object({
+  type: DocumentTypeSchema,
+});
+export type UploadPatientDocumentDto = z.infer<typeof UploadPatientDocumentSchema>;
+
+export interface PatientDocumentEntry {
+  id: string;
+  patientId: string;
+  type: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
 export interface TimelineEvent {
   id: string;
   type: "appointment" | "communication" | "invoice" | "note";

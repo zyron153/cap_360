@@ -15,6 +15,7 @@ import { AppointmentsRepository } from "./appointments.repository";
 import { AppointmentsGateway } from "./appointments.gateway";
 import { BillingService } from "../billing/billing.service";
 import { NotificationsService } from "../notifications/notifications.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import {
   CreateAppointmentDto,
   CreateAppointmentSeriesDto,
@@ -60,6 +61,7 @@ export class AppointmentsService {
     private readonly gateway: AppointmentsGateway,
     private readonly billingService: BillingService,
     private readonly notifService: NotificationsService,
+    private readonly healthPlansService: HealthPlansService,
     private readonly prisma: PrismaService,
     @InjectQueue("reminders") private readonly remindersQueue: Queue,
     @Inject(REDIS_CLIENT) private readonly redis: Redis
@@ -437,6 +439,12 @@ export class AppointmentsService {
           unitPrice,
         }).catch((err: unknown) => {
           console.error(`[billing] auto-invoice failed for appointment ${id}:`, err);
+        });
+      }
+
+      if (appointment.patient?.healthPlanId) {
+        await this.healthPlansService.incrementUsage(appointment.patient.healthPlanId).catch((err: unknown) => {
+          console.error(`[health-plans] usage increment failed for appointment ${id}:`, err);
         });
       }
     }

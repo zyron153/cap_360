@@ -94,4 +94,14 @@ export class HealthPlansService {
     const staff = await this.staffRepo.findById(staffId);
     return staff?.companyId ?? undefined;
   }
+
+  /** Best-effort — called from AppointmentsService when a patient with an active plan completes
+   * an appointment. A failure here must never block the appointment status update itself. */
+  incrementUsage(healthPlanId: string) {
+    return this.repo.incrementUsage(healthPlanId);
+  }
+
+  findExpiringBetween(from: Date, to: Date) {
+    return this.repo.findExpiringBetween(from, to);
+  }
 }

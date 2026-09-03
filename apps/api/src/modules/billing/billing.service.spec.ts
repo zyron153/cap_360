@@ -6,6 +6,7 @@ import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { generateReceiptPdf } from "./receipt.pdf";
+import { RequestContext } from "../../common/context/request-context";
 
 jest.mock("./receipt.pdf", () => ({ generateReceiptPdf: jest.fn() }));
 
@@ -146,6 +147,7 @@ describe("BillingService", () => {
 
       await service.create({
         patientId: "patient-1",
+        priceOverrideReason: "Paciente em dificuldade financeira",
         items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
       } as never, ["admin"]);
 
@@ -185,10 +187,66 @@ describe("BillingService", () => {
 
       await service.create({
         patientId: "patient-1",
+        priceOverrideReason: "Desconto autorizado",
         items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
       } as never, ["admin"]);
 
       expect(repo.create).toHaveBeenCalledWith(expect.objectContaining({ subtotal: 500, total: 500 }));
+    });
+
+    it("requires priceOverrideReason when an admin bills below the catalogue price", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+      jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      await expect(
+        service.create({
+          patientId: "patient-1",
+          items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
+        } as never, ["admin"])
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("does not require a reason when an admin bills ABOVE the catalogue price", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+      jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 2000 }],
+      } as never, ["admin"]);
+
+      expect(repo.create).toHaveBeenCalled();
+    });
+
+    it("records the override and reason in the audit diff", async () => {
+      repo.findServiceById.mockResolvedValue({ id: "service-1", name: "Consulta Geral", price: "1500" });
+      jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
+      const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+
+      await service.create({
+        patientId: "patient-1",
+        priceOverrideReason: "Desconto autorizado",
+        items: [{ serviceId: "service-1", description: "Consulta Geral", quantity: 1, unitPrice: 500 }],
+      } as never, ["admin"]);
+
+      expect(diffSpy).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({ reason: "Desconto autorizado" })
+      );
+      diffSpy.mockRestore();
+    });
+
+    it("connects the invoice to a health plan when healthPlanId is provided", async () => {
+      await service.create({
+        patientId: "patient-1",
+        healthPlanId: "plan-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 250 }],
+      } as never, ["receptionist"]);
+
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ healthPlan: { connect: { id: "plan-1" } } })
+      );
     });
 
     it("rejects a non-admin trying to override a catalogued service's price", async () => {

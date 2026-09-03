@@ -21,6 +21,7 @@ export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod];
 export const CreateInvoiceSchema = z.object({
   patientId: z.string().uuid(),
   appointmentId: z.string().uuid().optional(),
+  healthPlanId: z.string().uuid().optional(),
   items: z
     .array(
       z.object({
@@ -33,6 +34,9 @@ export const CreateInvoiceSchema = z.object({
     .min(1),
   notes: z.string().max(500).optional(),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  // Required (checked in BillingService, not here — Zod can't see the catalogue price to compare
+  // against) only when an admin bills a catalogued service below its catalogue price.
+  priceOverrideReason: z.string().min(3).max(300).optional(),
 });
 export type CreateInvoiceDto = z.infer<typeof CreateInvoiceSchema>;
 
@@ -72,6 +76,7 @@ export interface Invoice {
   invoiceNumber: string;
   patientId: string;
   appointmentId?: string | null;
+  healthPlanId?: string | null;
   status: InvoiceStatus;
   subtotal: number;
   total: number;

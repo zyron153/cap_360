@@ -7,12 +7,14 @@ import { AppointmentsGateway } from "./appointments.gateway";
 import { RemindersProcessor } from "./reminders.processor";
 import { BillingModule } from "../billing/billing.module";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { HealthPlansModule } from "../health-plans/health-plans.module";
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: "reminders" }),
     BillingModule,
     NotificationsModule,
+    HealthPlansModule,
   ],
   controllers: [AppointmentsController],
   providers: [

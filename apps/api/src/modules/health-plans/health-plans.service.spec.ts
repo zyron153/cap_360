@@ -7,6 +7,8 @@ import { StaffRepository } from "../staff/staff.repository";
 const repo = {
   findAllPlans: jest.fn(),
   findPlanById: jest.fn(),
+  incrementUsage: jest.fn(),
+  findExpiringBetween: jest.fn(),
 };
 const staffRepo = { findById: jest.fn() };
 
@@ -95,6 +97,22 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
     it("still throws NotFoundException for a genuinely missing plan id", async () => {
       repo.findPlanById.mockResolvedValue(null);
       await expect(service.findPlanById("ghost", ADMIN)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("incrementUsage / findExpiringBetween", () => {
+    it("delegates usage increments to the repository", async () => {
+      repo.incrementUsage.mockResolvedValue({ id: "plan-1", usageCount: 4 });
+      await service.incrementUsage("plan-1");
+      expect(repo.incrementUsage).toHaveBeenCalledWith("plan-1");
+    });
+
+    it("delegates the expiring-plans window query to the repository", async () => {
+      repo.findExpiringBetween.mockResolvedValue([]);
+      const from = new Date("2026-09-01");
+      const to = new Date("2026-09-30");
+      await service.findExpiringBetween(from, to);
+      expect(repo.findExpiringBetween).toHaveBeenCalledWith(from, to);
     });
   });
 });

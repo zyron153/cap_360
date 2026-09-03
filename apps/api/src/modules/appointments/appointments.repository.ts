@@ -18,7 +18,9 @@ export class AppointmentsRepository {
     return this.prisma.appointment.findFirst({
       where: { id, deletedAt: null },
       include: {
-        patient: { select: { id: true, fullName: true, phone: true } },
+        // healthPlanId: only this query needs it (updateStatus's completed-branch usage bump) —
+        // not added to the other patient-select call sites below to avoid over-fetching there.
+        patient: { select: { id: true, fullName: true, phone: true, healthPlanId: true } },
         staff: { select: { id: true, fullName: true, role: true } },
         service: { select: { id: true, name: true, durationMinutes: true, price: true } },
         room: { select: { id: true, name: true } },

@@ -57,3 +57,27 @@ export interface PublicInvitationInfo {
   role: string;
   expired: boolean;
 }
+
+// ─── Leave Requests ─────────────────────────────────────────────────────────
+
+export const CreateLeaveRequestSchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().max(300).optional(),
+}).refine((d) => d.endDate >= d.startDate, { message: "endDate must not be before startDate", path: ["endDate"] });
+export type CreateLeaveRequestDto = z.infer<typeof CreateLeaveRequestSchema>;
+
+export const LeaveRequestDecisionSchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+});
+export type LeaveRequestDecisionDto = z.infer<typeof LeaveRequestDecisionSchema>;
+
+export interface LeaveRequestEntry {
+  id: string;
+  staffId: string;
+  startDate: string;
+  endDate: string;
+  reason: string | null;
+  status: string;
+  createdAt: string;
+}
