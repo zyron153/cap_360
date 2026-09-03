@@ -555,7 +555,7 @@ export default function PatientsPage() {
                           <td className="px-5 py-3.5 border-b border-dim-100">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-800 font-semibold text-[11px] flex items-center justify-center shrink-0">
-                                {patient.fullName[0]?.toUpperCase()}
+                                {patient.fullName?.[0]?.toUpperCase()}
                               </div>
                               <span className="text-[13px] font-semibold text-dim-900">{patient.fullName}</span>
                             </div>

@@ -128,7 +128,6 @@ export default function DashboardPage() {
   const todayStr   = format(NOW, "yyyy-MM-dd");
   const monthStart = format(new Date(NOW.getFullYear(), NOW.getMonth(), 1), "yyyy-MM-dd");
   const monthEnd   = format(new Date(NOW.getFullYear(), NOW.getMonth() + 1, 0), "yyyy-MM-dd");
-  const todayLabel = format(NOW, "EEEE, dd MMM", { locale: pt });
   const calMonthStart = format(calMonth, "yyyy-MM-dd");
   const calMonthEnd   = format(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 0), "yyyy-MM-dd");
   const monthLabel    = format(calMonth, "MMMM yyyy", { locale: pt });

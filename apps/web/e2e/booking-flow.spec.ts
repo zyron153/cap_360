@@ -40,9 +40,12 @@ test.beforeAll(async ({ request }) => {
   const staffId: string = staff[0].id;
   const serviceId: string = services[0].id;
 
-  // Book appointment 3 days from now at 10:00 local
+  // Book appointment ~3 days out at 14:00 local, nudged off any weekend the clinic is closed —
+  // a fixed +3 lands on a different weekday each time this runs and can hit a closed Sunday/Saturday.
   const apptDate = new Date();
   apptDate.setDate(apptDate.getDate() + 3);
+  if (apptDate.getDay() === 0) apptDate.setDate(apptDate.getDate() + 1); // Sun -> Mon
+  if (apptDate.getDay() === 6) apptDate.setDate(apptDate.getDate() + 2); // Sat -> Mon
   apptDate.setHours(14, 0, 0, 0);
 
   const ar = await request.post(`${API}/appointments`, {
@@ -129,6 +132,9 @@ test("record payment → invoice transitions to paid", async ({ request }) => {
 
 test("billing page shows the invoice", async ({ page }) => {
   await page.goto("/billing");
+  // /billing lands on the Financeiro overview tab (charts, no invoice numbers) — Faturas is a
+  // separate client-side tab, not its own route.
+  await page.getByRole("button", { name: "Faturas" }).click();
   await expect(page.getByText("INV-").first()).toBeVisible();
 });
 

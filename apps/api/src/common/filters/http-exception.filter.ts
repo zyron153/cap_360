@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { Response } from "express";
 import { ZodError } from "zod";
+import * as Sentry from "@sentry/node";
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -36,6 +37,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     console.error("Unhandled exception", exception);
+    Sentry.captureException(exception); // no-op when SENTRY_DSN isn't set — only true 5xx bugs, not expected 4xx flow
     return response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: 500,
       error: "Internal Server Error",

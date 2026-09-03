@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
+import { EncryptionService } from "../../common/services/encryption.service";
 import type { TimelineEvent } from "@cap/types";
 
 @Injectable()
 export class BffService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly encryption: EncryptionService,
+  ) {}
 
   async getPatientScreen(id: string) {
     const [patient, appointments, comms, invoices] = await Promise.all([
@@ -52,6 +56,11 @@ export class BffService {
     ]);
 
     if (!patient) throw new NotFoundException(`Patient ${id} not found`);
+
+    // This reads via a raw Prisma call (not PatientsRepository), so — unlike every other patient
+    // read path — nothing has decrypted these two columns yet.
+    if (patient.dateOfBirth) patient.dateOfBirth = this.encryption.decrypt(patient.dateOfBirth);
+    if (patient.nif) patient.nif = this.encryption.decrypt(patient.nif);
 
     const timeline: TimelineEvent[] = [
       ...appointments.map((a) => ({

@@ -244,7 +244,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               <h1 className="font-display text-[24px] font-bold text-dim-900 font-mono">{invoice.invoiceNumber}</h1>
               <div className="flex items-center gap-2.5 mt-2">
                 <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 font-semibold text-[11px] flex items-center justify-center">
-                  {invoice.patient.fullName[0]?.toUpperCase()}
+                  {invoice.patient.fullName?.[0]?.toUpperCase()}
                 </div>
                 <span className="text-[13px] font-medium text-dim-700">{invoice.patient.fullName}</span>
               </div>

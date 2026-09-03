@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Send, Phone, MoreVertical, Check, CheckCheck, Clock, MessageCircle } from "lucide-react";
+import { Search, Send, Phone, MoreVertical, Check, CheckCheck, MessageCircle } from "lucide-react";
 
 type Message = {
   id: string;

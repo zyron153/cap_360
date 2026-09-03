@@ -295,7 +295,7 @@ function ValuesPanel({ nome }: { nome: string }) {
           )}
 
           {!isLoading && !isError && entries.length === 0 && !addingRow && (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-[13px] text-dim-400">Nenhum valor. Clique em "+ Valor" para adicionar.</td></tr>
+            <tr><td colSpan={7} className="px-4 py-10 text-center text-[13px] text-dim-400">Nenhum valor. Clique em &quot;+ Valor&quot; para adicionar.</td></tr>
           )}
 
           {entries.map((e, idx) => (
@@ -568,7 +568,7 @@ function ServicesPanel() {
           )}
 
           {!isLoading && !isError && merged.length === 0 && !addingRow && (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-[13px] text-dim-400">Nenhum serviço. Clique em "+ Serviço" para adicionar.</td></tr>
+            <tr><td colSpan={7} className="px-4 py-10 text-center text-[13px] text-dim-400">Nenhum serviço. Clique em &quot;+ Serviço&quot; para adicionar.</td></tr>
           )}
 
           {merged.map(m => (

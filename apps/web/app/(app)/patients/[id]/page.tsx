@@ -89,7 +89,7 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
             {/* Avatar header */}
             <div className="bg-gradient-to-br from-brand-50 via-brand-100/60 to-brand-100 px-6 py-8 text-center border-b border-brand-100">
               <div className="w-16 h-16 rounded-[20px] bg-brand-700 flex items-center justify-center text-white text-[22px] font-bold mx-auto shadow-[0_4px_12px_rgba(15,145,145,.3)]">
-                {patient.fullName[0]?.toUpperCase()}
+                {patient.fullName?.[0]?.toUpperCase()}
               </div>
               <h2 className="mt-3 font-display font-bold text-dim-900 text-[17px] leading-tight">{patient.fullName}</h2>
               <p className="text-[12px] text-dim-500 mt-0.5">{age} anos · {genderLabels[patient.gender] ?? patient.gender}</p>

@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import withBundleAnalyzer from "@next/bundle-analyzer";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 const nextConfig: NextConfig = {
   transpilePackages: [
@@ -20,4 +21,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withBundleAnalyzer({ enabled: process.env.ANALYZE === "true" })(nextConfig);
+export default withSentryConfig(
+  withBundleAnalyzer({ enabled: process.env.ANALYZE === "true" })(nextConfig),
+  // Only uploads source maps if org/project/authToken are configured later — a no-op build-time
+  // wrapper otherwise. silent avoids CLI log noise while that's unconfigured.
+  { silent: true }
+);

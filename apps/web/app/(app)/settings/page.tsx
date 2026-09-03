@@ -5,10 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Bell, Users, Plug, Shield, ShieldCheck,
   AlertCircle, Clock, Phone, Mail, Globe,
-  Key, Lock, Eye, EyeOff, Check, Plus, X, ExternalLink,
-  LayoutDashboard, CalendarDays, UserRound, HeartPulse,
-  FlaskConical, Receipt, ClipboardList, UserCog,
-  Home, BarChart2, Settings2, SlidersHorizontal,
+  Key, Lock, Eye, EyeOff, Plus, ExternalLink, Receipt,
 } from "lucide-react";
 import type { StaffInvitationEntry } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
@@ -1025,7 +1022,6 @@ function IntegrationConfigModal({
   onSave: (vals: Record<string, string>) => void;
   onClose: () => void;
 }) {
-  const Icon = intg.icon;
   const [vals, setVals] = useState<Record<string, string>>(
     () => Object.fromEntries(intg.fields.map(f => [f.key, initial[f.key] ?? ""]))
   );

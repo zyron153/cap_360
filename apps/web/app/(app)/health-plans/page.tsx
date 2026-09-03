@@ -106,7 +106,7 @@ export default function HealthPlansPage() {
     if (!form.name.trim()) return;
     const auto = form.name.trim().split(/\s+/).map(w => w[0] ?? "").join("").toUpperCase().slice(0, 8);
     setForm(f => ({ ...f, code: auto }));
-  }, [form.name]); // eslint-disable-line
+  }, [form.name]);
 
   /* ── Queries ── */
 
@@ -434,7 +434,7 @@ export default function HealthPlansPage() {
             {managingProduct.active && (
               deactivateConfirm ? (
                 <div className="bg-red-50 border border-red-200 rounded-[10px] p-3.5 flex flex-col gap-2.5">
-                  <p className="text-[12px] text-red-700 font-medium">Desativar "{managingProduct.name}"? Os planos existentes não são afetados.</p>
+                  <p className="text-[12px] text-red-700 font-medium">Desativar &quot;{managingProduct.name}&quot;? Os planos existentes não são afetados.</p>
                   <div className="flex gap-2">
                     <button
                       onClick={() => deactivateMutation.mutate(managingProduct.id)}

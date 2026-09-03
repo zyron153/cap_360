@@ -30,12 +30,14 @@ export class SettingsService {
 
   async upsert(key: string, value: unknown) {
     const merged = await this.preserveMaskedSecrets(key, value);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    /* eslint-disable @typescript-eslint/no-explicit-any -- Prisma's Json column type has no
+     * narrower shape to cast `merged` (already validated per-integration upstream) to here. */
     await this.prisma.setting.upsert({
       where: { key },
       update: { value: merged as any },
       create: { key, value: merged as any },
     });
+    /* eslint-enable @typescript-eslint/no-explicit-any */
     if (key === "notifications") {
       await this.notifications.syncScheduledJobs(merged as Record<string, boolean>);
     }

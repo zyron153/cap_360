@@ -455,7 +455,7 @@ export function FaturasTab() {
                       <td className="px-5 py-3.5 border-b border-dim-100">
                         <div className="flex items-center gap-2.5">
                           <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 text-[10px] font-semibold flex items-center justify-center shrink-0">
-                            {inv.patient.fullName[0]?.toUpperCase()}
+                            {inv.patient.fullName?.[0]?.toUpperCase()}
                           </div>
                           <span className="text-[13px] font-medium text-dim-900">{inv.patient.fullName}</span>
                         </div>

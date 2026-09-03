@@ -1,17 +1,18 @@
 # CAP 360 — Testing Strategy
 
-> **Version:** 1.1 · **Date:** updated 2026-08-30 against the current implementation
-> Tools: Jest (the only real automated suite today), Playwright (one real E2E spec)
+> **Version:** 1.2 · **Date:** updated 2026-09-03 against the current implementation
+> Tools: Jest (unit + a real integration tier), Playwright (3 real E2E specs, wired to `test:e2e`)
 
 > **Implementation status:** this document was written before implementation and describes a
-> testing program that mostly doesn't exist yet. What's real: **16 Jest spec files, ~225 tests**,
-> all colocated with source (`apps/api/src/**/*.spec.ts`) — no separate `test/integration`
-> directory, no testcontainers. **One** real Playwright spec (`apps/web/e2e/booking-flow.spec.ts`)
-> — no npm script even runs it (`apps/web/package.json` has no `test`/`test:e2e` script at all). No
+> testing program most of which now genuinely exists. What's real: **22 Jest unit spec files,
+> ~292 tests**, colocated with source (`apps/api/src/**/*.spec.ts`); a separate **integration tier**
+> (`apps/api/test/integration/*.integration-spec.ts`, 4 files / 9 tests, supertest against the real
+> dev Postgres + Redis, run via `pnpm --filter @cap/api test:integration`); **3** real Playwright
+> specs (`apps/web/e2e/*.spec.ts`, 9 tests total), wired to `pnpm --filter @cap/web test:e2e`. No
 > k6 performance tests exist (`tests/performance/` doesn't exist). No OWASP ZAP scan runs in CI —
 > only `.github/workflows/ci.yml` exists, no `security.yml`. Sections below describing tests for
-> features that were never built (health plan utilisation, WhatsApp bot FSM, clinical notes, exam
-> results) are pure fiction — see each feature's module doc.
+> features that were never built (WhatsApp bot FSM, clinical notes, exam results) are pure fiction
+> — see each feature's module doc.
 
 ---
 
@@ -26,15 +27,18 @@
 
 ## 2. Test Pyramid
 
-Reality today — a much flatter shape than originally planned:
+Closer to shape now, though still unit-heavy — no k6/ZAP layer on top:
 
 ```
          ╱╲
-        ╱E2E╲          1 spec — Playwright, not wired to an npm script
+        ╱E2E╲          9 tests — 3 Playwright specs, wired to test:e2e
        ╱──────╲
-      ╱ ~225   ╲       16 Jest spec files, colocated with source —
-     ╱  tests    ╲     no distinct "integration" layer, no testcontainers
+      ╱   9    ╲       4 integration spec files — supertest + real
+     ╱  tests    ╲     dev Postgres/Redis, no testcontainers yet
     ╱──────────────╲
+   ╱     ~292        ╲  22 Jest unit spec files, colocated with source,
+  ╱      tests         ╲ repository layer mocked
+ ╱──────────────────────╲
 ```
 
 ---
@@ -95,40 +99,36 @@ No WhatsApp bot, no FSM, no such test suite — M3 has no backend at all.
 
 ## 4. Integration Tests
 
-❌ **Not a distinct layer today.** There is no `apps/api/test/integration/` directory, no
-Supertest-driven HTTP-level suite, and no testcontainers setup. Repository-layer specs
-(`*.repository.spec.ts`) exercise real Prisma query logic but live alongside every other spec
-under `src/`, run by the same `jest` command as everything else.
+✅ **A real, distinct layer now.** `apps/api/test/integration/*.integration-spec.ts`, run via
+`pnpm --filter @cap/api test:integration` (own Jest config — `jest.integration.config.js`,
+`--runInBand --forceExit`). Supertest drives the real, fully-wired Nest app (`test/integration/
+setup.ts` mirrors `main.ts`'s pipes/filters/prefix) against the real dev Postgres + Redis — no
+mocks, no testcontainers (there's no isolated test DB locally; CI's ephemeral `postgres:16-alpine`
+service is the only truly isolated instance). Each spec creates and tears down its own fixtures by
+id — never a truncate. 4 files, 9 tests, picked for highest real-world value rather than blanket
+coverage:
 
-### 4.1 Scenarios below: which ones actually hold
+- **`booking-conflict.integration-spec.ts`** — a second booking for the same staff+slot gets a real
+  409, a different slot for the same staff still succeeds.
+- **`patient-erasure.integration-spec.ts`** — create over real HTTP (encrypted `dateOfBirth`/`nif`
+  round-trip correctly), then right-to-erasure: PII actually scrubbed at rest, normal lookup 404s,
+  the row itself survives (not hard-deleted) for audit history.
+- **`invoice-payment.integration-spec.ts`** — invoice creation at catalogue price, partial payment
+  → `partially_paid`, remaining balance → `paid`, a further payment on a paid invoice rejected.
+- **`staff-invitation.integration-spec.ts`** — the one spec that deliberately skips `AUTH_BYPASS`:
+  real admin login → invite → activation (token read straight from the DB row, the same way a real
+  invitee would read it from their inbox — the API never returns it) → the new hire's own real
+  login → session actually authenticates on a protected route with their real role.
 
-#### Appointment Booking API
-```
-POST /appointments → 201 created                                    ✅ real
-POST /appointments (conflict) → 409 Conflict                        ✅ real
-GET /appointments/availability → correct slots returned             ✅ real
-PATCH /appointments/:id (cancel) → reminder jobs cancelled           ❌ false — jobs are cancelled
-                                                                         on reschedule, NOT on
-                                                                         cancellation (M1 doc §2.4)
-```
+Note on the M1 §2.4 reminder-cancellation gap this section used to flag as unfixed: it was closed
+in the roadmap's Phase 1 (`appointments.service.ts`'s `cancelPendingReminders` now runs from both
+`reschedule()` and `updateStatus()`'s cancelled branch) — covered by unit tests, not (yet) one of
+the 4 integration specs above.
 
-#### Patient CRM API
-```
-POST /patients → 201 created                                        ✅ real
-POST /patients (duplicate phone) → 409 Conflict                     ✅ real
-GET /patients?search=Maria → returns fuzzy matches                  🟡 misleading — it's a plain
-                                                                         case-insensitive `contains`
-                                                                         match, not fuzzy search
-GET /patients/:id → includes active health plan                     ✅ real
-```
+### 4.1 What's still fictional below
 
-#### Auth Guard Tests
-```
-GET /patients (no token) → 401                                      ✅ real
-GET /patients (patient token) → 403 (wrong role)                    ✅ real
-GET /patients (receptionist token) → 200                            ✅ real
-GET /clinical-notes (...) → ...                                     ❌ route doesn't exist — M7
-                                                                         was never built
+The scenario tables below predate the real integration tier and describe unit/guard behavior, not
+this section's own specs:
 ```
 
 #### Billing Flow
@@ -150,12 +150,30 @@ POST /invoices/:id/payments (partial) → status = partially_paid     ✅ real
 
 ### 5.1 Critical Flows
 
-#### Patient Booking Flow — ✅ the one real spec, `apps/web/e2e/booking-flow.spec.ts`
+#### Patient Booking Flow — ✅ `apps/web/e2e/booking-flow.spec.ts`
 Covers booking through this app's own pages, not an embeddable widget on an external site (no such
-widget exists — see `M1-smart-appointment-engine.md`). Not currently wired to an npm script; run
-directly with `npx playwright test` from `apps/web`.
+widget exists — see `M1-smart-appointment-engine.md`): patient profile render, edit-and-save,
+appointment→invoice auto-creation, payment via a raw API call, the Faturas tab, invoice detail
+page, and the receipt endpoint.
 
-#### Receptionist Check-In Flow — ❌ no E2E spec (feature itself is real, just untested at this layer)
+#### Receptionist Check-In Flow — ✅ `apps/web/e2e/checkin-payment.spec.ts`
+The one flow the booking-flow spec doesn't touch: walking a *pending* appointment through the real
+status-transition UI on `/appointments` (Confirmar → Check-in feito → Concluída, not a raw API
+call) to its auto-created invoice, then paying it off through the "Registar Pagamento" form itself
+rather than the API.
+
+#### Staff Invitation → Activation → Login — ✅ covered, but as an **integration** spec, not E2E
+See §4's `staff-invitation.integration-spec.ts` — the activation token only ever reaches a real
+invitee by email (the API deliberately never returns it), so there's no way for a *browser* flow to
+learn it without either reversing that email-only design or reaching into the DB from `apps/web`'s
+own toolchain. Reading the token straight from Postgres is exactly as legitimate as it would be
+inside a backend integration spec (which already has DB access for setup/teardown) — doing the same
+from a Playwright spec would need a new cross-package dependency for one test. The activation *form*
+itself is plain, low-risk presentational code not covered at this layer.
+
+Run with `pnpm --filter @cap/web test:e2e` (wired to the `test:e2e` script — previously nothing ran
+these). All 3 specs need both dev servers up (`apps/api` on 4001, `apps/web` on 3000) — they hit
+the real running stack, not a mocked one.
 
 #### Doctor Clinical Note Flow — ❌ doesn't exist — M7 (EMR) was never built
 
@@ -256,21 +274,22 @@ WhatsApp integration tests use mock webhook handler (no real messages sent).
 
 ## 9. Test Run Commands
 
-Only these actually exist today:
-
 ```bash
-# All tests, every package (turbo-orchestrated)
+# All unit tests, every package (turbo-orchestrated)
 pnpm test
 
-# API tests with coverage (run from apps/api, or pnpm --filter @cap/api test:cov)
+# API unit tests with coverage
 pnpm --filter @cap/api test:cov
 
-# The one E2E spec (no package script wraps this yet)
-cd apps/web && npx playwright test
+# API integration tests — real dev Postgres/Redis must be up (docker-compose)
+pnpm --filter @cap/api test:integration
+
+# All 3 E2E specs — both dev servers must be running (apps/api on 4001, apps/web on 3000)
+pnpm --filter @cap/web test:e2e
 ```
 
-❌ `pnpm test:integration`, `pnpm test:e2e`, `pnpm test:all`, and any `k6 run` command do not exist
-— there's no script and, for k6, no test file to run.
+❌ `pnpm test:all` (one command running all four tiers) and any `k6 run` command still don't exist
+— there's no unifying script, and for k6, no test file to run.
 
 ---
 
@@ -278,12 +297,13 @@ cd apps/web && npx playwright test
 
 Realistic version of this list, given what actually exists:
 - ✅ Unit tests written and passing for new business logic (this is genuinely followed —
-  TDD red/green was used throughout the REVIEW.md fix effort)
-- ❌ "Integration tests cover new endpoints": no distinct integration layer exists to add to (§4)
-- ❌ E2E test added per user-facing feature: only one flow has ever gotten one (§5)
+  TDD red/green was used throughout the REVIEW.md fix effort and everything since)
+- 🟡 "Integration tests cover new endpoints": a real layer exists now (§4), but only 4 of the API's
+  many endpoint groups have one — not yet a norm applied to every new endpoint
+- 🟡 E2E test added per user-facing feature: 3 flows covered now (§5), still far from "per feature"
 - 🟡 80% coverage target: not verified as enforced by any CI gate or Jest config threshold
 - ❌ ZAP scan / performance regression gates: neither exists to check against (§6, §7)
 
 ---
 
-*CAP 360 · Testing Strategy v1.1 · updated 2026-08-30 against the current implementation*
+*CAP 360 · Testing Strategy v1.2 · updated 2026-09-03 against the current implementation*

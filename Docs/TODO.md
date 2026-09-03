@@ -28,8 +28,8 @@
 - [x] ~~Keycloak realm import file~~ — moot; `infra/keycloak/` deleted along with Keycloak itself
 - [ ] Kubernetes manifests (`infra/k8s/`) — not started; no production deployment target yet
 - [ ] `docker-compose.prod.yml` — not started
-- [ ] Pre-commit hooks (lint + typecheck) — no `husky`/`lint-staged` configured
-- [ ] `CONTRIBUTING.md` — doesn't exist
+- [x] Pre-commit hooks — `husky` + `lint-staged`, per-package `lint`+`typecheck` gated on staged-file globs
+- [x] `CONTRIBUTING.md` — exists, root of repo
 
 ---
 
@@ -132,8 +132,8 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Auth flow in Next.js (`middleware.ts`, checks the session cookie directly — no more
   Authorization-header translation, since the API now reads the cookie itself)
 - [x] API client in Next.js (`/api/*` rewrite proxy to the NestJS API)
-- [ ] Integration test suite against a real test DB (`supertest`) — today's tests mock the repository layer; live-verification this project has relied on has been manual (via a running dev server), not an automated integration suite
-- [ ] Sentry integration — not wired in `main.ts`
+- [x] Integration test suite against a real dev DB (`supertest`, `apps/api/test/integration/`) — 4 specs / 9 tests covering booking conflict, patient erasure, invoice payment, staff invitation→activation→login; see `Docs/TESTING.md` §4
+- [x] Sentry integration — wired in both `apps/api/src/main.ts` and `apps/web`'s `instrumentation(-client).ts`, no-op until `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN` are set (no real DSN configured yet)
 
 ---
 

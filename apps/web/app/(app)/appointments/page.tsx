@@ -494,7 +494,7 @@ export default function AppointmentsPage() {
                     <td className="px-5 py-3 border-b border-dim-100">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 font-semibold text-[10px] flex items-center justify-center shrink-0">
-                          {a.patient.fullName[0]?.toUpperCase()}
+                          {a.patient.fullName?.[0]?.toUpperCase()}
                         </div>
                         <span className="text-[13px] font-medium text-dim-900">{a.patient.fullName}</span>
                       </div>
