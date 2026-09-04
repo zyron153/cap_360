@@ -105,7 +105,7 @@ This is a **psychology clinic**. The fact that someone is a client at all is sen
 
 | SECURITY.md claim | Reality | Evidence |
 |---|---|---|
-| AES-256-GCM for `nif`, `date_of_birth`, clinical notes, prescriptions | **✅ Fixed for `nif` and `date_of_birth`.** Both encrypted at rest via `EncryptionService` (AES-256-GCM); clinical notes/prescriptions are still plain (M7 is a mockup — no notes model exists yet to encrypt) | §1.2 above; DOB fix below |
+| AES-256-GCM for `nif`, `date_of_birth`, clinical notes, prescriptions | **✅ Fixed for `nif` and `date_of_birth`** (encrypted via `EncryptionService`). Clinical notes/prescriptions now exist for real (M7, built) but are **still plain text** — genuinely open now, not moot | §1.2 above; DOB fix below |
 | MFA mandatory for admin/doctor/corporate_hr | **Not configured** in Keycloak realm | §1.5 above |
 | Audit log: "Patient record viewed" | **Not captured** — only mutations are logged | §1.4 above |
 | Audit log retained 7 years, append-only | **✅ Append-only fixed.** DB trigger now rejects any UPDATE/DELETE on `audit_log`, live-verified against the actual (superuser) app role. Retention/partitioning still not implemented | `manual-sql/audit-log-immutable.sql` |
@@ -194,10 +194,14 @@ Status legend: ✅ built and wired · 🟡 partial/stubbed · ❌ not started ·
 
 ### Phase 3 — Clinical Operations
 
-#### M7 — Clinical Records (EMR-lite)
-- 🎭 **Entirely a UI mockup.** `records/page.tsx`: `useState(RECORDS_INITIAL)` is the only data source; "new record" pushes into local React state and is gone on refresh. Zero backend calls.
-- **No backing tables exist** — no `ClinicalNote`, `Prescription`, or `Referral` model. `Docs/TODO.md:245` claims these are "already in schema" — they are not; only the generic `PatientNote` (free-text, no SOAP structure, no ICD-10, no lock-after-24h) exists. This is a documentation-vs-reality drift worth fixing in the docs regardless of when the feature itself gets built.
-- Given the client is now a psychology clinic, this module's real-world shape (session notes, treatment plans) probably needs a fresh spec pass rather than resuming the old SOAP/ICD-10/prescription design written for a medical clinic — see §6.
+#### M7 — Clinical Records
+- ✅ **Built**, rewritten for CAP rather than the original medical-clinic SOAP/ICD-10 spec.
+  `ClinicalNote` (structured session notes + a risk-level flag), `Prescription`/`PrescriptionItem`,
+  and `Referral` models are all real; `apps/api/src/modules/clinical-records/` (17 tests); a real
+  section on the patient page plus a `/records` worklist replacing the old fake mock table. See
+  `Docs/modules/M7-clinical-records-emr.md` v2.0 for the full shape.
+- ❌ Note/prescription content is plain text, not encrypted like `nif`/`date_of_birth` are — see
+  §1.2's table above; this is now a real, buildable gap rather than a moot one.
 
 #### M8 — Staff & Resource Scheduler
 - ✅ Staff CRUD, availability (weekly recurring), invitations with Keycloak user provisioning
@@ -323,7 +327,7 @@ In the interest of an honest scope statement: I did not run the app end-to-end f
 - [ ] Phase 2 — M3 WhatsApp: mockup only, no backend
 - [x] Phase 2 — M4 Health Plans: functional; plan-number race and no utilization tracking
 - [ ] Phase 2 — M5 Exams: stub model, no result storage, mostly mock UI
-- [ ] Phase 3 — M7 Clinical Records: mockup only, no backend, spec itself needs rewriting for a psych clinic; `Docs/TODO.md`'s false "already in schema" claim **corrected**
+- [x] Phase 3 — M7 Clinical Records: **built** — structured session notes, risk flagging, prescriptions, referrals, author-scoped access; rewritten for CAP rather than the original medical-clinic spec (`Docs/modules/M7-clinical-records-emr.md` v2.0)
 - [x] Phase 3 — M8 Staff Scheduler: functional; invitation flow **fixed** — no longer orphans a Keycloak account on a failed local write (still open: room-conflict detection, shift-planner UI)
 - [ ] Phase 3 — M9 Home Visits: mockup only, no backend; `Docs/TODO.md`'s false "already in schema" claim **corrected**
 - [ ] Phase 3 — M10 Analytics: mockup only, no backend

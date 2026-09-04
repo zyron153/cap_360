@@ -171,13 +171,13 @@ Nothing to time-limit or download.
 
 ## Phase 3 — Clinical Operations
 
-### M7 — Clinical Records (EMR-lite) — 🎭 not started
-UI mockup only (`records/page.tsx`, local React state, gone on refresh). **No `clinical_notes`,
-`prescriptions`, or `referrals` table** — corrected from this file's previous claim that they were
-"already in schema." Only the generic, unstructured `PatientNote` model exists. Given the client
-is now CAP, a psychology clinic, this module's real shape (session notes, treatment plans) likely
-needs a fresh spec pass rather than resuming the original SOAP/ICD-10/prescription design written
-for a medical clinic.
+### M7 — Clinical Records — ✅ built, rewritten for CAP (not the original medical-clinic spec)
+Structured session notes (presenting concerns / observations / assessment / plan), a risk-level
+flag, prescriptions, and referrals — `clinical_notes`, `prescriptions`, `prescription_items`,
+`referrals` tables all real. Access scoped by note authorship (a clinician sees only their own
+notes; admin sees everything) rather than a patient-clinician assignment table this app has
+nowhere else. See `Docs/modules/M7-clinical-records-emr.md` v2.0 for the full shape — it no longer
+resembles the original SOAP/ICD-10 design, which was written before the client became CAP.
 
 ### M8 — Staff & Resource Scheduler
 
@@ -258,12 +258,9 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 REVIEW.md tracks the authoritative, prioritized list of what's actually next (Sections 4–8:
 code quality, UX findings, redesign suggestions, and the phase-by-phase checklist this file
-mirrors). Highlights as of this update:
+mirrors).
 
-1. Decide whether to scope and build any of the fully-mocked modules (M3 WhatsApp, M5 Exams, M7
-   Clinical Records, M9 Home Visits, M10 Analytics) — each is a real feature build, not a bug fix
-2. Leave-request submission/approval endpoints (M1/M8) — the availability logic already honors an
-   approved `LeaveRequest`, but nothing can create one via the API today
-3. Document upload endpoint (M2) — the download side exists, upload doesn't
-4. Server-side price floor (M6)
-5. Health-plan utilisation counter, expiry reminders, auto-renew (M4)
+> 🟡 The 5-item "highlights" list this section used to carry here predates this file's Phase 1–3
+> roadmap work — items 2–5 (leave-requests, document upload, price floor, health-plan utilisation)
+> were completed there, and M7 Clinical Records (of item 1's still-mocked modules) is now built —
+> see that section above. M3 WhatsApp, M5 Exams, M9 Home Visits, and M10 Analytics remain mockups.

@@ -19,6 +19,7 @@ import { SettingsModule } from "./modules/settings/settings.module";
 import { ParametrizacaoModule } from "./modules/parametrizacao/parametrizacao.module";
 import { EFaturaModule } from "./modules/efatura/efatura.module";
 import { FinanceiroModule } from "./modules/financeiro/financeiro.module";
+import { ClinicalRecordsModule } from "./modules/clinical-records/clinical-records.module";
 import { SessionAuthGuard } from "./common/guards/session-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
@@ -54,6 +55,7 @@ import { RedisModule } from "./common/redis/redis.module";
     ParametrizacaoModule,
     EFaturaModule,
     FinanceiroModule,
+    ClinicalRecordsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

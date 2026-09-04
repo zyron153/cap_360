@@ -143,6 +143,9 @@ model Patient {
   invoices          Invoice[]
   waitlistEntries   Waitlist[]
   healthPlan        HealthPlan?        @relation(fields: [healthPlanId], references: [id])
+  clinicalNotes     ClinicalNote[]
+  prescriptions     Prescription[]
+  referrals         Referral[]
 
   @@unique([phone])
   @@unique([nifHash])
@@ -179,6 +182,10 @@ model Staff {
   patientNotes      PatientNote[]
   requestedExpenses Expense[]           @relation("ExpenseRequestedBy")
   approvedExpenses  Expense[]           @relation("ExpenseApprovedBy")
+  clinicalNotes     ClinicalNote[]
+  prescriptions     Prescription[]
+  referralsSent     Referral[]          @relation("ReferralReferredBy")
+  referralsReceived Referral[]          @relation("ReferralTarget")
 
   @@index([role])
   @@index([deletedAt])
@@ -280,6 +287,7 @@ model Appointment {
   reminders AppointmentReminder[]
   invoices  Invoice[]
   examRequests ExamRequest[]
+  clinicalNotes ClinicalNote[]
 
   @@unique([idempotencyKey])
   @@index([patientId])
@@ -392,6 +400,123 @@ model PatientNote {
 
   @@index([patientId])
   @@map("patient_notes")
+}
+
+// ─── Clinical Records (M7) ─────────────────────────────────────────────────────
+// "Assigned clinician" access (who may read a note) is derived from authorship, not a separate
+// assignment table — see ClinicalRecordsService. A note is editable by its author within 24h of
+// creation, or by admin at any time (checked in the service against createdAt — no stored lock
+// field needed for that alone).
+
+enum RiskLevel {
+  none
+  low
+  moderate
+  high
+}
+
+enum ReferralType {
+  internal
+  external
+}
+
+enum ReferralStatus {
+  pending
+  scheduled
+  completed
+  declined
+}
+
+model ClinicalNote {
+  id                 String    @id @default(uuid())
+  patientId          String
+  /// The session this note documents, when it was written off a specific appointment — optional
+  /// since a note can also record an ad-hoc contact with no booked slot.
+  appointmentId      String?
+  authorStaffId      String
+  sessionType        String    @db.VarChar(50)
+  durationMinutes    Int?
+  /// S — client-reported concerns, mood, history since last session.
+  presentingConcerns String    @db.VarChar(3000)
+  /// O — clinician's observations of affect, behaviour, presentation.
+  observations       String    @db.VarChar(3000)
+  /// A — clinical impression, progress against treatment goals.
+  assessment         String    @db.VarChar(3000)
+  /// P — interventions planned, homework, focus for next session.
+  plan               String    @db.VarChar(3000)
+  riskLevel          RiskLevel @default(none)
+  /// Required detail once riskLevel is above "none" — enforced in CreateClinicalNoteSchema, not
+  /// the DB (Postgres has no cross-column conditional-required constraint worth the complexity).
+  riskNotes          String?   @db.VarChar(1000)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  patient       Patient        @relation(fields: [patientId], references: [id])
+  appointment   Appointment?   @relation(fields: [appointmentId], references: [id])
+  author        Staff          @relation(fields: [authorStaffId], references: [id])
+  prescriptions Prescription[]
+  referrals     Referral[]
+
+  @@index([patientId])
+  @@index([authorStaffId])
+  @@map("clinical_notes")
+}
+
+model Prescription {
+  id                  String   @id @default(uuid())
+  patientId           String
+  clinicalNoteId      String?
+  prescribedByStaffId String
+  issuedAt            DateTime @default(now())
+  notes               String?  @db.VarChar(500)
+  createdAt           DateTime @default(now())
+
+  patient      Patient            @relation(fields: [patientId], references: [id])
+  clinicalNote ClinicalNote?      @relation(fields: [clinicalNoteId], references: [id])
+  prescribedBy Staff              @relation(fields: [prescribedByStaffId], references: [id])
+  items        PrescriptionItem[]
+
+  @@index([patientId])
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id             String  @id @default(uuid())
+  prescriptionId String
+  drugName       String  @db.VarChar(150)
+  dosage         String  @db.VarChar(100)
+  frequency      String  @db.VarChar(100)
+  durationDays   Int?
+  instructions   String? @db.VarChar(300)
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@map("prescription_items")
+}
+
+model Referral {
+  id                   String         @id @default(uuid())
+  patientId            String
+  clinicalNoteId       String?
+  referredByStaffId    String
+  type                 ReferralType
+  /// Set only when type = internal (another CAP clinician); null for external referrals.
+  targetStaffId        String?
+  /// Set only when type = external; null for internal referrals.
+  externalProviderName String?        @db.VarChar(150)
+  externalSpecialty    String?        @db.VarChar(100)
+  reason               String         @db.VarChar(1000)
+  status               ReferralStatus @default(pending)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  patient      Patient       @relation(fields: [patientId], references: [id])
+  clinicalNote ClinicalNote? @relation(fields: [clinicalNoteId], references: [id])
+  referredBy   Staff         @relation("ReferralReferredBy", fields: [referredByStaffId], references: [id])
+  targetStaff  Staff?        @relation("ReferralTarget", fields: [targetStaffId], references: [id])
+
+  @@index([patientId])
+  @@map("referrals")
 }
 
 model CommunicationLog {

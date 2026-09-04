@@ -18,6 +18,8 @@ import {
   Plus,
 } from "lucide-react";
 import type { Patient, TimelineEvent } from "@cap/types";
+import { ClinicalRecordsSection } from "./ClinicalRecordsSection";
+import { usePermissions } from "../../hooks/use-permissions";
 
 interface PatientScreenResponse {
   patient: Patient & { healthPlan?: { planNumber: string; product: { name: string } } | null };
@@ -46,6 +48,10 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
     queryFn: () => fetchPatientScreen(id),
     staleTime: 60_000,
   });
+  const { me, isAdmin } = usePermissions();
+  // Matches the API's own @Roles("admin", "doctor") gate on every clinical-records route — showing
+  // this to a role that would just get a 403 back isn't useful.
+  const canSeeClinicalRecords = isAdmin || me?.role === "doctor";
 
   const patient = data?.patient;
   const timeline = data?.timeline;
@@ -203,6 +209,8 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
           </div>
         </div>
       </div>
+
+      {canSeeClinicalRecords && <ClinicalRecordsSection patientId={id} />}
     </div>
   );
 }
