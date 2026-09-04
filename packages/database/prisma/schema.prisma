@@ -436,18 +436,23 @@ model ClinicalNote {
   authorStaffId      String
   sessionType        String    @db.VarChar(50)
   durationMinutes    Int?
+  /// AES-256-GCM encrypted at the application layer (EncryptionService), like Patient.nif/
+  /// dateOfBirth — "ivHex:authTagHex:dataHex". @db.Text (not VarChar) because ciphertext runs
+  /// longer than the plaintext it replaces: worst case (every char a 4-byte UTF-8 codepoint) is
+  /// roughly 8x the original character count once hex-encoded.
   /// S — client-reported concerns, mood, history since last session.
-  presentingConcerns String    @db.VarChar(3000)
+  presentingConcerns String    @db.Text
   /// O — clinician's observations of affect, behaviour, presentation.
-  observations       String    @db.VarChar(3000)
+  observations       String    @db.Text
   /// A — clinical impression, progress against treatment goals.
-  assessment         String    @db.VarChar(3000)
+  assessment         String    @db.Text
   /// P — interventions planned, homework, focus for next session.
-  plan               String    @db.VarChar(3000)
+  plan               String    @db.Text
   riskLevel          RiskLevel @default(none)
   /// Required detail once riskLevel is above "none" — enforced in CreateClinicalNoteSchema, not
   /// the DB (Postgres has no cross-column conditional-required constraint worth the complexity).
-  riskNotes          String?   @db.VarChar(1000)
+  /// Encrypted like the fields above.
+  riskNotes          String?   @db.Text
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -468,7 +473,8 @@ model Prescription {
   clinicalNoteId      String?
   prescribedByStaffId String
   issuedAt            DateTime @default(now())
-  notes               String?  @db.VarChar(500)
+  /// AES-256-GCM encrypted, same as ClinicalNote's text fields.
+  notes               String?  @db.Text
   createdAt           DateTime @default(now())
 
   patient      Patient            @relation(fields: [patientId], references: [id])
@@ -483,11 +489,13 @@ model Prescription {
 model PrescriptionItem {
   id             String  @id @default(uuid())
   prescriptionId String
-  drugName       String  @db.VarChar(150)
-  dosage         String  @db.VarChar(100)
-  frequency      String  @db.VarChar(100)
+  /// All four below AES-256-GCM encrypted, same as ClinicalNote's text fields — a drug name and
+  /// dosage are as clinically sensitive as anything in the note itself.
+  drugName       String  @db.Text
+  dosage         String  @db.Text
+  frequency      String  @db.Text
   durationDays   Int?
-  instructions   String? @db.VarChar(300)
+  instructions   String? @db.Text
 
   prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
 

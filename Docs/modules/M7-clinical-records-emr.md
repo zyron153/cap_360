@@ -110,6 +110,14 @@ record view, per `SECURITY.md`.
 `Referral` (see that file directly; this doc no longer duplicates field lists that drift from the
 real schema — that's exactly how the original version of this doc went stale).
 
+`ClinicalNote`'s four structured fields plus `riskNotes`, and every `Prescription`/
+`PrescriptionItem` text field (`notes`, `drugName`, `dosage`, `frequency`, `instructions`), are
+AES-256-GCM encrypted at the application layer via `EncryptionService` — same posture as
+`Patient.nif`/`dateOfBirth`, encrypted on every write and decrypted on every read in
+`ClinicalRecordsRepository`. No blind index on any of them (nothing does an exact-match lookup on
+clinical text). `Referral.reason` is **not** encrypted — SECURITY.md's own list only names clinical
+notes and prescriptions specifically; revisit if that scope changes.
+
 ---
 
 ## 5. API Endpoints
@@ -142,6 +150,8 @@ PATCH  /referrals/:id/status                    — referrer, target, or admin
 
 ## 7. Compliance Notes
 
+- Clinical-note and prescription content is encrypted at rest (§4) — `SECURITY.md`'s "AES-256-GCM
+  for clinical notes, prescriptions" claim is now real, not aspirational.
 - Clinical-note access is logged at every read (`@AuditView()`), matching `SECURITY.md`'s
   "patient record viewed" requirement.
 - Risk flags are structured data, not buried in prose, so they can't be missed on a quick scan of
@@ -151,4 +161,4 @@ PATCH  /referrals/:id/status                    — referrer, target, or admin
 
 ---
 
-*Module M7 · v2.0 · rewritten 2026-09-04 against the real (psychology-practice) implementation*
+*Module M7 · v2.1 · updated 2026-09-04 — v2.0 rewrite plus field-level encryption*
