@@ -4,7 +4,7 @@ import { Prisma } from "@cap/database";
 
 const ADMIN_SELECT = {
   id: true, name: true, code: true, description: true,
-  durationMinutes: true, price: true, active: true,
+  durationMinutes: true, price: true, active: true, specialtyCode: true,
   createdAt: true, updatedAt: true,
 };
 
@@ -22,6 +22,7 @@ export class ServicesRepository {
         description: true,
         durationMinutes: true,
         price: true,
+        specialtyCode: true,
       },
       orderBy: { name: "asc" },
     });
@@ -37,6 +38,7 @@ export class ServicesRepository {
         description: true,
         durationMinutes: true,
         price: true,
+        specialtyCode: true,
       },
     });
   }

@@ -8,10 +8,18 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Plus, CalendarDays, List, Clock, User, Stethoscope, DoorOpen, FileText } from "lucide-react";
 import { io } from "socket.io-client";
+import type { ServiceEntry, TimeSlot } from "@cap/types";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
 import { usePermissions } from "../hooks/use-permissions";
+
+async function fetchAvailability(serviceId: string, staffId: string, date: string): Promise<TimeSlot[]> {
+  const params = new URLSearchParams({ serviceId, staffId, date });
+  const res = await fetch(`/api/appointments/availability?${params}`);
+  if (!res.ok) return [];
+  return res.json();
+}
 
 const CalendarView = dynamic(() => import("./_CalendarView"), {
   ssr: false,
@@ -174,16 +182,28 @@ export default function AppointmentsPage() {
     queryFn: () => fetch("/api/patients?limit=100").then((r) => r.json()),
     staleTime: 60_000,
   });
-  const { data: staffList } = useQuery<{ id: string; fullName: string }[]>({
+  const { data: staffList } = useQuery<{ id: string; fullName: string; specialtyCode: string | null }[]>({
     queryKey: ["staff-list"],
     queryFn: () => fetch("/api/staff").then((r) => r.json()),
     staleTime: 60_000,
   });
-  const { data: servicesList = [] } = useQuery<{ id: number; valor: string; codigo: string | null }[]>({
-    queryKey: ["parametrizacao", "TIPO_SERVICO"],
-    queryFn: () => fetch("/api/parametrizacao/TIPO_SERVICO").then((r) => r.json()),
+  const { data: servicesList = [] } = useQuery<ServiceEntry[]>({
+    queryKey: ["services-list"],
+    queryFn: () => fetch("/api/services").then((r) => r.json()),
     staleTime: 120_000,
   });
+
+  const selectedService = servicesList.find((s) => s.id === form.serviceId);
+  const staffOptions = staffList?.filter(
+    (s) => !selectedService?.specialtyCode || s.specialtyCode === selectedService.specialtyCode
+  );
+
+  const { data: slots } = useQuery({
+    queryKey: ["availability", form.serviceId, form.staffId, form.apptDate],
+    queryFn: () => fetchAvailability(form.serviceId, form.staffId, form.apptDate),
+    enabled: !!(form.serviceId && form.staffId && form.apptDate),
+  });
+  const availableSlots = slots?.filter((s) => s.available) ?? [];
 
   const { data: detail, isLoading: detailLoading } = useQuery<AppointmentDetail>({
     queryKey: ["appointment", selectedId],
@@ -538,29 +558,68 @@ export default function AppointmentsPage() {
         </div>
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Serviço *</label>
-          <select value={form.serviceId} onChange={(e) => set("serviceId", e.target.value)} className={inputCls}>
+          <select
+            value={form.serviceId}
+            onChange={(e) => setForm((f) => ({ ...f, serviceId: e.target.value, staffId: "", apptTime: "" }))}
+            className={inputCls}
+          >
             <option value="">Selecionar serviço…</option>
             {servicesList.map((s) => (
-              <option key={s.id} value={s.codigo ?? ""}>{s.valor}</option>
+              <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
         </div>
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Médico/a *</label>
-          <select value={form.staffId} onChange={(e) => set("staffId", e.target.value)} className={inputCls}>
+          <select
+            value={form.staffId}
+            onChange={(e) => setForm((f) => ({ ...f, staffId: e.target.value, apptTime: "" }))}
+            className={inputCls}
+          >
             <option value="">Selecionar médico…</option>
-            {staffList?.map((s) => (
+            {staffOptions?.map((s) => (
               <option key={s.id} value={s.id}>{s.fullName}</option>
             ))}
           </select>
         </div>
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Data *</label>
-          <input type="date" value={form.apptDate} onChange={(e) => set("apptDate", e.target.value)} className={inputCls} />
+          <input
+            type="date"
+            value={form.apptDate}
+            onChange={(e) => setForm((f) => ({ ...f, apptDate: e.target.value, apptTime: "" }))}
+            className={inputCls}
+          />
         </div>
-        <div>
-          <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Hora *</label>
-          <input type="time" value={form.apptTime} onChange={(e) => set("apptTime", e.target.value)} className={inputCls} />
+        <div className="col-span-2">
+          <label className="block text-[12px] font-semibold text-dim-700 mb-2">Horário Disponível *</label>
+          {!form.serviceId || !form.staffId || !form.apptDate ? (
+            <p className="text-[12px] text-dim-400">Selecione serviço, médico/a e data para ver os horários.</p>
+          ) : availableSlots.length === 0 ? (
+            <p className="text-[12px] text-dim-400">Sem horários disponíveis nesta data.</p>
+          ) : (
+            <div className="grid grid-cols-4 gap-2">
+              {availableSlots.map((slot) => {
+                const hhmm = format(new Date(slot.start), "HH:mm");
+                const isSelected = form.apptTime === hhmm;
+                return (
+                  <button
+                    key={slot.start}
+                    type="button"
+                    onClick={() => set("apptTime", hhmm)}
+                    className={`flex items-center justify-center gap-1.5 border rounded-[10px] py-2 text-[12px] font-semibold transition-all ${
+                      isSelected
+                        ? "bg-brand-700 border-brand-700 text-white"
+                        : "border-dim-200 text-dim-700 hover:bg-brand-50 hover:border-brand-300 hover:text-brand-700"
+                    }`}
+                  >
+                    <Clock className="w-3 h-3" />
+                    {hhmm}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>

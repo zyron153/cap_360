@@ -6,6 +6,9 @@ const serviceFields = {
   description:     z.string().max(500).nullable().optional(),
   durationMinutes: z.number().int().positive(),
   price:           z.number().nonnegative(),
+  // Free text, same Parametrizacao "ESPECIALIDADE" convention as Staff.specialtyCode. Null/unset
+  // means bookable by any staff member.
+  specialtyCode:   z.string().max(50).nullable().optional(),
 };
 
 export const CreateServiceSchema = z.object({
@@ -28,6 +31,7 @@ export interface ServiceEntry {
   durationMinutes: number;
   price: number;
   active: boolean;
+  specialtyCode: string | null;
   createdAt: string;
   updatedAt: string;
 }

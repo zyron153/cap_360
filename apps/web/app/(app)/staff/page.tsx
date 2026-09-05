@@ -17,6 +17,7 @@ type StaffMember = {
   phone: string;
   email: string;
   shift: { start: string; end: string; days: string; dayNums: number[] };
+  availability: ApiStaff["availability"];
   status: "on_duty" | "off_duty" | "on_leave";
   appointmentsToday: number;
   initials: string;
@@ -66,6 +67,7 @@ function toUiMember(s: ApiStaff, idx: number): StaffMember {
       days:  allDays || "—",
       dayNums,
     },
+    availability: s.availability,
     status: todayAvail.length > 0 ? "on_duty" : "off_duty",
     appointmentsToday: 0,
     initials: makeInitials(s.fullName),
@@ -113,15 +115,20 @@ function FieldRow({ label, required, error, children }: {
   );
 }
 
+type DayHours = { start: string; end: string };
+
 type FormValues = {
   name: string; role: StaffMember["role"]; jobTitle: string; specialty: string;
   phone: string; email: string;
-  shiftStart: string; shiftEnd: string; days: number[];
+  days: number[]; hours: Record<number, DayHours>;
 };
+
+const DEFAULT_DAY_HOURS: DayHours = { start: "08:00", end: "17:00" };
 
 const BLANK_FORM: FormValues = {
   name: "", role: "doctor", jobTitle: "", specialty: "", phone: "", email: "",
-  shiftStart: "08:00", shiftEnd: "17:00", days: [1, 2, 3, 4, 5],
+  days: [1, 2, 3, 4, 5],
+  hours: { 1: DEFAULT_DAY_HOURS, 2: DEFAULT_DAY_HOURS, 3: DEFAULT_DAY_HOURS, 4: DEFAULT_DAY_HOURS, 5: DEFAULT_DAY_HOURS },
 };
 
 const FALLBACK_ROLES: ParamOption[] = [
@@ -153,7 +160,11 @@ function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving, jobTi
     setForm((f) => ({
       ...f,
       days: f.days.includes(dow) ? f.days.filter((d) => d !== dow) : [...f.days, dow],
+      hours: f.hours[dow] ? f.hours : { ...f.hours, [dow]: DEFAULT_DAY_HOURS },
     }));
+  }
+  function setDayHours(dow: number, patch: Partial<DayHours>) {
+    setForm((f) => ({ ...f, hours: { ...f.hours, [dow]: { ...(f.hours[dow] ?? DEFAULT_DAY_HOURS), ...patch } } }));
   }
   function selectJobTitle(val: string) {
     const entry = jobTitles.find((t) => (t.codigo ?? t.valor) === val);
@@ -216,32 +227,38 @@ function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving, jobTi
         </FieldRow>
 
         <div className="col-span-2">
-          <label className="block text-[12px] font-semibold text-dim-700 mb-2">Dias de Trabalho</label>
-          <div className="flex gap-1.5 flex-wrap">
-            {DAYS_OF_WEEK.map(({ dow, label }) => (
-              <button
-                key={dow}
-                type="button"
-                onClick={() => toggleDay(dow)}
-                className={`px-3 py-1.5 rounded-[8px] text-[11px] font-semibold transition-colors border ${
-                  form.days.includes(dow)
-                    ? "bg-brand-700 text-white border-brand-700"
-                    : "bg-white text-dim-500 border-dim-200 hover:border-dim-300"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <label className="block text-[12px] font-semibold text-dim-700 mb-2">Dias e Horário de Trabalho</label>
+          <div className="flex flex-col gap-1.5">
+            {DAYS_OF_WEEK.map(({ dow, label }) => {
+              const checked = form.days.includes(dow);
+              const dayHours = form.hours[dow] ?? DEFAULT_DAY_HOURS;
+              return (
+                <div key={dow} className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleDay(dow)}
+                    className={`w-14 shrink-0 px-3 py-1.5 rounded-[8px] text-[11px] font-semibold transition-colors border ${
+                      checked
+                        ? "bg-brand-700 text-white border-brand-700"
+                        : "bg-white text-dim-500 border-dim-200 hover:border-dim-300"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                  {checked ? (
+                    <div className="flex items-center gap-1.5">
+                      <input type="time" value={dayHours.start} onChange={(e) => setDayHours(dow, { start: e.target.value })} className={`${inputCls} py-1.5`} />
+                      <span className="text-[11px] text-dim-400">–</span>
+                      <input type="time" value={dayHours.end} onChange={(e) => setDayHours(dow, { end: e.target.value })} className={`${inputCls} py-1.5`} />
+                    </div>
+                  ) : (
+                    <span className="text-[11px] text-dim-300">Sem turno</span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
-
-        <FieldRow label="Início do Turno">
-          <input type="time" value={form.shiftStart} onChange={(e) => set("shiftStart", e.target.value)} className={inputCls} />
-        </FieldRow>
-
-        <FieldRow label="Fim do Turno">
-          <input type="time" value={form.shiftEnd} onChange={(e) => set("shiftEnd", e.target.value)} className={inputCls} />
-        </FieldRow>
       </div>
 
       <div className="px-6 py-4 border-t border-dim-100 bg-dim-50/60 flex items-center gap-3">
@@ -272,13 +289,15 @@ function toApiBody(form: FormValues) {
     specialtyCode: form.specialty.trim() || undefined,
     availability: form.days.map((dow) => ({
       dayOfWeek: dow,
-      startTime: form.shiftStart,
-      endTime: form.shiftEnd,
+      startTime: (form.hours[dow] ?? DEFAULT_DAY_HOURS).start,
+      endTime: (form.hours[dow] ?? DEFAULT_DAY_HOURS).end,
     })),
   };
 }
 
 function toFormValues(m: StaffMember): FormValues {
+  const hours: Record<number, DayHours> = {};
+  for (const a of m.availability) hours[a.dayOfWeek] = { start: a.startTime, end: a.endTime };
   return {
     name: m.name,
     role: m.role,
@@ -286,9 +305,8 @@ function toFormValues(m: StaffMember): FormValues {
     specialty: m.specialty ?? "",
     phone: m.phone === "—" ? "" : m.phone,
     email: m.email,
-    shiftStart: m.shift.start === "—" ? "08:00" : m.shift.start,
-    shiftEnd:   m.shift.end   === "—" ? "17:00" : m.shift.end,
     days: m.shift.dayNums,
+    hours,
   };
 }
 

@@ -224,6 +224,9 @@ model Service {
   durationMinutes Int      @default(30)
   price           Decimal  @db.Decimal(10, 2)
   active          Boolean  @default(true)
+  /// Free-text, same Parametrizacao "ESPECIALIDADE" convention as Staff.specialtyCode. Null means
+  /// bookable by any staff member; set, it must exact-match the assigned staff's own specialtyCode.
+  specialtyCode   String?  @db.VarChar(50)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

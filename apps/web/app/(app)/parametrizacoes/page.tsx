@@ -355,6 +355,7 @@ type MergedService = {
   ativo: boolean;
   durationMinutes: number | null;
   price: number | null;
+  specialtyCode: string | null;
   createdAt: string;
 };
 
@@ -370,7 +371,7 @@ function suggestServiceCode(name: string) {
 }
 
 const BLANK_NEW = { name: "" };
-const BLANK_EDIT = { name: "", code: "", durationMinutes: "30", price: "" };
+const BLANK_EDIT = { name: "", code: "", durationMinutes: "30", price: "", specialty: "" };
 
 function ServicesPanel() {
   const { addMessage } = useMessage();
@@ -400,6 +401,12 @@ function ServicesPanel() {
     retryDelay: attempt => Math.min(500 * 2 ** attempt, 5000),
   });
 
+  const { data: specialtyOptions = [] } = useQuery<ParametrizacaoEntry[]>({
+    queryKey: ["parametrizacao", "ESPECIALIDADE"],
+    queryFn: () => fetch("/api/parametrizacao/ESPECIALIDADE").then(r => r.json()),
+    staleTime: 120_000,
+  });
+
   const isLoading = paramLoading || servicesLoading;
   const isError = paramError || servicesError;
 
@@ -413,6 +420,7 @@ function ServicesPanel() {
       ativo: p.ativo,
       durationMinutes: svc?.durationMinutes ?? null,
       price: svc ? Number(svc.price) : null,
+      specialtyCode: svc?.specialtyCode ?? null,
       createdAt: p.createdAt,
     };
   });
@@ -440,8 +448,8 @@ function ServicesPanel() {
   });
 
   const saveEditMut = useMutation({
-    mutationFn: async (vars: { m: MergedService; name: string; code: string; duration: string; price: string }) => {
-      const { m, name, code, duration, price } = vars;
+    mutationFn: async (vars: { m: MergedService; name: string; code: string; duration: string; price: string; specialty: string }) => {
+      const { m, name, code, duration, price, specialty } = vars;
 
       // Name lives on the parametrização entry — codigo is UUID-managed below, never edited directly here.
       if (name.trim() !== m.name) {
@@ -459,6 +467,7 @@ function ServicesPanel() {
         code: code.trim().toUpperCase(),
         price: Number(price),
         durationMinutes: duration !== "" ? Number(duration) : undefined,
+        specialtyCode: specialty || null,
       };
 
       if (m.serviceId) {
@@ -494,13 +503,14 @@ function ServicesPanel() {
       name: m.name, code: m.serviceCode ?? suggestServiceCode(m.name),
       durationMinutes: m.durationMinutes != null ? String(m.durationMinutes) : "30",
       price: m.price != null ? String(m.price) : "",
+      specialty: m.specialtyCode ?? "",
     });
   }
 
   function saveEdit(m: MergedService) {
     if (!editRow.name.trim()) return;
     if (editRow.price !== "" && !editRow.code.trim()) return; // code is required once a price is set
-    saveEditMut.mutate({ m, name: editRow.name, code: editRow.code, duration: editRow.durationMinutes, price: editRow.price });
+    saveEditMut.mutate({ m, name: editRow.name, code: editRow.code, duration: editRow.durationMinutes, price: editRow.price, specialty: editRow.specialty });
   }
 
   function saveNew() {
@@ -531,7 +541,7 @@ function ServicesPanel() {
       <table className="w-full border-collapse">
         <thead>
           <tr>
-            {["NOME", "CÓDIGO", "DURAÇÃO", "PREÇO (CVE)", "ATIVO", "CRIADO", ""].map(h => (
+            {["NOME", "CÓDIGO", "ESPECIALIDADE", "DURAÇÃO", "PREÇO (CVE)", "ATIVO", "CRIADO", ""].map(h => (
               <th key={h} className="text-left text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 px-4 py-2.5 border-b border-dim-100 bg-dim-50">{h}</th>
             ))}
           </tr>
@@ -540,6 +550,7 @@ function ServicesPanel() {
           {addingRow && (
             <tr className="bg-brand-50/50 border-b-2 border-brand-200">
               <td className="px-4 py-2" colSpan={2}><input autoFocus className={cellInput} placeholder="Nome do serviço *" value={newRow.name} onChange={e => setNewRow({ name: e.target.value })} onKeyDown={e => { if (e.key === "Enter") saveNew(); if (e.key === "Escape") setAddingRow(false); }} /></td>
+              <td className="px-4 py-2 text-[11px] text-dim-300">—</td>
               <td className="px-4 py-2 text-[11px] text-dim-300">—</td>
               <td className="px-4 py-2 text-[11px] text-dim-300">definir a seguir</td>
               <td className="px-4 py-2"><Toggle checked={true} onChange={() => {}} /></td>
@@ -556,7 +567,7 @@ function ServicesPanel() {
           {isLoading && !addingRow && (
             Array.from({ length: 3 }).map((_, i) => (
               <tr key={i} className="animate-pulse">
-                {[140, 80, 60, 80, 40, 80, 80].map((w, j) => (
+                {[140, 80, 90, 60, 80, 40, 80, 80].map((w, j) => (
                   <td key={j} className="px-4 py-3.5 border-b border-dim-100"><div className="h-3 bg-dim-100 rounded" style={{ width: w }} /></td>
                 ))}
               </tr>
@@ -564,11 +575,11 @@ function ServicesPanel() {
           )}
 
           {isError && !addingRow && (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-[13px] text-red-500">Erro ao carregar serviços. Verifique se a API está em execução e recarregue a página.</td></tr>
+            <tr><td colSpan={8} className="px-4 py-10 text-center text-[13px] text-red-500">Erro ao carregar serviços. Verifique se a API está em execução e recarregue a página.</td></tr>
           )}
 
           {!isLoading && !isError && merged.length === 0 && !addingRow && (
-            <tr><td colSpan={7} className="px-4 py-10 text-center text-[13px] text-dim-400">Nenhum serviço. Clique em &quot;+ Serviço&quot; para adicionar.</td></tr>
+            <tr><td colSpan={8} className="px-4 py-10 text-center text-[13px] text-dim-400">Nenhum serviço. Clique em &quot;+ Serviço&quot; para adicionar.</td></tr>
           )}
 
           {merged.map(m => (
@@ -577,6 +588,12 @@ function ServicesPanel() {
                 <>
                   <td className="px-4 py-2 border-b border-dim-100"><input autoFocus className={cellInput} value={editRow.name} onChange={v => setEditRow(r => ({ ...r, name: v.target.value }))} onKeyDown={k => { if (k.key === "Escape") setEditingId(null); }} /></td>
                   <td className="px-4 py-2 border-b border-dim-100"><input className={`${cellInput} font-mono`} value={editRow.code} onChange={v => setEditRow(r => ({ ...r, code: v.target.value.toUpperCase() }))} /></td>
+                  <td className="px-4 py-2 border-b border-dim-100">
+                    <select className={cellInput} value={editRow.specialty} onChange={v => setEditRow(r => ({ ...r, specialty: v.target.value }))}>
+                      <option value="">— Qualquer —</option>
+                      {specialtyOptions.map(s => <option key={s.id} value={s.codigo ?? s.valor}>{s.valor}</option>)}
+                    </select>
+                  </td>
                   <td className="px-4 py-2 border-b border-dim-100"><input type="number" min="1" className={`${cellInput} font-mono`} value={editRow.durationMinutes} onChange={v => setEditRow(r => ({ ...r, durationMinutes: v.target.value }))} /></td>
                   <td className="px-4 py-2 border-b border-dim-100"><input type="number" min="0" step="0.01" placeholder="0.00" className={`${cellInput} font-mono`} value={editRow.price} onChange={v => setEditRow(r => ({ ...r, price: v.target.value }))} /></td>
                   <td className="px-4 py-2 border-b border-dim-100"><Toggle checked={m.ativo} onChange={() => toggleMut.mutate({ m, ativo: !m.ativo })} /></td>
@@ -592,6 +609,11 @@ function ServicesPanel() {
                 <>
                   <td className="px-4 py-3 border-b border-dim-100 text-[13px] font-medium text-dim-900">{m.name}</td>
                   <td className="px-4 py-3 border-b border-dim-100 font-mono text-[11px] text-dim-500">{m.serviceCode ?? <span className="text-dim-300">—</span>}</td>
+                  <td className="px-4 py-3 border-b border-dim-100 text-[11px] text-dim-500">
+                    {m.specialtyCode
+                      ? (specialtyOptions.find(s => (s.codigo ?? s.valor) === m.specialtyCode)?.valor ?? m.specialtyCode)
+                      : <span className="text-dim-300">Qualquer</span>}
+                  </td>
                   <td className="px-4 py-3 border-b border-dim-100 font-mono text-[11px] text-dim-500">{m.durationMinutes != null ? `${m.durationMinutes} min` : <span className="text-dim-300">—</span>}</td>
                   <td className="px-4 py-3 border-b border-dim-100">
                     {m.price != null ? (

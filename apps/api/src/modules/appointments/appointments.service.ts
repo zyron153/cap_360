@@ -127,6 +127,13 @@ export class AppointmentsService {
     return start >= dayStart && end <= dayEnd;
   }
 
+  /** Same "does this interval fit in a fetched window" shape as isWithinWindow, generalized to
+   * any of N rows — a staff member can have several StaffAvailability rows on the same weekday
+   * (e.g. a split shift), and the interval only needs to fit inside one of them. */
+  private isWithinAnyAvailability(start: Date, end: Date, rows: { startTime: string; endTime: string }[]): boolean {
+    return rows.some((r) => this.isWithinWindow(start, end, { open: r.startTime, close: r.endTime }));
+  }
+
   async getAvailability(query: AvailabilityQuery): Promise<TimeSlot[]> {
     const date = parseLocalDate(query.date);
     const dayOfWeek = date.getDay();
@@ -193,12 +200,26 @@ export class AppointmentsService {
     const scheduledAt = new Date(dto.scheduledAt);
     const slotEnd = new Date(scheduledAt.getTime() + SLOT_MINUTES * 60_000);
 
-    const { blockReason, window } = await this.loadBookingConstraints(dto.staffId, scheduledAt);
+    const [{ blockReason, window }, availabilityRows, staffRow, serviceRow] = await Promise.all([
+      this.loadBookingConstraints(dto.staffId, scheduledAt),
+      this.repo.findStaffAvailability(dto.staffId, scheduledAt.getDay()),
+      this.prisma.staff.findUnique({ where: { id: dto.staffId }, select: { specialtyCode: true } }),
+      this.prisma.service.findUnique({ where: { id: dto.serviceId }, select: { specialtyCode: true } }),
+    ]);
     if (blockReason) throw new BadRequestException(blockReason);
     if (!this.isWithinWindow(scheduledAt, slotEnd, window)) {
       throw new BadRequestException(
         `Fora do horário de funcionamento da clínica (${window!.open}–${window!.close})`
       );
+    }
+    // Zero configured rows for this weekday is deliberately treated the same as
+    // getAvailability() already treats it (no rows → no offerable slots) — not bookable, not a
+    // permissive default, unlike the clinic-wide window above.
+    if (!this.isWithinAnyAvailability(scheduledAt, slotEnd, availabilityRows)) {
+      throw new BadRequestException("Fora do horário de disponibilidade do profissional para este dia");
+    }
+    if (serviceRow?.specialtyCode && staffRow?.specialtyCode !== serviceRow.specialtyCode) {
+      throw new BadRequestException("A especialidade do profissional não corresponde à deste serviço");
     }
 
     // A non-grid-aligned start time (e.g. 10:15) spans two 30-min buckets — lock every bucket

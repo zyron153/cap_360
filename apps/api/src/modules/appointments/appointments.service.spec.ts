@@ -11,7 +11,11 @@ import { HealthPlansService } from "../health-plans/health-plans.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { REDIS_CLIENT } from "../../common/redis/redis.module";
 
-const prisma = { setting: { findUnique: jest.fn() } };
+const prisma = {
+  setting: { findUnique: jest.fn() },
+  staff: { findUnique: jest.fn() },
+  service: { findUnique: jest.fn() },
+};
 const repo = {
   findStaffAvailability: jest.fn(),
   findConfirmedInRange: jest.fn(),
@@ -66,6 +70,12 @@ describe("AppointmentsService", () => {
     repo.findPublicHolidays.mockResolvedValue([]);
     repo.findConfirmedInRangeForRoom.mockResolvedValue([]);
     repo.findSeriesByIdempotencyKey.mockResolvedValue(null);
+    // Permissive defaults for the two create()-time checks added for staff-availability and
+    // specialty enforcement — every describe block below this one books through create() without
+    // caring about either, so only the two blocks that actually test them override these.
+    repo.findStaffAvailability.mockResolvedValue([{ startTime: "00:00", endTime: "23:59", active: true }]);
+    prisma.staff.findUnique.mockResolvedValue({ specialtyCode: null });
+    prisma.service.findUnique.mockResolvedValue({ specialtyCode: null });
   });
 
   describe("getAvailability — slot generation", () => {
@@ -392,6 +402,98 @@ describe("AppointmentsService", () => {
       const sunday = new Date(2026, 6, 5, 10, 0, 0).toISOString();
       await expect(service.create({ ...BASE_DTO, scheduledAt: sunday })).rejects.toThrow(BadRequestException);
       expect(redis.set).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("create — staff availability validation", () => {
+    // 2026-07-01 is a Wednesday ("Quarta-feira")
+    const WED_10AM = new Date(2026, 6, 1, 10, 0, 0).toISOString();
+    const BASE_DTO = {
+      patientId: "patient-1",
+      staffId: STAFF_ID,
+      serviceId: "service-1",
+      scheduledAt: WED_10AM,
+      source: "web" as const,
+    };
+
+    beforeEach(() => {
+      redis.set.mockResolvedValue("OK");
+      redis.del.mockResolvedValue(1);
+      repo.findConfirmedInRange.mockResolvedValue([]);
+      repo.create.mockResolvedValue({ id: "appt-1", scheduledAt: new Date(WED_10AM) });
+      queue.add.mockResolvedValue({ id: "job-1" });
+      repo.createReminder.mockResolvedValue({});
+    });
+
+    it("throws BadRequestException when the staff member has no availability rows configured for that weekday", async () => {
+      repo.findStaffAvailability.mockResolvedValue([]);
+      await expect(service.create(BASE_DTO)).rejects.toThrow(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestException when the requested time falls outside every configured row that day", async () => {
+      repo.findStaffAvailability.mockResolvedValue([{ startTime: "14:00", endTime: "18:00" }]);
+      await expect(service.create(BASE_DTO)).rejects.toThrow(BadRequestException);
+    });
+
+    it("creates successfully when the requested time is inside a configured row", async () => {
+      repo.findStaffAvailability.mockResolvedValue([{ startTime: "08:00", endTime: "18:00" }]);
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+      expect(repo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("creates successfully when it falls inside the second of two split-shift rows for that day", async () => {
+      repo.findStaffAvailability.mockResolvedValue([
+        { startTime: "07:00", endTime: "09:00" },
+        { startTime: "09:30", endTime: "18:00" },
+      ]);
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+    });
+
+    it("does not acquire the Redis slot lock when rejected for being outside the staff member's availability", async () => {
+      repo.findStaffAvailability.mockResolvedValue([]);
+      await expect(service.create(BASE_DTO)).rejects.toThrow(BadRequestException);
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("create — specialty matching", () => {
+    const WED_10AM = new Date(2026, 6, 1, 10, 0, 0).toISOString();
+    const BASE_DTO = {
+      patientId: "patient-1",
+      staffId: STAFF_ID,
+      serviceId: "service-1",
+      scheduledAt: WED_10AM,
+      source: "web" as const,
+    };
+
+    beforeEach(() => {
+      redis.set.mockResolvedValue("OK");
+      redis.del.mockResolvedValue(1);
+      repo.findConfirmedInRange.mockResolvedValue([]);
+      repo.create.mockResolvedValue({ id: "appt-1", scheduledAt: new Date(WED_10AM) });
+      queue.add.mockResolvedValue({ id: "job-1" });
+      repo.createReminder.mockResolvedValue({});
+    });
+
+    it("throws BadRequestException when the staff member's specialty does not match the service's", async () => {
+      prisma.service.findUnique.mockResolvedValue({ specialtyCode: "CARDIOLOGIA" });
+      prisma.staff.findUnique.mockResolvedValue({ specialtyCode: "DERMATOLOGIA" });
+      await expect(service.create(BASE_DTO)).rejects.toThrow(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it("creates successfully when the service has no specialtyCode set, regardless of the staff member's specialty", async () => {
+      prisma.service.findUnique.mockResolvedValue({ specialtyCode: null });
+      prisma.staff.findUnique.mockResolvedValue({ specialtyCode: "DERMATOLOGIA" });
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+    });
+
+    it("creates successfully when the staff member's specialty matches the service's", async () => {
+      prisma.service.findUnique.mockResolvedValue({ specialtyCode: "CARDIOLOGIA" });
+      prisma.staff.findUnique.mockResolvedValue({ specialtyCode: "CARDIOLOGIA" });
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+      expect(repo.create).toHaveBeenCalledTimes(1);
     });
   });
 
