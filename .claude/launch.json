@@ -5,14 +5,13 @@
       "name": "web-dev",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@cap/web", "dev"],
-      "port": 3000,
-      "autoPort": true
+      "port": 63204
     },
     {
       "name": "api-dev",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@cap/api", "dev"],
-      "port": 4001
+      "port": 4000
     }
   ]
 }

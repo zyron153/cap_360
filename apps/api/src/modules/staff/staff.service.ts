@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException, BadRequestException } from "@nestjs/common";
+import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { randomBytes } from "crypto";
 import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto, CreateLeaveRequestDto, LeaveRequestDecisionDto } from "@cap/types";
 import { StaffRepository } from "./staff.repository";
@@ -123,5 +123,34 @@ export class StaffService {
     if (!existing) throw new NotFoundException(`Leave request ${id} not found`);
     if (existing.status !== "pending") throw new BadRequestException("Este pedido já foi decidido");
     return this.repo.updateLeaveRequestStatus(id, dto.status);
+  }
+
+  // ─── Availability calendar (block a doctor's own or another's schedule) ────
+  // Both actions are "self or admin" — same posture as clinical-records authorship scoping and
+  // health-plans corporate_hr scoping elsewhere in this app.
+
+  async createBlock(targetStaffId: string, requesterId: string, requesterRoles: string[], dto: CreateLeaveRequestDto) {
+    if (!requesterRoles.includes("admin") && requesterId !== targetStaffId) {
+      throw new ForbiddenException("Só pode bloquear a sua própria agenda");
+    }
+    return this.repo.createApprovedBlock(targetStaffId, dto);
+  }
+
+  async listLeaveRequestsForStaff(targetStaffId: string, requesterId: string, requesterRoles: string[]) {
+    if (!requesterRoles.includes("admin") && requesterId !== targetStaffId) {
+      throw new ForbiddenException("Só pode ver a sua própria agenda");
+    }
+    return this.repo.findLeaveRequestsByStaffId(targetStaffId);
+  }
+
+  /** Undo for createBlock — a block created by mistake (wrong dates, changed plans) needs a way
+   * back out, same self-or-admin posture as creating one. */
+  async removeBlock(id: string, requesterId: string, requesterRoles: string[]) {
+    const existing = await this.repo.findLeaveRequestById(id);
+    if (!existing) throw new NotFoundException(`Leave request ${id} not found`);
+    if (!requesterRoles.includes("admin") && requesterId !== existing.staffId) {
+      throw new ForbiddenException("Só pode remover bloqueios da sua própria agenda");
+    }
+    return this.repo.deleteLeaveRequest(id);
   }
 }

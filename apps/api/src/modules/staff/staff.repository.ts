@@ -212,4 +212,23 @@ export class StaffRepository {
   updateLeaveRequestStatus(id: string, status: "approved" | "rejected") {
     return this.prisma.leaveRequest.update({ where: { id }, data: { status } });
   }
+
+  /** Same shape as createLeaveRequest, but pre-approved — the "block my calendar" action from the
+   * new availability-calendar tab is deliberately a different, immediate action from the existing
+   * request-leave flow above, not a variant of it, even though it shares the same table. */
+  createApprovedBlock(staffId: string, dto: { startDate: string; endDate: string; reason?: string }) {
+    return this.prisma.leaveRequest.create({
+      data: {
+        staffId,
+        startDate: new Date(dto.startDate),
+        endDate: new Date(dto.endDate),
+        reason: dto.reason ?? null,
+        status: "approved",
+      },
+    });
+  }
+
+  deleteLeaveRequest(id: string) {
+    return this.prisma.leaveRequest.delete({ where: { id } });
+  }
 }

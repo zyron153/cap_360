@@ -78,6 +78,34 @@ export class StaffController {
     return this.service.decideLeaveRequest(id, dto);
   }
 
+  // ─── Availability calendar ──────────────────────────────────────────────────
+  // Self-or-admin, enforced in the service — a doctor may block/view only their own; admin any.
+
+  @Post(":id/availability-blocks")
+  createBlock(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: { user: { sub: string; roles: string[] } },
+    @Body(new ZodValidationPipe(CreateLeaveRequestSchema)) dto: CreateLeaveRequestDto,
+  ) {
+    return this.service.createBlock(id, req.user.sub, req.user.roles, dto);
+  }
+
+  @Get(":id/leave-requests")
+  listLeaveRequestsForStaff(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: { user: { sub: string; roles: string[] } },
+  ) {
+    return this.service.listLeaveRequestsForStaff(id, req.user.sub, req.user.roles);
+  }
+
+  @Delete("leave-requests/:id")
+  removeBlock(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: { user: { sub: string; roles: string[] } },
+  ) {
+    return this.service.removeBlock(id, req.user.sub, req.user.roles);
+  }
+
   @Get(":id")
   findOne(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.findById(id);

@@ -1,5 +1,5 @@
 import { Test } from "@nestjs/testing";
-import { GoneException, NotFoundException, UnauthorizedException, BadRequestException } from "@nestjs/common";
+import { GoneException, NotFoundException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { StaffRepository } from "./staff.repository";
 import { PasswordService } from "../../common/services/password.service";
@@ -16,6 +16,8 @@ const repo = {
   findPendingLeaveRequests: jest.fn(),
   findLeaveRequestById: jest.fn(),
   updateLeaveRequestStatus: jest.fn(),
+  createApprovedBlock: jest.fn(),
+  deleteLeaveRequest: jest.fn(),
 };
 const password = { hash: jest.fn(), verify: jest.fn() };
 const notifications = { sendInvite: jest.fn() };
@@ -173,5 +175,83 @@ describe("StaffService — leave requests", () => {
   it("throws NotFoundException for an unknown leave request id", async () => {
     repo.findLeaveRequestById.mockResolvedValue(null);
     await expect(service.decideLeaveRequest("ghost", { status: "approved" })).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe("StaffService — availability blocks (calendar tab)", () => {
+  let service: StaffService;
+
+  beforeEach(async () => {
+    const mod = await Test.createTestingModule({
+      providers: [
+        StaffService,
+        { provide: StaffRepository, useValue: repo },
+        { provide: PasswordService, useValue: password },
+        { provide: NotificationsService, useValue: notifications },
+      ],
+    }).compile();
+    service = mod.get(StaffService);
+    jest.clearAllMocks();
+  });
+
+  it("creates an immediately-approved block when a doctor blocks their own calendar", async () => {
+    repo.createApprovedBlock.mockResolvedValue({ id: "b1", status: "approved" });
+    await service.createBlock("s1", "s1", ["doctor"], { startDate: "2026-09-10", endDate: "2026-09-12" });
+    expect(repo.createApprovedBlock).toHaveBeenCalledWith("s1", { startDate: "2026-09-10", endDate: "2026-09-12" });
+  });
+
+  it("creates an immediately-approved block when admin blocks someone else's calendar", async () => {
+    repo.createApprovedBlock.mockResolvedValue({ id: "b1", status: "approved" });
+    await service.createBlock("s1", "admin-1", ["admin"], { startDate: "2026-09-10", endDate: "2026-09-12" });
+    expect(repo.createApprovedBlock).toHaveBeenCalledWith("s1", { startDate: "2026-09-10", endDate: "2026-09-12" });
+  });
+
+  it("throws ForbiddenException when a non-admin tries to block someone else's calendar", async () => {
+    await expect(
+      service.createBlock("s1", "s2", ["doctor"], { startDate: "2026-09-10", endDate: "2026-09-12" })
+    ).rejects.toThrow(ForbiddenException);
+    expect(repo.createApprovedBlock).not.toHaveBeenCalled();
+  });
+
+  it("lists a staff member's own leave requests/blocks", async () => {
+    repo.findLeaveRequestsByStaffId.mockResolvedValue([{ id: "lr-1" }]);
+    await service.listLeaveRequestsForStaff("s1", "s1", ["doctor"]);
+    expect(repo.findLeaveRequestsByStaffId).toHaveBeenCalledWith("s1");
+  });
+
+  it("lets admin list any staff member's leave requests/blocks", async () => {
+    repo.findLeaveRequestsByStaffId.mockResolvedValue([{ id: "lr-1" }]);
+    await service.listLeaveRequestsForStaff("s1", "admin-1", ["admin"]);
+    expect(repo.findLeaveRequestsByStaffId).toHaveBeenCalledWith("s1");
+  });
+
+  it("throws ForbiddenException when a non-admin requests someone else's leave requests", async () => {
+    await expect(service.listLeaveRequestsForStaff("s1", "s2", ["doctor"])).rejects.toThrow(ForbiddenException);
+    expect(repo.findLeaveRequestsByStaffId).not.toHaveBeenCalled();
+  });
+
+  it("removes a block when the requester owns it", async () => {
+    repo.findLeaveRequestById.mockResolvedValue({ id: "lr-1", staffId: "s1" });
+    repo.deleteLeaveRequest.mockResolvedValue({ id: "lr-1" });
+    await service.removeBlock("lr-1", "s1", ["doctor"]);
+    expect(repo.deleteLeaveRequest).toHaveBeenCalledWith("lr-1");
+  });
+
+  it("lets admin remove any block", async () => {
+    repo.findLeaveRequestById.mockResolvedValue({ id: "lr-1", staffId: "s1" });
+    repo.deleteLeaveRequest.mockResolvedValue({ id: "lr-1" });
+    await service.removeBlock("lr-1", "admin-1", ["admin"]);
+    expect(repo.deleteLeaveRequest).toHaveBeenCalledWith("lr-1");
+  });
+
+  it("throws ForbiddenException when a non-admin tries to remove someone else's block", async () => {
+    repo.findLeaveRequestById.mockResolvedValue({ id: "lr-1", staffId: "s1" });
+    await expect(service.removeBlock("lr-1", "s2", ["doctor"])).rejects.toThrow(ForbiddenException);
+    expect(repo.deleteLeaveRequest).not.toHaveBeenCalled();
+  });
+
+  it("throws NotFoundException when the block doesn't exist", async () => {
+    repo.findLeaveRequestById.mockResolvedValue(null);
+    await expect(service.removeBlock("ghost", "s1", ["doctor"])).rejects.toThrow(NotFoundException);
   });
 });

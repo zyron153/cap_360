@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "../hooks/use-permissions";
-import { Users2, Stethoscope, UserCheck, Clock, Phone, Mail, ChevronRight, Plus } from "lucide-react";
+import { Users2, Stethoscope, UserCheck, Clock, Phone, Mail, ChevronRight, Plus, CalendarDays, Table2 } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
+import AvailabilityCalendar from "./_AvailabilityCalendar";
 
 type StaffMember = {
   id: string;
@@ -320,6 +321,7 @@ export default function StaffPage() {
   const queryClient = useQueryClient();
   const [newOpen, setNewOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [view, setView] = useState<"overview" | "calendar">("overview");
 
   const { data: apiStaff = [], isLoading } = useQuery<ApiStaff[]>({
     queryKey: ["bff-staff"],
@@ -386,15 +388,43 @@ export default function StaffPage() {
             <h1 className="font-display text-[22px] font-bold text-dim-900">Equipa & Turnos</h1>
             <p className="text-[13px] text-dim-500 mt-0.5">Gestão de colaboradores e horários</p>
           </div>
-          <button
-            onClick={() => setNewOpen(true)}
-            className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Novo Colaborador
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1">
+              <button
+                onClick={() => setView("overview")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+                  view === "overview" ? "bg-white text-dim-900 shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-500 hover:text-dim-700"
+                }`}
+              >
+                <Table2 className="w-3.5 h-3.5" />
+                Visão Geral
+              </button>
+              <button
+                onClick={() => setView("calendar")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+                  view === "calendar" ? "bg-white text-dim-900 shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-500 hover:text-dim-700"
+                }`}
+              >
+                <CalendarDays className="w-3.5 h-3.5" />
+                Calendário de Disponibilidade
+              </button>
+            </div>
+            {view === "overview" && (
+              <button
+                onClick={() => setNewOpen(true)}
+                className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Novo Colaborador
+              </button>
+            )}
+          </div>
         </div>
 
+        {view === "calendar" && <AvailabilityCalendar />}
+
+        {view === "overview" && (
+        <>
         {/* KPI cards */}
         <div className="grid grid-cols-4 gap-4">
           {[
@@ -580,6 +610,8 @@ export default function StaffPage() {
             </tbody>
           </table>
         </div>
+        </>
+        )}
       </div>
 
       {/* New staff modal */}
