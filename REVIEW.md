@@ -155,8 +155,8 @@ Status legend: ✅ built and wired · 🟡 partial/stubbed · ❌ not started ·
 - ✅ New/Edit patient forms with Zod validation
 - 🟡 Phone "normalization" is cosmetic only — strips non-digits and re-adds `+`, with **no country-code or format validation**; a number typed without `+238` silently becomes a broken number that will never receive a WhatsApp reminder (`patients.service.ts:180-183`)
 - 🟡 NIF has no format validation client or server side, and no DB-level uniqueness constraint (only an index) — the app-level duplicate check is a bare `findFirst`, so a race between two concurrent creates can produce two patients with the same NIF (`schema.prisma:107`, `patients.service.ts:73-90`)
-- ❌ Document upload — `PatientDocument` table and a download-URL endpoint exist; **there is no upload endpoint**, so nothing can ever populate that table via the API (`documents.controller.ts`)
-- ❌ Notes panel — `POST .../notes` exists, `GET .../notes` (list) does not appear wired to a UI panel
+- ✅ **Corrected + built.** Document upload — the upload endpoint (`POST /patients/:id/documents`) actually already existed in `patients.controller.ts` at the time this line was written; this line was simply wrong. What genuinely was missing — a frontend panel to use it — has since been added (`PatientRecordsPanel.tsx`), live-verified.
+- ✅ **Fixed.** Notes panel — `GET .../notes` (list) added, with `staffAuthor` included; frontend panel added alongside the document panel above, live-verified with real author attribution.
 - ❌ Tagging system (VIP, Chronic, etc.) — no field for it in `Patient`
 
 #### M6 — Billing & Invoicing → now **Financeiro**
@@ -261,7 +261,7 @@ Several places (`appointments.service.ts:223`) use raw `console.error` instead o
 Has specs:    appointments, billing, efatura (×2), financeiro, patients, settings
 No specs at all: bff, companies, documents, health-plans, notifications, parametrizacao, public, services, staff
 ```
-`staff.service.ts` in particular has real business logic worth covering (the partial-failure invitation flow flagged in §3 M8). One `e2e` spec exists (`booking-flow.spec.ts`) covering a single happy path; nothing covers Financeiro, health-plans, or any error/edge-case scenario end-to-end.
+`staff.service.ts` in particular has real business logic worth covering (the partial-failure invitation flow flagged in §3 M8) — since fixed, with a full `staff.service.spec.ts`. **Update:** 3 `e2e` specs now exist (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login, 10 tests total), up from the 1 noted here; still nothing covers Financeiro or health-plans end-to-end.
 
 ### 4.6 — Positive findings worth naming
 - No `window.confirm()` anywhere — every destructive action uses an in-app two-step confirmation UI, which is the right call and consistently applied.
@@ -286,7 +286,7 @@ Badge components (invoice status, expense status, e-fatura status) pair color wi
 Every list page reviewed (patients, faturas, despesas, entradas) has a real skeleton loading state, a distinct error state, and a distinct "nothing found" empty state with contextual copy (different message when a search filter is active vs. truly empty). This is a genuinely consistent, well-executed pattern across the whole app — worth naming as a strength, not just an absence of complaints.
 
 ### 5.4 — The sidebar makes no distinction between real and mock features
-This is the UX finding I'd weight highest. "Registos Clínicos," "Visitas Domiciliárias," "Analytics," and "WhatsApp Hub" sit in the sidebar with the exact same visual weight as "Financeiro" and "Pacientes CRM." A staff member has no way to know, without clicking in and testing, that three of those four don't save anything they type. At minimum, this deserves a "Beta" or "Em breve" (coming soon) badge until the backend exists — the current presentation actively misleads.
+**Fixed.** "Visitas Domiciliárias," "Analytics," and "WhatsApp Hub" now carry a "Beta" badge (`isMock: true` in `sidebar.tsx`'s nav config) with a tooltip explaining why — "Registos Clínicos" turned out to be genuinely real (M7 Clinical Records, built since this finding was written) and was correctly left unbadged. A staff member can now tell at a glance which of these don't save anything they type, instead of finding out by testing.
 
 ### 5.5 — Design consistency
 Card styling (`bg-white rounded-[16px] border ... shadow-[...]`), the brand color scale, and typography scale are applied consistently across every page I read, including the code built this session — there's a real, if informal, design system here and it's being followed, not just declared. No inline-style drift, no ad-hoc color values outside the Tailwind `brand`/`dim` scales, in anything I reviewed.

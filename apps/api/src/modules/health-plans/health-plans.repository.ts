@@ -63,6 +63,28 @@ export class HealthPlansRepository {
     return this.prisma.healthPlan.create({ data, include: { product: true, company: true } });
   }
 
+  /** Race-safe plan-number generation, mirroring BillingRepository.nextInvoiceNumber's advisory
+   * -lock pattern exactly — a client-computed "count of existing plans + 1" (the previous approach)
+   * can collide under concurrent submissions and surface as a raw 500 on the unique constraint.
+   * A two-argument advisory lock keeps this in its own namespace, separate from invoices' lock. */
+  async nextPlanNumber(productCode: string, year: number): Promise<string> {
+    const NAMESPACE = 8781; // arbitrary fixed first key — just needs to differ from other lock users
+    await this.prisma.$executeRaw`SELECT pg_advisory_lock(${NAMESPACE}, ${year})`;
+    try {
+      const result = await this.prisma.$queryRaw<[{ next_seq: bigint }]>`
+        SELECT (SELECT COUNT(*) FROM health_plans hp
+                JOIN health_plan_products hpp ON hpp.id = hp."productId"
+                WHERE hpp.code = ${productCode}
+                  AND hp."startDate" >= ${new Date(`${year}-01-01`)}
+                  AND hp."startDate" <  ${new Date(`${year + 1}-01-01`)}) + 1 AS next_seq
+      `;
+      const seq = String(Number(result[0].next_seq)).padStart(3, "0");
+      return `${productCode}-${year}-${seq}`;
+    } finally {
+      await this.prisma.$executeRaw`SELECT pg_advisory_unlock(${NAMESPACE}, ${year})`;
+    }
+  }
+
   incrementUsage(id: string) {
     return this.prisma.healthPlan.update({
       where: { id },

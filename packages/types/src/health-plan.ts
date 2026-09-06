@@ -22,7 +22,10 @@ export const CreateHealthPlanSchema = z.object({
   productId:       z.string().uuid(),
   holderPatientId: z.string().uuid().optional(),
   companyId:       z.string().uuid().optional(),
-  planNumber:      z.string().min(3).max(50),
+  // Omitted = server generates one (race-safe, see HealthPlansRepository.nextPlanNumber) — the
+  // client used to compute this itself (count of existing plans + 1), which could collide under
+  // concurrent submissions. Still overridable: an admin typing a specific number is respected as-is.
+  planNumber:      z.string().min(3).max(50).optional(),
   startDate:       z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate:         z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 }).refine(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -180,10 +180,13 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
   const hasplan = !!patient.healthPlanId;
   const [mode, setMode] = useState<"view" | "edit">(hasplan ? "view" : "edit");
   const TODAY = new Date().toISOString().split("T")[0];
+  // planNumber starts blank — left blank, the server generates a race-safe one (see
+  // HealthPlansRepository.nextPlanNumber); typing a value here overrides that with a manual one.
+  // Previously computed client-side as "count of this product's plans this year + 1", which could
+  // collide under concurrent submissions since two clients could compute the same count.
   const [form, setForm] = useState({ productId: "", planNumber: "", startDate: TODAY });
   const [removeConfirm, setRemoveConfirm] = useState(false);
   const [err, setErr] = useState("");
-  const autoFillProductRef = useRef<string>("");
 
   const { data: products = [] } = useQuery<PlanProduct[]>({
     queryKey: ["health-plan-products"],
@@ -191,27 +194,7 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
     staleTime: 120_000,
   });
 
-  const { data: allPlans = [], isSuccess: plansLoaded } = useQuery<HealthPlan[]>({
-    queryKey: ["health-plans", "all"],
-    queryFn:  () => fetch("/api/health-plans").then(r => r.json()),
-    enabled:  mode === "edit",
-    staleTime: 30_000,
-  });
-
   const selectedProduct = products.find(p => p.id === form.productId);
-
-  // Auto-fill plan number when product changes or plans finish loading
-  useEffect(() => {
-    if (!form.productId || !selectedProduct || !plansLoaded) return;
-    if (form.productId === autoFillProductRef.current) return;
-    autoFillProductRef.current = form.productId;
-    const year = new Date().getFullYear();
-    const count = allPlans.filter(
-      p => p.product.id === form.productId &&
-      new Date(p.startDate).getFullYear() === year
-    ).length;
-    setForm(f => ({ ...f, planNumber: `${selectedProduct.code}-${year}-${String(count + 1).padStart(3, "0")}` }));
-  }, [form.productId, plansLoaded]); // eslint-disable-line
 
   const { data: currentPlan, isLoading: planLoading } = useQuery<HealthPlan>({
     queryKey: ["health-plan", patient.healthPlanId],
@@ -228,11 +211,14 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!form.productId || !form.planNumber || !form.startDate) throw new Error("Preencha todos os campos obrigatórios");
+      if (!form.productId || !form.startDate) throw new Error("Preencha todos os campos obrigatórios");
       const plan = await fetch("/api/health-plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: form.productId, holderPatientId: patient.id, planNumber: form.planNumber, startDate: form.startDate }),
+        body: JSON.stringify({
+          productId: form.productId, holderPatientId: patient.id, startDate: form.startDate,
+          ...(form.planNumber.trim() ? { planNumber: form.planNumber.trim() } : {}),
+        }),
       }).then(async r => { if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro ao criar plano"); } return r.json(); });
       await fetch(`/api/patients/${patient.id}`, {
         method: "PATCH",
@@ -358,15 +344,12 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[12px] font-semibold text-dim-700">Número do Plano <span className="text-red-500">*</span></label>
-                {form.planNumber && <span className="text-[10px] text-dim-400 font-medium">Gerado automaticamente · editável</span>}
+                <label className="text-[12px] font-semibold text-dim-700">Número do Plano</label>
+                <span className="text-[10px] text-dim-400 font-medium">Deixe em branco para gerar automaticamente</span>
               </div>
               <input
                 value={form.planNumber}
-                onChange={e => {
-                  autoFillProductRef.current = form.productId; // lock: treat as manual
-                  setForm(f => ({ ...f, planNumber: e.target.value }));
-                }}
+                onChange={e => setForm(f => ({ ...f, planNumber: e.target.value }))}
                 placeholder={selectedProduct ? `${selectedProduct.code}-${new Date().getFullYear()}-001` : "Selecione um produto primeiro"}
                 className={inputCls}
               />
@@ -388,7 +371,7 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
             {err && <p className="text-[12px] text-red-600 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{err}</p>}
 
             <div className="flex gap-2 pt-1">
-              <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.productId || !form.planNumber || !form.startDate || form.startDate > TODAY}
+              <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || !form.productId || !form.startDate || form.startDate > TODAY}
                 className="flex-1 text-[12px] font-semibold py-2 rounded-[10px] bg-brand-700 hover:bg-brand-800 text-white transition-colors disabled:opacity-50">
                 {saveMutation.isPending ? "A guardar…" : hasplan ? "Substituir Plano" : "Adicionar Plano"}
               </button>

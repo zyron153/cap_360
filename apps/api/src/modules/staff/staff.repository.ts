@@ -67,6 +67,13 @@ export class StaffRepository {
     return this.prisma.staff.update({ where: { id }, data: { passwordHash } });
   }
 
+  /** Same soft-delete convention as patients.repository.ts — deletedAt, not a hard delete. Staff
+   * reads already filter deletedAt: null everywhere (findAll/findById/findByEmail/...), so this
+   * one write is all that was missing to make deactivation actually reachable. */
+  softDelete(id: string) {
+    return this.prisma.staff.update({ where: { id }, data: { deletedAt: new Date() } });
+  }
+
   update(id: string, dto: UpdateStaffDto) {
     const avail = dto.availability;
     return this.prisma.staff.update({

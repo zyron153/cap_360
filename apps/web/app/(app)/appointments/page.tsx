@@ -4,11 +4,12 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
+import Link from "next/link";
+import { format, isSameDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Plus, CalendarDays, List, Clock, User, Stethoscope, DoorOpen, FileText } from "lucide-react";
 import { io } from "socket.io-client";
-import type { ServiceEntry, TimeSlot } from "@cap/types";
+import type { ServiceEntry, TimeSlot, WaitlistEntry } from "@cap/types";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
@@ -121,7 +122,7 @@ const BLANK_APPT = {
 export default function AppointmentsPage() {
   const { isLoading: permLoading, can, canDo } = usePermissions();
   const router = useRouter();
-  const [view, setView] = useState<"calendar" | "list">("calendar");
+  const [view, setView] = useState<"calendar" | "list" | "waitlist">("calendar");
   const [newOpen, setNewOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [form, setForm] = useState(BLANK_APPT);
@@ -150,6 +151,29 @@ export default function AppointmentsPage() {
       queryClient.invalidateQueries({ queryKey: ["appointment", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       addMessage("Success", "Estado atualizado com sucesso!");
+    },
+    onError: (err: Error) => addMessage("Error", err.message),
+  });
+
+  const waitlistQ = useQuery({
+    queryKey: ["waitlist"],
+    queryFn: (): Promise<WaitlistEntry[]> => fetch("/api/appointments/waitlist").then((r) => r.json()),
+    enabled: view === "waitlist",
+  });
+
+  const waitlistStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      fetch(`/api/appointments/waitlist/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      }).then(async (r) => {
+        if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["waitlist"] });
+      addMessage("Success", "Lista de espera atualizada.");
     },
     onError: (err: Error) => addMessage("Error", err.message),
   });
@@ -341,7 +365,10 @@ export default function AppointmentsPage() {
     });
   }
 
-  const filteredAppts = allAppts.filter((a) => activeFilters.has(a.status));
+  const [todayOnly, setTodayOnly] = useState(false);
+  const filteredAppts = allAppts
+    .filter((a) => activeFilters.has(a.status))
+    .filter((a) => !todayOnly || isSameDay(new Date(a.scheduledAt), new Date()));
 
   const events = filteredAppts.map((a) => ({
     id: a.id,
@@ -401,6 +428,15 @@ export default function AppointmentsPage() {
               <List className="w-3.5 h-3.5" />
               Lista
             </button>
+            <button
+              onClick={() => setView("waitlist")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+                view === "waitlist" ? "bg-white text-dim-900 shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-500 hover:text-dim-700"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              Lista de Espera
+            </button>
           </div>
 
           {canDo("appointments", "create") && (
@@ -430,6 +466,13 @@ export default function AppointmentsPage() {
         ))}
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setTodayOnly((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-opacity"
+            style={todayOnly ? { background: "#8B5CF618", color: "#8B5CF6" } : { background: "#f0f0f5", color: "#9898b0", opacity: 0.6 }}
+          >
+            Hoje
+          </button>
           <button
             onClick={() => setActiveFilters(activeFilters.size === STATUS_LEGEND.length ? new Set() : new Set(STATUS_LEGEND.map((s) => s.key)))}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-opacity"
@@ -529,12 +572,127 @@ export default function AppointmentsPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3 border-b border-dim-100">
-                      <button
-                        onClick={() => setSelectedId(a.id)}
-                        className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        Ver →
-                      </button>
+                      <div className="flex items-center justify-end gap-3">
+                        {a.status === "confirmed" && (
+                          <button
+                            onClick={() => statusMutation.mutate({ id: a.id, status: "checked_in" })}
+                            disabled={statusMutation.isPending}
+                            className="text-[11px] font-semibold text-violet-600 hover:text-violet-700 disabled:opacity-40"
+                          >
+                            Check-in
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setSelectedId(a.id)}
+                          className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          Ver →
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Waitlist view */}
+      {view === "waitlist" && (
+        <div className={CARD}>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-dim-100">
+            <h2 className="font-display text-[14px] font-semibold text-dim-900">Lista de Espera</h2>
+            <span className="font-mono text-[11px] text-dim-400">{waitlistQ.data?.length ?? 0} registos</span>
+          </div>
+
+          {waitlistQ.isLoading ? (
+            <div className="divide-y divide-dim-100">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="px-5 py-3.5 flex items-center gap-4 animate-pulse">
+                  <div className="w-32 h-3 bg-dim-100 rounded" />
+                  <div className="flex-1 h-3 bg-dim-100 rounded" />
+                  <div className="w-20 h-5 bg-dim-100 rounded-full" />
+                </div>
+              ))}
+            </div>
+          ) : !waitlistQ.data || waitlistQ.data.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="w-12 h-12 bg-dim-100 rounded-[16px] flex items-center justify-center mx-auto mb-3">
+                <Clock className="w-6 h-6 text-dim-400" />
+              </div>
+              <p className="text-[13px] font-medium text-dim-600">Ninguém em lista de espera</p>
+            </div>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead>
+                <tr>
+                  {["Paciente", "Serviço", "Preferência", "Estado", "Desde", ""].map((h) => (
+                    <th key={h} className="text-left text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 px-5 py-2.5 border-b border-dim-100 bg-dim-50">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {waitlistQ.data.map((w) => (
+                  <tr key={w.id} className="hover:bg-dim-50 transition-colors">
+                    <td className="px-5 py-3 border-b border-dim-100">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 font-semibold text-[10px] flex items-center justify-center shrink-0">
+                          {w.patient.fullName?.[0]?.toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[13px] font-medium text-dim-900 block truncate">{w.patient.fullName}</span>
+                          <span className="font-mono text-[10px] text-dim-400">{w.patient.phone}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 border-b border-dim-100 text-[12px] text-dim-600">{w.service.name}</td>
+                    <td className="px-5 py-3 border-b border-dim-100 text-[12px] text-dim-500 whitespace-nowrap">
+                      {w.preferredDateFrom
+                        ? `${format(new Date(w.preferredDateFrom), "dd MMM", { locale: pt })}${w.preferredDateTo ? ` – ${format(new Date(w.preferredDateTo), "dd MMM", { locale: pt })}` : ""}`
+                        : "Qualquer data"}
+                    </td>
+                    <td className="px-5 py-3 border-b border-dim-100">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${w.status === "notified" ? "bg-violet-50 text-violet-700" : "bg-amber-50 text-amber-700"}`}>
+                        {w.status === "notified" ? "Notificado" : "Aguardando"}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 border-b border-dim-100 font-mono text-[11px] text-dim-400 whitespace-nowrap">
+                      {format(new Date(w.createdAt), "dd MMM yyyy", { locale: pt })}
+                    </td>
+                    <td className="px-5 py-3 border-b border-dim-100">
+                      <div className="flex items-center justify-end gap-3">
+                        <Link
+                          href={`/appointments/new?patientId=${w.patientId}`}
+                          className="text-[11px] font-semibold text-brand-600 hover:text-brand-700"
+                        >
+                          Agendar
+                        </Link>
+                        {w.status === "waiting" ? (
+                          <button
+                            onClick={() => waitlistStatusMutation.mutate({ id: w.id, status: "notified" })}
+                            disabled={waitlistStatusMutation.isPending}
+                            className="text-[11px] font-semibold text-violet-600 hover:text-violet-700 disabled:opacity-40"
+                          >
+                            Notificar
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => waitlistStatusMutation.mutate({ id: w.id, status: "booked" })}
+                            disabled={waitlistStatusMutation.isPending}
+                            className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-40"
+                          >
+                            Reservado
+                          </button>
+                        )}
+                        <button
+                          onClick={() => waitlistStatusMutation.mutate({ id: w.id, status: "expired" })}
+                          disabled={waitlistStatusMutation.isPending}
+                          className="text-[11px] font-semibold text-dim-400 hover:text-red-600 disabled:opacity-40"
+                        >
+                          Remover
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -9,6 +9,9 @@ const repo = {
   findPlanById: jest.fn(),
   incrementUsage: jest.fn(),
   findExpiringBetween: jest.fn(),
+  findProductById: jest.fn(),
+  nextPlanNumber: jest.fn(),
+  createPlan: jest.fn(),
 };
 const staffRepo = { findById: jest.fn() };
 
@@ -113,6 +116,37 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
       const to = new Date("2026-09-30");
       await service.findExpiringBetween(from, to);
       expect(repo.findExpiringBetween).toHaveBeenCalledWith(from, to);
+    });
+  });
+
+  describe("createPlan — server-side plan number generation", () => {
+    it("uses a caller-supplied planNumber as-is, without generating one", async () => {
+      repo.createPlan.mockResolvedValue({ id: "plan-1", planNumber: "CUSTOM-001" });
+      await service.createPlan({
+        productId: "prod-1", holderPatientId: "pat-1", planNumber: "CUSTOM-001", startDate: "2026-01-01",
+      } as never);
+      expect(repo.findProductById).not.toHaveBeenCalled();
+      expect(repo.nextPlanNumber).not.toHaveBeenCalled();
+      expect(repo.createPlan).toHaveBeenCalledWith(expect.objectContaining({ planNumber: "CUSTOM-001" }));
+    });
+
+    it("generates a race-safe plan number server-side when none is provided, keyed by the product's own code and the start year", async () => {
+      repo.findProductById.mockResolvedValue({ id: "prod-1", code: "IMPAR-IND-001" });
+      repo.nextPlanNumber.mockResolvedValue("IMPAR-IND-001-2026-004");
+      repo.createPlan.mockResolvedValue({ id: "plan-1" });
+
+      await service.createPlan({ productId: "prod-1", holderPatientId: "pat-1", startDate: "2026-01-01" } as never);
+
+      expect(repo.nextPlanNumber).toHaveBeenCalledWith("IMPAR-IND-001", 2026);
+      expect(repo.createPlan).toHaveBeenCalledWith(expect.objectContaining({ planNumber: "IMPAR-IND-001-2026-004" }));
+    });
+
+    it("throws NotFoundException when generating a number for a nonexistent product, without creating a plan", async () => {
+      repo.findProductById.mockResolvedValue(null);
+      await expect(
+        service.createPlan({ productId: "ghost", holderPatientId: "pat-1", startDate: "2026-01-01" } as never)
+      ).rejects.toThrow(NotFoundException);
+      expect(repo.createPlan).not.toHaveBeenCalled();
     });
   });
 });

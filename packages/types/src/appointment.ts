@@ -131,3 +131,24 @@ export const JoinWaitlistSchema = z.object({
   notes: z.string().max(300).optional(),
 });
 export type JoinWaitlistDto = z.infer<typeof JoinWaitlistSchema>;
+
+export const UpdateWaitlistStatusSchema = z.object({
+  status: z.enum(["waiting", "notified", "booked", "expired"]),
+});
+export type UpdateWaitlistStatusDto = z.infer<typeof UpdateWaitlistStatusSchema>;
+
+export interface WaitlistEntry {
+  id: string;
+  patientId: string;
+  serviceId: string;
+  staffId?: string | null;
+  preferredDateFrom?: string | null;
+  preferredDateTo?: string | null;
+  notes?: string | null;
+  status: "waiting" | "notified" | "booked" | "expired";
+  notifiedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  patient: { id: string; fullName: string; phone: string };
+  service: { id: string; name: string };
+}

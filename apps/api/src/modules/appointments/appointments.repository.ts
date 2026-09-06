@@ -148,7 +148,9 @@ export class AppointmentsRepository {
   findWaitlist(serviceId?: string) {
     return this.prisma.waitlist.findMany({
       where: {
-        status: "waiting",
+        // "waiting" and "notified" are both still-actionable — only "booked"/"expired" are
+        // resolved and drop off this list.
+        status: { in: ["waiting", "notified"] },
         ...(serviceId ? { serviceId } : {}),
       },
       include: {
@@ -156,6 +158,24 @@ export class AppointmentsRepository {
         service: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "asc" },
+    });
+  }
+
+  findWaitlistById(id: string) {
+    return this.prisma.waitlist.findUnique({ where: { id } });
+  }
+
+  updateWaitlistStatus(id: string, status: string) {
+    return this.prisma.waitlist.update({
+      where: { id },
+      data: {
+        status: status as Prisma.WaitlistUpdateInput["status"],
+        ...(status === "notified" ? { notifiedAt: new Date() } : {}),
+      },
+      include: {
+        patient: { select: { id: true, fullName: true, phone: true } },
+        service: { select: { id: true, name: true } },
+      },
     });
   }
 }

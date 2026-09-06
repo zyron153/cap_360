@@ -62,7 +62,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Recurring appointments (`POST /appointments/series`) — `AppointmentSeries` model, daily/weekly/monthly with configurable interval, ends on a fixed count or a date, pre-generated best-effort occurrences, idempotency-key protected
 - [x] Idempotency keys end-to-end for booking (client-generated, replay-safe)
 - [x] Extensive unit test suite (`appointments.service.spec.ts`, `appointments.repository.spec.ts` — availability, conflicts, holidays/leave, rooms, series)
-- [ ] Leave request submission/approval endpoints — `LeaveRequest` rows are honored by availability logic but nothing can create or approve one via the API (direct DB access only)
+- [x] ~~Leave request submission/approval endpoints — nothing can create or approve one via the API~~ — corrected: `POST /staff/me/leave-requests`, `GET /staff/leave-requests`, `PATCH /staff/leave-requests/:id` all exist and work; this line was stale
 - [ ] Reminder channel is hardcoded to WhatsApp regardless of the `ReminderChannel` enum having SMS/email options — needs real SMS-sending infrastructure (none exists) before this can be fixed
 
 **Frontend**
@@ -70,8 +70,8 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] New appointment form, incl. a "make recurring" toggle (frequency/interval/end-condition)
 - [x] Drag-and-drop reschedule (move only; resize disabled — the API has no concept of changing duration via reschedule)
 - [x] Appointment detail modal with status-transition buttons
-- [ ] Dedicated waitlist view page
-- [ ] Formal check-in workflow UI for reception (status update exists generically, no scan/dedicated flow)
+- [x] Dedicated waitlist view page — "Lista de Espera" tab on `/appointments`, backed by `PATCH /appointments/waitlist/:id` (waiting → notified → booked/expired); the list endpoint was already scoped to `status: "waiting"` only, widened to also include `"notified"` so a contacted patient doesn't silently vanish from the view before they're actually booked
+- [x] Formal check-in workflow UI for reception — "Hoje" quick-filter + inline one-click Check-in action in the list view, instead of opening the detail modal for the common case
 
 ---
 
@@ -84,15 +84,15 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] NIF/phone uniqueness races (create and update) surface as `409 Conflict`, not a raw `500`
 - [x] `findOrCreateByPhone` (public booking path) no longer hardcodes `consentGiven: true` — requires the real value from the caller
 - [x] Right to erasure: soft-delete nulls every direct-PII field, not just `deletedAt`
-- [ ] `POST /patients/:id/documents` (upload) — only a download-URL endpoint exists; nothing can populate `patient_documents` via the API
-- [ ] `GET /patients/:id/notes` (list) — creation exists (`POST`), no list endpoint or UI panel
+- [x] ~~`POST /patients/:id/documents` (upload) — only a download-URL endpoint exists~~ — corrected: `POST`/`GET /patients/:id/documents` both exist (`patients.controller.ts`), wired to `DocumentsService.upload()`/`listByPatient()`; this line was stale. Frontend panel still didn't exist — added this pass.
+- [x] `GET /patients/:id/notes` (list) — added, with `staffAuthor` included; frontend panel added (see below)
 - [ ] Patient-initiated consent management (view/download own consent record) — consent is currently staff-managed only
 - [ ] Tagging system (VIP, Chronic, etc.) — no field for it in the schema
 
 **Frontend**
 - [x] Patient list page, profile page (via BFF), new patient form, **edit patient form** (`/patients/[id]/edit`)
-- [ ] Document upload panel on patient profile (blocked on the missing backend endpoint above)
-- [ ] Notes panel with add-note form on the patient profile page
+- [x] Document upload panel on patient profile — `PatientRecordsPanel.tsx`, type-select + upload + download-URL round-trip, live-verified
+- [x] Notes panel with add-note form on the patient profile page — same component, live-verified with real author attribution
 - [ ] Patient search as autocomplete in the booking form (currently a plain dropdown)
 
 ---
@@ -126,7 +126,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `@cap/types` — `Staff`, `Service`, `Room`/appointment types and Zod schemas all exist
 - [x] API rate limiting (`@nestjs/throttler`) — global default 300 req/min, public routes overridden to 60 req/min
 - [x] Request/performance logging (`PerformanceInterceptor`)
-- [x] Unit test suite (Jest) — 251 tests across guards, interceptors, services, repositories
+- [x] Unit test suite (Jest) — 355 tests across guards, interceptors, services, repositories
 - [x] **Self-hosted auth (2026-08-31, replaces Keycloak)**: argon2id password hashing, Redis-backed
   sessions (httpOnly/Secure/SameSite=Lax cookie), per-IP + per-account login rate-limiting/lockout,
   forgot/reset/change-password flows — `AUTH_BYPASS=true` dev bypass preserved, fails safe (requires
@@ -151,8 +151,8 @@ piece of groundwork already laid — ready to be pointed at a real send service.
 
 **Backend**
 - [x] Plan products, company linkage, patient subscription — all implemented (`health-plans.controller.ts`)
-- [ ] Utilisation counter — `usageCount` column exists, nothing increments it
-- [ ] Expiry notification job (30/15/7 days)
+- [x] ~~Utilisation counter — `usageCount` column exists, nothing increments it~~ — corrected: `AppointmentsService.updateStatus()`'s completed branch calls `healthPlansService.incrementUsage()`, unit-tested; this line was stale
+- [x] ~~Expiry notification job (30/15/7 days)~~ — corrected: `NotificationsProcessor.handleHealthPlanExpiring()` exists, scheduled daily at 08:00 (`notifications.service.ts`), 4 tests; this line was stale
 - [ ] Auto-renew logic
 - [ ] `POST /health-plans/:id/members` / member roster — a `HealthPlan` links to one holder patient directly today, not a membership join table
 
@@ -161,8 +161,11 @@ piece of groundwork already laid — ready to be pointed at a real send service.
 - [ ] Dedicated health plans list/detail pages
 - [ ] Corporate HR self-service portal (Phase 4)
 
-Known bug: `planNumber` is client-computed (count+1), not a DB sequence — a race between two
-concurrent "add plan" submissions can collide on the unique constraint and surface as a raw `500`.
+~~Known bug: `planNumber` is client-computed (count+1), not a DB sequence — a race between two
+concurrent "add plan" submissions can collide on the unique constraint and surface as a raw `500`.~~
+**Fixed** — `planNumber` is now generated server-side (`HealthPlansRepository.nextPlanNumber`), race-safe
+via a Postgres advisory lock keyed by product code + year, same pattern as `billing.repository.ts`'s
+invoice numbering. Caller-supplied `planNumber` is still honored as-is when provided (now optional).
 
 ### M5 — Exam Results Portal — 🟡 stub only
 `ExamRequest` exists as a schema stub (self-labelled "Phase 1 stub"), no controller/service at
@@ -191,7 +194,11 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   used to need (delete an orphaned Keycloak user if the local `Staff` write failed) is gone;
   there's nothing external left to get out of sync with
 - [x] Room/equipment conflict detection (see M1 — same underlying fix)
-- [ ] Leave request submission/approval endpoints (see M1 note — schema and availability-logic support exist, no way to create one via the API)
+- [x] Staff deactivation — `DELETE /staff/:id` (admin-only, self-deactivation blocked), soft-deletes via the
+  `deletedAt` column that already existed and was already used by every staff read path but had no write
+  endpoint to actually set it. `SessionAuthGuard` now also rejects a deactivated staff member's still-live
+  session on their next request; login already rejected them for free via the existing `deletedAt: null` filter.
+- [x] ~~Leave request submission/approval endpoints (see M1 note — schema and availability-logic support exist, no way to create one via the API)~~ — corrected: same duplicate/contradictory line as M1's own corrected copy above; `POST /staff/me/leave-requests` etc. all exist
 - [ ] Shift-planner calendar UI (drag-to-assign)
 
 ### M9 — Home Visit Manager — 🎭 not started
@@ -237,16 +244,16 @@ psychology clinic with no ultrasound/ECG imaging use case.
 - [x] Rate limiting — global 300/min + public 60/min (see above; the original "1000/min WhatsApp webhook" line doesn't apply — no webhook exists)
 - [x] MFA required (`CONFIGURE_TOTP`) for new admin/doctor/corporate_hr accounts
 - [x] `audit_log` genuinely append-only via a DB trigger (not just app convention)
-- [ ] Helmet headers in `main.ts`
+- [x] ~~Helmet headers in `main.ts`~~ — corrected: `app.use(helmet())` is already the second line of `bootstrap()`; this line was stale
 - [ ] OWASP ZAP scan in CI
 - [ ] Quarterly penetration test plan
 
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 344 tests total
-- [ ] Integration tests against a real test DB
-- [ ] E2E tests (Playwright) — `apps/web/e2e/booking-flow.spec.ts` exists as a starting point, not a full suite
+- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 355 tests total (23 suites)
+- [x] ~~Integration tests against a real test DB~~ — this contradicted this file's own line 137 ([x], 4 specs / 9 tests); duplicate line removed
+- [~] E2E tests (Playwright) — 3 specs / 10 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login), up from 1 spec; still not full coverage (nothing for Financeiro or health-plans end-to-end). Fixed along the way: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)
 
 ### DevOps

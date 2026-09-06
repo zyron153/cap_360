@@ -15,6 +15,7 @@ const repo = {
   update: jest.fn(),
   softDelete: jest.fn(),
   createNote: jest.fn(),
+  findNotesForPatient: jest.fn(),
   findTimelineEvents: jest.fn(),
 };
 
@@ -281,6 +282,22 @@ describe("PatientsService", () => {
 
       expect(result).toEqual({ id: "existing" });
       expect(repo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("listNotes", () => {
+    it("returns the patient's notes, most recent first (delegated to the repository)", async () => {
+      repo.findById.mockResolvedValue({ id: "p1" });
+      repo.findNotesForPatient.mockResolvedValue([{ id: "n1", content: "..." }]);
+      const result = await service.listNotes("p1");
+      expect(repo.findNotesForPatient).toHaveBeenCalledWith("p1");
+      expect(result).toEqual([{ id: "n1", content: "..." }]);
+    });
+
+    it("throws NotFoundException for an unknown patient, without querying notes", async () => {
+      repo.findById.mockResolvedValue(null);
+      await expect(service.listNotes("ghost")).rejects.toThrow("Patient ghost not found");
+      expect(repo.findNotesForPatient).not.toHaveBeenCalled();
     });
   });
 });

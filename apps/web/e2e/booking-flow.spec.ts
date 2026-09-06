@@ -6,7 +6,7 @@
  */
 import { test, expect } from "@playwright/test";
 
-const API = "http://localhost:4001/v1";
+const API = "http://localhost:4000/v1";
 
 // IDs created during the run — shared across tests in this file
 let patientId: string;
@@ -30,30 +30,38 @@ test.beforeAll(async ({ request }) => {
   expect(pr.status(), "create patient").toBe(201);
   patientId = (await pr.json()).id;
 
-  // Fetch first active staff + service (seeded in dev DB)
+  // Fetch a real doctor (booking-eligible — needs configured StaffAvailability, unlike admin/
+  // receptionist/etc.) + first service (seeded in dev DB).
   const [staffRes, svcRes] = await Promise.all([
     request.get(`${API}/staff`),
     request.get(`${API}/services`),
   ]);
   const staff = await staffRes.json();
   const services = await svcRes.json();
-  const staffId: string = staff[0].id;
+  const staffId: string = staff.find((s: { role: string }) => s.role === "doctor").id;
   const serviceId: string = services[0].id;
 
-  // Book appointment ~3 days out at 14:00 local, nudged off any weekend the clinic is closed —
-  // a fixed +3 lands on a different weekday each time this runs and can hit a closed Sunday/Saturday.
-  const apptDate = new Date();
-  apptDate.setDate(apptDate.getDate() + 3);
-  if (apptDate.getDay() === 0) apptDate.setDate(apptDate.getDate() + 1); // Sun -> Mon
-  if (apptDate.getDay() === 6) apptDate.setDate(apptDate.getDate() + 2); // Sat -> Mon
-  apptDate.setHours(14, 0, 0, 0);
+  // Ask the real availability endpoint (same one the booking UI uses) for a slot within the next
+  // 2 weeks, instead of guessing a fixed hour — the doctor's own configured hours are seed data,
+  // not something this test should hardcode a guess about.
+  let scheduledAt: string | undefined;
+  for (let offset = 3; offset < 17 && !scheduledAt; offset++) {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const dateStr = d.toISOString().slice(0, 10);
+    const slots = await request
+      .get(`${API}/appointments/availability?serviceId=${serviceId}&staffId=${staffId}&date=${dateStr}`)
+      .then((r) => r.json());
+    scheduledAt = slots.find((s: { available: boolean; start: string }) => s.available)?.start;
+  }
+  expect(scheduledAt, "found an available slot for the doctor within 2 weeks").toBeTruthy();
 
   const ar = await request.post(`${API}/appointments`, {
     data: {
       patientId,
       staffId,
       serviceId,
-      scheduledAt: apptDate.toISOString(),
+      scheduledAt,
       source: "web",
     },
   });

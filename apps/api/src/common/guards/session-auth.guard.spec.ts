@@ -3,6 +3,7 @@ import { SessionAuthGuard } from "./session-auth.guard";
 
 const reflector = { getAllAndOverride: jest.fn() };
 const sessions = { get: jest.fn() };
+const staffRepo = { findById: jest.fn() };
 
 function makeContext(cookies: Record<string, string> = {}) {
   const request = { cookies, user: undefined as unknown };
@@ -21,6 +22,8 @@ describe("SessionAuthGuard", () => {
     process.env = { ...ORIGINAL_ENV };
     reflector.getAllAndOverride.mockReturnValue(false);
     sessions.get.mockReset();
+    staffRepo.findById.mockReset();
+    staffRepo.findById.mockResolvedValue({ id: "s1" }); // active by default — deactivation tested explicitly below
   });
 
   afterAll(() => {
@@ -28,7 +31,7 @@ describe("SessionAuthGuard", () => {
   });
 
   function guard() {
-    return new SessionAuthGuard(reflector as never, sessions as never);
+    return new SessionAuthGuard(reflector as never, sessions as never, staffRepo as never);
   }
 
   it("lets a @Public() route through with no cookie at all", async () => {
@@ -54,6 +57,14 @@ describe("SessionAuthGuard", () => {
     const ctx = makeContext({ cap_session: "good" });
     await expect(guard().canActivate(ctx)).resolves.toBe(true);
     expect(ctx.__request.user).toEqual({ sub: "s1", email: "a@cap.cv", roles: ["admin"] });
+  });
+
+  it("rejects a valid session cookie belonging to a since-deactivated staff member", async () => {
+    sessions.get.mockResolvedValue({ staffId: "s1", email: "a@cap.cv", roles: ["admin"] });
+    staffRepo.findById.mockResolvedValue(null); // soft-deleted — findById filters deletedAt: null
+    const ctx = makeContext({ cap_session: "good" });
+    await expect(guard().canActivate(ctx)).rejects.toThrow(UnauthorizedException);
+    expect(ctx.__request.user).toBeUndefined();
   });
 
   describe("dev bypass posture", () => {

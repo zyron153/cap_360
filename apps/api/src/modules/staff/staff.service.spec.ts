@@ -18,6 +18,8 @@ const repo = {
   updateLeaveRequestStatus: jest.fn(),
   createApprovedBlock: jest.fn(),
   deleteLeaveRequest: jest.fn(),
+  findById: jest.fn(),
+  softDelete: jest.fn(),
 };
 const password = { hash: jest.fn(), verify: jest.fn() };
 const notifications = { sendInvite: jest.fn() };
@@ -253,5 +255,41 @@ describe("StaffService — availability blocks (calendar tab)", () => {
   it("throws NotFoundException when the block doesn't exist", async () => {
     repo.findLeaveRequestById.mockResolvedValue(null);
     await expect(service.removeBlock("ghost", "s1", ["doctor"])).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe("StaffService — softDelete (deactivation)", () => {
+  let service: StaffService;
+
+  beforeEach(async () => {
+    const mod = await Test.createTestingModule({
+      providers: [
+        StaffService,
+        { provide: StaffRepository, useValue: repo },
+        { provide: PasswordService, useValue: password },
+        { provide: NotificationsService, useValue: notifications },
+      ],
+    }).compile();
+    service = mod.get(StaffService);
+    jest.clearAllMocks();
+  });
+
+  it("deactivates an existing staff member", async () => {
+    repo.findById.mockResolvedValue({ id: "s1", fullName: "Dr. Carlos Silva" });
+    repo.softDelete.mockResolvedValue({ id: "s1", deletedAt: new Date() });
+    await service.softDelete("s1", "admin-1");
+    expect(repo.softDelete).toHaveBeenCalledWith("s1");
+  });
+
+  it("throws NotFoundException for a nonexistent staff member, without deactivating anything", async () => {
+    repo.findById.mockResolvedValue(null);
+    await expect(service.softDelete("ghost", "admin-1")).rejects.toThrow(NotFoundException);
+    expect(repo.softDelete).not.toHaveBeenCalled();
+  });
+
+  it("throws ForbiddenException when an admin tries to deactivate their own account", async () => {
+    await expect(service.softDelete("admin-1", "admin-1")).rejects.toThrow(ForbiddenException);
+    expect(repo.findById).not.toHaveBeenCalled();
+    expect(repo.softDelete).not.toHaveBeenCalled();
   });
 });

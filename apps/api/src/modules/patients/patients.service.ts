@@ -162,6 +162,11 @@ export class PatientsService {
     });
   }
 
+  async listNotes(patientId: string) {
+    await this.findById(patientId);
+    return this.repo.findNotesForPatient(patientId);
+  }
+
   async getTimeline(patientId: string): Promise<TimelineEvent[]> {
     await this.findById(patientId);
     const [appointments, comms, invoices] =

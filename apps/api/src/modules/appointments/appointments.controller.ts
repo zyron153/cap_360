@@ -19,6 +19,7 @@ import {
   AvailabilityQuerySchema,
   AppointmentCalendarQuerySchema,
   JoinWaitlistSchema,
+  UpdateWaitlistStatusSchema,
   CreateAppointmentDto,
   CreateAppointmentSeriesDto,
   UpdateAppointmentStatusDto,
@@ -26,6 +27,7 @@ import {
   AvailabilityQuery,
   AppointmentCalendarQuery,
   JoinWaitlistDto,
+  UpdateWaitlistStatusDto,
 } from "@cap/types";
 
 @Controller("appointments")
@@ -79,6 +81,14 @@ export class AppointmentsController {
     @Body(new ZodValidationPipe(JoinWaitlistSchema)) dto: JoinWaitlistDto
   ) {
     return this.service.joinWaitlist(dto);
+  }
+
+  @Patch("waitlist/:id")
+  updateWaitlistStatus(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(UpdateWaitlistStatusSchema)) dto: UpdateWaitlistStatusDto
+  ) {
+    return this.service.updateWaitlistStatus(id, dto);
   }
 
   @Patch(":id/status")

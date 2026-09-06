@@ -9,6 +9,8 @@ import { NotificationsModule } from "../notifications/notifications.module";
   imports: [NotificationsModule],
   controllers: [StaffController],
   providers: [StaffService, StaffRepository, PasswordService],
-  exports: [StaffService],
+  // StaffRepository is also exported — SessionAuthGuard (a global APP_GUARD in AppModule) needs
+  // it directly to reject a since-deactivated staff member on every request, not just at login.
+  exports: [StaffService, StaffRepository],
 })
 export class StaffModule {}

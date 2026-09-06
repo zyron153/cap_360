@@ -9,7 +9,7 @@
  */
 import { test, expect } from "@playwright/test";
 
-const API = "http://localhost:4001/v1";
+const API = "http://localhost:4000/v1";
 
 let patientId: string;
 let appointmentId: string;
@@ -32,17 +32,30 @@ test.beforeAll(async ({ request }) => {
     request.get(`${API}/staff`),
     request.get(`${API}/services`),
   ]);
-  const staffId: string = (await staffRes.json())[0].id;
+  const staff = await staffRes.json();
+  // Needs a real doctor — StaffAvailability is enforced at booking time, and admin/receptionist/
+  // etc. have none configured.
+  const staffId: string = staff.find((s: { role: string }) => s.role === "doctor").id;
   const serviceId: string = (await svcRes.json())[0].id;
 
-  // Minute varies per run so a prior run's own appointment (left behind if it failed before
-  // afterAll's cleanup, same as this repo's other e2e debris) can never 409-block this one.
-  const apptDate = new Date();
-  apptDate.setDate(apptDate.getDate() + 4);
-  apptDate.setHours(11, Date.now() % 50, 0, 0);
+  // Ask the real availability endpoint for a slot within the next 2 weeks — same reasoning as
+  // booking-flow.spec.ts: the doctor's configured hours are seed data, not something to hardcode
+  // a guess about. Still varies per run so a prior run's own leftover appointment (left behind
+  // if it failed before afterAll's cleanup, same as this repo's other e2e debris) never 409s this one.
+  let scheduledAt: string | undefined;
+  for (let offset = 4; offset < 18 && !scheduledAt; offset++) {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    const dateStr = d.toISOString().slice(0, 10);
+    const slots = await request
+      .get(`${API}/appointments/availability?serviceId=${serviceId}&staffId=${staffId}&date=${dateStr}`)
+      .then((r) => r.json());
+    scheduledAt = slots.find((s: { available: boolean; start: string }) => s.available)?.start;
+  }
+  expect(scheduledAt, "found an available slot for the doctor within 2 weeks").toBeTruthy();
 
   const ar = await request.post(`${API}/appointments`, {
-    data: { patientId, staffId, serviceId, scheduledAt: apptDate.toISOString(), source: "web" },
+    data: { patientId, staffId, serviceId, scheduledAt, source: "web" },
   });
   expect(ar.status(), "create appointment").toBe(201);
   appointmentId = (await ar.json()).id;
@@ -59,7 +72,8 @@ test.afterAll(async ({ request }) => {
 
 test("walking a pending appointment through confirmed → checked_in → completed creates a payable invoice", async ({ page }) => {
   await page.goto("/appointments");
-  await page.getByRole("button", { name: "Lista" }).click();
+  // exact: true — a "Lista de Espera" tab button also matches "Lista" as a substring otherwise.
+  await page.getByRole("button", { name: "Lista", exact: true }).click();
 
   // The row's own text isn't clickable — only its "Ver →" button (revealed on hover, but still
   // present/clickable off-hover) opens the detail modal.

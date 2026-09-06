@@ -105,6 +105,11 @@ export class PatientsController {
     return this.service.addNote(patientId, dto, user.sub);
   }
 
+  @Get(":id/notes")
+  listNotes(@Param("id", ParseUUIDPipe) patientId: string) {
+    return this.service.listNotes(patientId);
+  }
+
   @Get(":id/documents")
   listDocuments(@Param("id", ParseUUIDPipe) patientId: string) {
     return this.documentsService.listByPatient(patientId);

@@ -108,6 +108,7 @@ export class PatientsRepository {
   findNotesForPatient(patientId: string) {
     return this.prisma.patientNote.findMany({
       where: { patientId },
+      include: { staffAuthor: { select: { id: true, fullName: true } } },
       orderBy: { createdAt: "desc" },
     });
   }

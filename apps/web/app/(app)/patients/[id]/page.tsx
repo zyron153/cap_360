@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { Patient, TimelineEvent } from "@cap/types";
 import { ClinicalRecordsSection } from "./ClinicalRecordsSection";
+import { PatientRecordsPanel } from "./PatientRecordsPanel";
 import { usePermissions } from "../../hooks/use-permissions";
 
 interface PatientScreenResponse {
@@ -209,6 +210,8 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
           </div>
         </div>
       </div>
+
+      <PatientRecordsPanel patientId={id} />
 
       {canSeeClinicalRecords && <ClinicalRecordsSection patientId={id} />}
     </div>

@@ -79,12 +79,23 @@ export class HealthPlansService {
     return plan;
   }
 
-  createPlan(dto: CreateHealthPlanDto) {
+  async createPlan(dto: CreateHealthPlanDto) {
+    let planNumber = dto.planNumber;
+    if (!planNumber) {
+      const product = await this.repo.findProductById(dto.productId);
+      if (!product) throw new NotFoundException(`Health plan product ${dto.productId} not found`);
+      // Read the year directly from the "YYYY-MM-DD" string rather than via `new Date(...)
+      // .getFullYear()` — a bare date string parses as UTC midnight, and .getFullYear() reads it
+      // back in local time, silently shifting to the wrong year on any negative-UTC-offset server
+      // (same class of bug appointments.service.ts's parseLocalDate already exists to avoid).
+      planNumber = await this.repo.nextPlanNumber(product.code, Number(dto.startDate.slice(0, 4)));
+    }
+
     return this.repo.createPlan({
       product: { connect: { id: dto.productId } },
       ...(dto.holderPatientId ? { holderPatientId: dto.holderPatientId } : {}),
       ...(dto.companyId ? { company: { connect: { id: dto.companyId } } } : {}),
-      planNumber: dto.planNumber,
+      planNumber,
       startDate: new Date(dto.startDate),
       endDate: dto.endDate ? new Date(dto.endDate) : undefined,
     });

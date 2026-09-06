@@ -128,4 +128,14 @@ export class StaffController {
   ) {
     return this.service.update(id, dto);
   }
+
+  @Delete(":id")
+  @Roles("admin")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  softDelete(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: { user: { sub: string } },
+  ) {
+    return this.service.softDelete(id, req.user.sub);
+  }
 }

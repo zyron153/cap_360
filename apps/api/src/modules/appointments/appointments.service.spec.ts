@@ -1,5 +1,5 @@
 import { Test } from "@nestjs/testing";
-import { ConflictException, BadRequestException } from "@nestjs/common";
+import { ConflictException, BadRequestException, NotFoundException } from "@nestjs/common";
 import { getQueueToken } from "@nestjs/bull";
 import { Prisma } from "@cap/database";
 import { AppointmentsService } from "./appointments.service";
@@ -27,6 +27,8 @@ const repo = {
   createReminder: jest.fn(),
   createWaitlistEntry: jest.fn(),
   findWaitlist: jest.fn(),
+  findWaitlistById: jest.fn(),
+  updateWaitlistStatus: jest.fn(),
   findApprovedLeave: jest.fn(),
   findPublicHolidays: jest.fn(),
   findConfirmedInRangeForRoom: jest.fn(),
@@ -744,6 +746,25 @@ describe("AppointmentsService", () => {
       await expect(service.updateStatus("appt-1", { status: "completed" })).resolves.toEqual({
         id: "appt-1", status: "completed",
       });
+    });
+  });
+
+  describe("updateWaitlistStatus", () => {
+    it("throws NotFoundException for a nonexistent waitlist entry, without updating anything", async () => {
+      repo.findWaitlistById.mockResolvedValue(null);
+      await expect(service.updateWaitlistStatus("wl-missing", { status: "notified" }))
+        .rejects.toThrow(NotFoundException);
+      expect(repo.updateWaitlistStatus).not.toHaveBeenCalled();
+    });
+
+    it("updates the entry's status when it exists", async () => {
+      repo.findWaitlistById.mockResolvedValue({ id: "wl-1", status: "waiting" });
+      repo.updateWaitlistStatus.mockResolvedValue({ id: "wl-1", status: "notified" });
+
+      const result = await service.updateWaitlistStatus("wl-1", { status: "notified" });
+
+      expect(repo.updateWaitlistStatus).toHaveBeenCalledWith("wl-1", "notified");
+      expect(result).toEqual({ id: "wl-1", status: "notified" });
     });
   });
 });

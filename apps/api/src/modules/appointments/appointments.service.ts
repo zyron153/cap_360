@@ -23,6 +23,7 @@ import {
   RescheduleAppointmentDto,
   AvailabilityQuery,
   JoinWaitlistDto,
+  UpdateWaitlistStatusDto,
   TimeSlot,
   AppointmentCalendarQuery,
 } from "@cap/types";
@@ -524,6 +525,12 @@ export class AppointmentsService {
 
   getWaitlist(serviceId?: string) {
     return this.repo.findWaitlist(serviceId);
+  }
+
+  async updateWaitlistStatus(id: string, dto: UpdateWaitlistStatusDto) {
+    const entry = await this.repo.findWaitlistById(id);
+    if (!entry) throw new NotFoundException(`Waitlist entry ${id} not found`);
+    return this.repo.updateWaitlistStatus(id, dto.status);
   }
 
   private async enqueueReminders(appointmentId: string, scheduledAt: Date) {

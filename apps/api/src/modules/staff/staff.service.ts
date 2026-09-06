@@ -31,6 +31,15 @@ export class StaffService {
     return this.repo.update(id, dto);
   }
 
+  /** Soft-delete (deactivate) — see StaffRepository.softDelete. Self-deactivation is blocked so
+   * an admin can't accidentally (or maliciously, alone) lock themselves out. */
+  async softDelete(id: string, requesterId: string) {
+    if (id === requesterId) throw new ForbiddenException("Não pode desativar a sua própria conta");
+    const staff = await this.repo.findById(id);
+    if (!staff) throw new NotFoundException(`Staff ${id} not found`);
+    return this.repo.softDelete(id);
+  }
+
   async changePassword(id: string, dto: ChangePasswordDto): Promise<void> {
     const staff = await this.repo.findByIdWithPassword(id);
     if (!staff) throw new NotFoundException(`Staff ${id} not found`);
@@ -57,7 +66,10 @@ export class StaffService {
 
     await this.notifications.sendInvite(dto.email, dto.fullName, token);
 
-    return invitation;
+    // token is otherwise never selectable again (INVITATION_SELECT omits it, by design — it's
+    // a bearer credential for the activation endpoint) — returned once here, only to the admin
+    // who just created it, as a copy-link fallback for when the invite email doesn't arrive.
+    return { ...invitation, token };
   }
 
   listInvitations() {
