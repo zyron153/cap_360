@@ -45,7 +45,11 @@ export const CreateCompanySchema = z.object({
   address: z.string().max(300).optional(),
 });
 
-export const UpdateCompanySchema = CreateCompanySchema.partial();
+// active is here (not in Create) so PATCH /companies/:id can reactivate a company the
+// DELETE endpoint deactivated — without it there is no path back from active:false.
+export const UpdateCompanySchema = CreateCompanySchema.partial().extend({
+  active: z.boolean().optional(),
+});
 
 export type CreateCompanyDto = z.infer<typeof CreateCompanySchema>;
 export type UpdateCompanyDto = z.infer<typeof UpdateCompanySchema>;
