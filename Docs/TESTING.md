@@ -259,6 +259,8 @@ counts below are illustrative and weren't re-verified line-by-line.
 // - 10 test patients
 // - 20 appointments across next 7 days
 // - 2 health plans (1 family, 1 corporate)
+// - Financeiro data (added later): 8 expenses, 2 manual income entries, 7 invoices spanning
+//   paid/partially_paid/issued/overdue, 2 of them linked to real completed appointments
 ```
 
 ### 8.2 Test Patient Phone Numbers

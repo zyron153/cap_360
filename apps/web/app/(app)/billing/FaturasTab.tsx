@@ -11,12 +11,17 @@ import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
 
+type InvoiceRow = Invoice & {
+  patient: { fullName: string };
+  appointment?: { id: string; scheduledAt: string; service: { name: string } } | null;
+};
+
 async function fetchInvoices(page: number, status?: string) {
   const params = new URLSearchParams({ page: String(page), limit: "20" });
   if (status) params.set("status", status);
   const res = await fetch(`/api/invoices?${params}`);
   if (!res.ok) throw new Error("Erro ao carregar faturas");
-  return res.json() as Promise<PaginatedResponse<Invoice & { patient: { fullName: string } }>>;
+  return res.json() as Promise<PaginatedResponse<InvoiceRow>>;
 }
 
 interface BillingSummary {
@@ -457,7 +462,14 @@ export function FaturasTab() {
                           <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 text-[10px] font-semibold flex items-center justify-center shrink-0">
                             {inv.patient.fullName?.[0]?.toUpperCase()}
                           </div>
-                          <span className="text-[13px] font-medium text-dim-900">{inv.patient.fullName}</span>
+                          <div>
+                            <p className="text-[13px] font-medium text-dim-900">{inv.patient.fullName}</p>
+                            {inv.appointment && (
+                              <p className="text-[11px] text-dim-400">
+                                via {inv.appointment.service.name} · {format(new Date(inv.appointment.scheduledAt), "d MMM", { locale: pt })}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">

@@ -149,6 +149,7 @@ export class BillingService {
         include: {
           patient: { select: { id: true, fullName: true } },
           efaturaSubmission: { select: { status: true, atcud: true } },
+          appointment: { select: { id: true, scheduledAt: true, service: { select: { name: true } } } },
         },
         orderBy: { createdAt: "desc" },
       }),

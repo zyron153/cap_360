@@ -418,6 +418,109 @@ async function main() {
     await prisma.appointment.create({ data: { ...appt, source: "web" } });
   }
 
+  // ─── Financeiro (expenses, income, invoices) ────────────────────────────────
+  // ponytail: group-level idempotency (count-and-skip), same convention as seedGroup() below —
+  // Expense/Income have no natural unique key to upsert against, unlike everything else here.
+  const now = new Date();
+  // n>0 = n months in the past, n<0 = |n| months in the future (for not-yet-due invoices).
+  const monthOffset = (n: number, day: number) => new Date(now.getFullYear(), now.getMonth() - n, day);
+
+  if ((await prisma.expense.count()) === 0) {
+    const expensesData = [
+      { description: "Renda do consultório — mês corrente",   category: "Renda",         amount: 45000, date: monthOffset(0, 1),  supplier: "Imobiliária Sotavento", method: "bank_transfer" as const, status: "approved" as const },
+      { description: "Renda do consultório",                  category: "Renda",         amount: 45000, date: monthOffset(1, 1),  supplier: "Imobiliária Sotavento", method: "bank_transfer" as const, status: "approved" as const },
+      { description: "Renda do consultório",                  category: "Renda",         amount: 45000, date: monthOffset(2, 1),  supplier: "Imobiliária Sotavento", method: "bank_transfer" as const, status: "approved" as const },
+      { description: "Material de escritório e consumíveis",  category: "Fornecimentos", amount: 8500,  date: monthOffset(0, 5),  supplier: "Papelaria Central",      method: "cash" as const,          status: "approved" as const },
+      { description: "Reagentes para laboratório",            category: "Fornecimentos", amount: 22000, date: monthOffset(1, 10), supplier: "MedSupply Cabo Verde",   method: "bank_transfer" as const, status: "approved" as const },
+      { description: "Eletricidade — Electra",                category: "Utilidades",    amount: 12500, date: monthOffset(0, 2),  supplier: "Electra",                method: "bank_transfer" as const, status: "approved" as const },
+      { description: "Manutenção do ecógrafo",                category: "Manutenção",    amount: 15000, date: monthOffset(0, 12), supplier: "TecMed Praia",           method: "bank_transfer" as const, status: "pending"  as const },
+      { description: "Formação em atendimento ao cliente",    category: "Formação",      amount: 6000,  date: monthOffset(1, 20), method: "cash" as const,            status: "approved" as const },
+    ];
+    for (const e of expensesData) {
+      await prisma.expense.create({
+        data: {
+          ...e,
+          requestedById: recepAna.id,
+          ...(e.status === "approved" ? { approvedById: adminUser.id, approvedAt: e.date } : {}),
+        },
+      });
+    }
+  }
+
+  if ((await prisma.income.count()) === 0) {
+    await prisma.income.createMany({
+      data: [
+        { description: "Subsídio Câmara Municipal — apoio à saúde", category: "Subsídios",  amount: 30000, date: monthOffset(1, 15) },
+        { description: "Reembolso seguradora — sinistro anterior",  category: "Reembolsos", amount: 9500,  date: monthOffset(0, 3)  },
+      ],
+    });
+  }
+
+  // A minimal health-plan enrollment so seeded invoices have something real to link against for
+  // the Financeiro Overview's payer-type breakdown — Maria Tavares (p2) on IMPAR's individual plan.
+  const planIndividual = await prisma.healthPlanProduct.findUnique({ where: { code: "IMPAR-IND-001" } });
+  const seedHealthPlan = planIndividual
+    ? await prisma.healthPlan.upsert({
+        where: { planNumber: "IMPAR-IND-SEED-0001" },
+        update: {},
+        create: {
+          productId: planIndividual.id,
+          holderPatientId: p2.id,
+          planNumber: "IMPAR-IND-SEED-0001",
+          startDate: monthOffset(6, 1),
+          active: true,
+        },
+      })
+    : null;
+
+  // The two "completed" appointments above are the natural candidates for a real appointmentId
+  // link on an invoice — in the running app this is exactly when an invoice auto-generates, but
+  // that side effect lives in AppointmentsService.updateStatus(), not triggered by seeding rows
+  // directly via Prisma, so it's created here explicitly instead.
+  const completedAppt1 = await prisma.appointment.findFirst({ where: { patientId: p4.id, status: "completed" } });
+  const completedAppt2 = await prisma.appointment.findFirst({ where: { patientId: p5.id, status: "completed" } });
+
+  if ((await prisma.invoice.count()) === 0) {
+    const dentService  = services.find((s) => s.code === "DENT-CONS")!;
+    const ultraService = services.find((s) => s.code === "EXAM-ULTRA")!;
+
+    const invoicesData: {
+      num: string; patientId: string; appointmentId?: string; healthPlanId?: string;
+      serviceId: string; serviceName: string; unitPrice: number;
+      status: "paid" | "partially_paid" | "issued" | "overdue";
+      issuedAt: Date; dueDate: Date; paid: number;
+    }[] = [
+      { num: "0001", patientId: p4.id, appointmentId: completedAppt1?.id,       serviceId: consGeral.id,     serviceName: "Consulta Geral",         unitPrice: 1500, status: "paid",           issuedAt: monthOffset(0, 3),  dueDate: monthOffset(0, 10),  paid: 1500 },
+      { num: "0002", patientId: p5.id, appointmentId: completedAppt2?.id,       serviceId: consEsp.id,       serviceName: "Consulta Especialidade", unitPrice: 2500, status: "partially_paid", issuedAt: monthOffset(0, 4),  dueDate: monthOffset(0, 18),  paid: 1000 },
+      { num: "0003", patientId: p2.id, healthPlanId: seedHealthPlan?.id,        serviceId: consGeral.id,     serviceName: "Consulta Geral",         unitPrice: 1500, status: "paid",           issuedAt: monthOffset(1, 5),  dueDate: monthOffset(1, 15),  paid: 1500 },
+      { num: "0004", patientId: p1.id,                                          serviceId: examLab.id,       serviceName: "Exame Laboratorial",     unitPrice: 800,  status: "paid",           issuedAt: monthOffset(1, 8),  dueDate: monthOffset(1, 18),  paid: 800  },
+      { num: "0005", patientId: p3.id,                                          serviceId: dentService.id,   serviceName: "Consulta Dentária",      unitPrice: 2000, status: "issued",         issuedAt: monthOffset(0, 1),  dueDate: monthOffset(-1, 1),  paid: 0    },
+      { num: "0006", patientId: p2.id, healthPlanId: seedHealthPlan?.id,        serviceId: ultraService.id,  serviceName: "Ecografia",              unitPrice: 3500, status: "overdue",        issuedAt: monthOffset(2, 1),  dueDate: monthOffset(1, 15),  paid: 0    },
+      { num: "0007", patientId: p5.id,                                          serviceId: consGeral.id,     serviceName: "Consulta Geral",         unitPrice: 1500, status: "overdue",        issuedAt: monthOffset(2, 10), dueDate: monthOffset(1, 25),  paid: 0    },
+    ];
+
+    for (const inv of invoicesData) {
+      await prisma.invoice.create({
+        data: {
+          invoiceNumber: `INV-${now.getFullYear()}-${inv.num}`,
+          patientId: inv.patientId,
+          ...(inv.appointmentId ? { appointmentId: inv.appointmentId } : {}),
+          ...(inv.healthPlanId ? { healthPlanId: inv.healthPlanId } : {}),
+          status: inv.status,
+          subtotal: inv.unitPrice,
+          total: inv.unitPrice,
+          amountPaid: inv.paid,
+          issuedAt: inv.issuedAt,
+          dueDate: inv.dueDate,
+          items: { create: [{ serviceId: inv.serviceId, description: inv.serviceName, quantity: 1, unitPrice: inv.unitPrice, total: inv.unitPrice }] },
+          ...(inv.paid > 0
+            ? { payments: { create: [{ amount: inv.paid, method: "cash" as const, paidAt: inv.issuedAt }] } }
+            : {}),
+        },
+      });
+    }
+  }
+
   // ─── Cabo Verde Public Holidays ────────────────────────────────────────────
   const year = new Date().getFullYear();
   const holidays = [
@@ -509,7 +612,7 @@ async function main() {
   const totalParams = paramCounts.reduce((a, b) => a + b, 0);
 
   console.warn(
-    `Seeded 3 companies, 8 health plan products, ${services.length} services, ${rooms.length} rooms, 7 staff, 6 patients, ${appointmentsData.length} appointments, ${holidays.length} public holidays, ${totalParams} parametrizações.`
+    `Seeded 3 companies, 8 health plan products, ${services.length} services, ${rooms.length} rooms, 7 staff, 6 patients, ${appointmentsData.length} appointments, ${holidays.length} public holidays, ${totalParams} parametrizações, Financeiro data (expenses/income/invoices).`
   );
   console.warn(`All staff accounts log in with password: ${SEED_PASSWORD}`);
   console.warn(`Admin: capjacobvicente@gmail.com`);

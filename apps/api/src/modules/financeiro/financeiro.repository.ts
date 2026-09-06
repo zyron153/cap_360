@@ -84,7 +84,9 @@ export class FinanceiroRepository {
   // ── Receivables — a current snapshot, not date-range scoped (see FinanceiroSummary) ──
   outstandingInvoices() {
     return this.prisma.invoice.findMany({
-      where: { status: { in: ["issued", "partially_paid"] } },
+      // "overdue" is a real, distinct status the scheduled job sets once dueDate passes (see
+      // billing.service.ts) — it must count as outstanding too, not just issued/partially_paid.
+      where: { status: { in: ["issued", "partially_paid", "overdue"] } },
       select: { total: true, amountPaid: true, dueDate: true },
     });
   }

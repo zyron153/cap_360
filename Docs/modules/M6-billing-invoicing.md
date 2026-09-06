@@ -49,6 +49,10 @@ Invoice includes:
 - 🟡 Patient name — yes; **NIF is not stored on the invoice itself**, only linked via the patient
   record (so an erased/soft-deleted patient's invoice shows "Paciente removido", no NIF at all)
 - ✅ Line items: service, quantity, unit price, total
+- ✅ The Faturas list shows which consultation an invoice came from (when it has one) — service
+  name + date, under the patient's name — `Invoice.appointmentId` already existed, `GET /invoices`
+  just never included the relation until now; a manually-created invoice with no appointment simply
+  shows nothing extra
 - ❌ Health plan discount line — never computed (see §2.1)
 - ✅ Subtotal, **Total in CVE**; ❌ no separate discount field
 - ✅ Clinic details/tax ID — pulled from Configurações → Clínica settings, with placeholder
@@ -84,10 +88,14 @@ no staff/user field.
 ### 2.5 Outstanding Balances
 
 - ✅ **Contas a Receber**, on the Financeiro Overview tab: total outstanding (sum of `total −
-  amountPaid` across every `issued`/`partially_paid` invoice), total overdue, and a count of
-  overdue invoices — `FinanceiroService.getSummary()`'s `receivables` field, computed directly from
-  `dueDate` rather than trusting the scheduled job below to have run. It's a live snapshot ("owed
-  right now"), deliberately not scoped to whatever date range the rest of the Overview is showing.
+  amountPaid` across every `issued`/`partially_paid`/`overdue` invoice), total overdue, and a count
+  of overdue invoices — `FinanceiroService.getSummary()`'s `receivables` field, computed directly
+  from `dueDate` rather than trusting the scheduled job below to have run. It's a live snapshot
+  ("owed right now"), deliberately not scoped to whatever date range the rest of the Overview is
+  showing. **Found and fixed while seeding real demo data (empty tables never exercised this
+  path):** the underlying query originally checked only `issued`/`partially_paid`, silently
+  excluding any invoice the scheduled job below had already flipped to `overdue` — exactly the
+  invoices this card most needs to surface.
 - ❌ Still no dedicated invoice-level "outstanding balances" list/drill-down — the Overview card
   above is a clinic-wide total, not a per-invoice or per-patient breakdown; `GET
   /invoices?status=...` can be filtered manually for that, but there's no purpose-built view
@@ -179,5 +187,6 @@ design.
 
 ---
 
-*Module M6 · v1.2 · updated 2026-09-05 — Financeiro Overview niche additions (receivables, revenue
-by payer type/service, no-show impact) and a date-range selector*
+*Module M6 · v1.3 · updated 2026-09-06 — seeded real Financeiro demo data (which surfaced and fixed
+a receivables bug: `overdue` invoices were invisible to the Contas a Receber card), plus the Faturas
+list now shows an invoice's linked consultation*
