@@ -156,7 +156,10 @@ export class FinanceiroService {
     const fromDate = from ? new Date(from) : new Date(new Date().getFullYear(), 0, 1);
     const toDate = to ? new Date(`${to}T23:59:59Z`) : new Date();
 
-    const [paymentsSum, incomeSum, expensesSum, payments, income, expenses, expensesByCategory] = await Promise.all([
+    const [
+      paymentsSum, incomeSum, expensesSum, payments, income, expenses, expensesByCategory,
+      outstandingInvoices, paymentsByPlan, paymentsPrivate, invoiceItems, noShows,
+    ] = await Promise.all([
       this.repo.sumPayments(fromDate, toDate),
       this.repo.sumIncome({ date: { gte: fromDate, lte: toDate } }),
       this.repo.sumApprovedExpenses({ date: { gte: fromDate, lte: toDate } }),
@@ -164,6 +167,11 @@ export class FinanceiroService {
       this.repo.incomeInRange(fromDate, toDate),
       this.repo.approvedExpensesInRange(fromDate, toDate),
       this.repo.approvedExpensesByCategory(fromDate, toDate),
+      this.repo.outstandingInvoices(),
+      this.repo.sumPaymentsByPlan(fromDate, toDate),
+      this.repo.sumPaymentsPrivate(fromDate, toDate),
+      this.repo.invoiceItemsInRange(fromDate, toDate),
+      this.repo.noShowAppointments(fromDate, toDate),
     ]);
 
     const totalEntradas = Number(paymentsSum._sum.amount ?? 0) + Number(incomeSum._sum.amount ?? 0);
@@ -184,6 +192,38 @@ export class FinanceiroService {
       .map((c) => ({ category: c.category, total: Number(c._sum.amount ?? 0) }))
       .sort((a, b) => b.total - a.total);
 
+    const now = new Date();
+    const receivables = outstandingInvoices.reduce(
+      (acc, inv) => {
+        const remaining = Number(inv.total) - Number(inv.amountPaid);
+        acc.totalOutstanding += remaining;
+        if (inv.dueDate && inv.dueDate < now) {
+          acc.totalOverdue += remaining;
+          acc.overdueCount += 1;
+        }
+        return acc;
+      },
+      { totalOutstanding: 0, totalOverdue: 0, overdueCount: 0 }
+    );
+
+    const byServiceMap = new Map<string, number>();
+    for (const item of invoiceItems) {
+      const key = item.service?.name ?? item.description;
+      byServiceMap.set(key, (byServiceMap.get(key) ?? 0) + Number(item.total));
+    }
+    const byService = Array.from(byServiceMap.entries())
+      .map(([service, total]) => ({ service, total }))
+      .sort((a, b) => b.total - a.total);
+
+    const noShowImpact = noShows.reduce(
+      (acc, appt) => {
+        acc.count += 1;
+        acc.lostRevenue += Number(appt.service?.price ?? 0);
+        return acc;
+      },
+      { count: 0, lostRevenue: 0 }
+    );
+
     return {
       totalEntradas,
       totalDespesas,
@@ -192,6 +232,13 @@ export class FinanceiroService {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([month, v]) => ({ month, ...v })),
       byCategory,
+      receivables,
+      byPayerType: {
+        privado: Number(paymentsPrivate._sum.amount ?? 0),
+        planoSaude: Number(paymentsByPlan._sum.amount ?? 0),
+      },
+      byService,
+      noShowImpact,
     };
   }
 }

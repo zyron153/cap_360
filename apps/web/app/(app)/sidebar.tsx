@@ -61,7 +61,7 @@ export function Sidebar() {
   const [previewRole, setPreviewRole] = useState("");
   const { data: clinicName } = useQuery({
     queryKey: ["settings-clinic-name"],
-    queryFn: () => fetch("/api/settings").then(r => r.json()).then((all: Record<string, { name?: string }>) => all.clinic?.name),
+    queryFn: () => fetch("/api/settings").then(r => r.json()).then((all: Record<string, { name?: string }>) => all.clinic?.name ?? null),
     staleTime: 120_000,
   });
 

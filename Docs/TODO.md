@@ -109,12 +109,14 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] E-Fatura (Cabo Verde tax authority) submission via BullMQ queue + retry, with its own processor test suite
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
+- [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables
 - [ ] Server-side price floor (a hard minimum below catalogue price, independent of the admin-override gate)
-- [ ] Invoice-to-health-plan linkage (`health_plan_id` on invoices was never implemented)
+- [x] ~~Invoice-to-health-plan linkage (`health_plan_id` on invoices was never implemented)~~ — corrected: `Invoice.healthPlanId` exists and is now actually read (the new payer-type breakdown above), this line was stale
 
 **Frontend**
 - [x] Invoice list with status filters + KPI cards, invoice detail with payment recording
 - [x] Financeiro tabs (Overview / Entradas / Despesas / Faturas)
+- [x] Financeiro Overview date-range selector (this month / last 3 months / this year / custom) — previously hardcoded to Jan 1 of the current year with no way to change it
 - [ ] New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form
 
 ---
@@ -204,8 +206,9 @@ tracking, no assignment logic.
 ### M10 — Analytics & Reporting — 🎭 not started
 UI mockup only (`analytics/page.tsx`, 8 hardcoded const arrays). No `apps/api/src/modules/analytics`
 directory, no materialised views. The Financeiro Overview tab is the one piece of real, live-data
-analytics anywhere in the app — worth treating as the template for what this module should
-actually look like.
+analytics anywhere in the app — now covering receivables, revenue by payer type, revenue by
+service, and no-show impact on top of the original expenses/income summary — worth treating as
+the template for what this module should actually look like, more so than when this was written.
 
 ### Self-Service Portals — not started
 No patient-facing login path exists at all — the auth system built 2026-08-31 (replacing
@@ -241,7 +244,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 251 tests total
+- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 344 tests total
 - [ ] Integration tests against a real test DB
 - [ ] E2E tests (Playwright) — `apps/web/e2e/booking-flow.spec.ts` exists as a starting point, not a full suite
 - [ ] Performance/load tests (k6)

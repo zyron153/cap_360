@@ -12,10 +12,13 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 > **Implementation status:** invoice creation (auto-draft at check-in + manual), payments
 > (idempotent, transactional, overpayment-guarded), cancellation, PDF receipts, and E-Fatura tax
 > submission are built and tested. ❌ Nothing computes health-plan co-pay/discounts or tracks plan
-> utilisation — `health_plan` is only a `PaymentMethod` enum value. ❌ No automatic WhatsApp/email
-> receipt delivery — a receipt is only ever generated on request via `GET /invoices/:id/receipt`.
-> ❌ Cash-summary/revenue/receivables reporting doesn't exist. Not covered by the original design
-> at all: a separate **Financeiro** module (`/financeiro/*`) for clinic expenses, income entries,
+> utilisation — `health_plan` is only a `PaymentMethod` enum value (though `Invoice.healthPlanId`
+> itself is real and now actually read, by the payer-type breakdown in §2.6/§3). ❌ No automatic
+> WhatsApp/email receipt delivery — a receipt is only ever generated on request via
+> `GET /invoices/:id/receipt`. ✅ Receivables (outstanding/overdue invoices) and a handful of
+> revenue breakdowns exist now (§2.5/§3) — real numbers, not a mockup, but scoped to what's
+> described there, not a general-purpose reporting engine. Not covered by the original design at
+> all: a separate **Financeiro** module (`/financeiro/*`) for clinic expenses, income entries,
 > and a date-ranged summary — see §2.6.
 
 ---
@@ -80,8 +83,14 @@ no staff/user field.
 
 ### 2.5 Outstanding Balances
 
-- ❌ No dedicated "outstanding balances" dashboard screen or endpoint — `GET /invoices?status=...`
-  can be filtered manually, but there's no purpose-built view
+- ✅ **Contas a Receber**, on the Financeiro Overview tab: total outstanding (sum of `total −
+  amountPaid` across every `issued`/`partially_paid` invoice), total overdue, and a count of
+  overdue invoices — `FinanceiroService.getSummary()`'s `receivables` field, computed directly from
+  `dueDate` rather than trusting the scheduled job below to have run. It's a live snapshot ("owed
+  right now"), deliberately not scoped to whatever date range the rest of the Overview is showing.
+- ❌ Still no dedicated invoice-level "outstanding balances" list/drill-down — the Overview card
+  above is a clinic-wide total, not a per-invoice or per-patient breakdown; `GET
+  /invoices?status=...` can be filtered manually for that, but there's no purpose-built view
 - ✅ Overdue marking is real: a scheduled job runs `UPDATE invoices SET status='overdue' WHERE
   status IN ('issued','partially_paid') AND dueDate < now()`, independent of whether email is
   configured; the existing overdue-invoices digest email then reads from that corrected status
@@ -96,17 +105,32 @@ rather than patient invoices:
   delete (admin), and an admin-only approve/reject decision flow (`PATCH despesas/:id/decision`)
 - ✅ **Entradas** (income entries): create/list/update/delete (delete is admin-only)
 - ✅ **Resumo** (`GET /financeiro/summary?from&to`): date-ranged summary combining expenses and
-  income — the closest thing this codebase has to the "reporting" described in §3 below
+  income, plus (added later, see §3) receivables, revenue by payer type, revenue by service, and
+  no-show financial impact — a date-range selector on the frontend (this month / last 3 months /
+  this year / custom) drives the `from`/`to` params, which the endpoint already accepted before
+  anything on screen actually sent them
 
 ---
 
 ## 3. Reporting
 
-❌ None of this exists: no daily cash summary, no monthly revenue breakdown by service/doctor/plan,
-no outstanding-receivables report, no Excel/PDF export. **M10 Analytics doesn't exist at all**
-(see `Docs/modules/M10-analytics-reporting.md`), so the planned integration point is moot. The
-only real numeric rollup in this area is Financeiro's `GET /financeiro/summary` (§2.6), which
-covers expenses/income, not invoice revenue.
+🟡 More exists than the "nothing" this section used to describe, but it's still not a general
+reporting engine — everything below lives on the Financeiro Overview tab specifically, computed by
+`FinanceiroService.getSummary()` from data that was already there (`Invoice`, `InvoiceItem`,
+`Appointment`), no new tables:
+- ✅ Receivables — outstanding/overdue invoice totals (§2.5)
+- ✅ Revenue by payer type — payment revenue split between private-pay and health-plan/company
+  invoices (`Invoice.healthPlanId` set vs. null); manual `Income` entries have no payer, so they're
+  outside this specific breakdown
+- ✅ Revenue by service — billed (not necessarily collected) totals per `InvoiceItem.serviceId`,
+  falling back to the line item's free-text description when it has none
+- ✅ No-show financial impact — count of `no_show` appointments in range, plus the hypothetical
+  revenue lost (their service's price, never actually billed)
+- ❌ No revenue-by-doctor breakdown, no daily (as opposed to monthly-chart/period-snapshot)
+  granularity, no Excel/PDF export
+- ❌ **M10 Analytics still doesn't exist as its own module** (see
+  `Docs/modules/M10-analytics-reporting.md`) — everything above is Financeiro-specific, not a
+  general-purpose reporting surface other modules can plug into
 
 ---
 
@@ -155,4 +179,5 @@ design.
 
 ---
 
-*Module M6 · v1.1 · updated 2026-08-30 against the current implementation*
+*Module M6 · v1.2 · updated 2026-09-05 — Financeiro Overview niche additions (receivables, revenue
+by payer type/service, no-show impact) and a date-range selector*

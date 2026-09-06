@@ -312,7 +312,10 @@ POST   /financeiro/entradas                    body: description,category,amount
 PATCH  /financeiro/entradas/:id
 DELETE /financeiro/entradas/:id
 
-GET    /financeiro/summary                     → { totalEntradas, totalDespesas, balance, monthly[], byCategory[] }
+GET    /financeiro/summary?from&to              → { totalEntradas, totalDespesas, balance, monthly[], byCategory[],
+                                                     receivables, byPayerType, byService[], noShowImpact }
+                                                 // receivables is a current snapshot (unpaid invoices right now),
+                                                 // not scoped to from/to — the rest of the shape is period-scoped
 ```
 
 ---

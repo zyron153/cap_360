@@ -11,9 +11,11 @@ Provides the clinic's first business intelligence layer. Replaces zero visibilit
 
 > **Implementation status: 🎭 UI mockup only — no backend at all.** No `/analytics/*` routes, no
 > materialised views, no dashboards, no exports. The one place in the running app with real
-> aggregate data is Financeiro's `GET /financeiro/summary` (expenses + income, date-ranged) — see
-> `M6-billing-invoicing.md` §2.6 — which covers none of the KPIs described below. Nothing in this
-> document is implemented.
+> aggregate data is Financeiro's `GET /financeiro/summary` (date-ranged expenses/income, plus
+> receivables, revenue by payer type, revenue by service, and no-show financial impact — see
+> `M6-billing-invoicing.md` §2.6/§3) — which still covers none of the KPIs described below (nothing
+> here reports on appointments, staff, or patient-CRM metrics). Nothing in this document is
+> implemented.
 
 ---
 

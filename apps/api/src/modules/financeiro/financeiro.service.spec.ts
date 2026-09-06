@@ -26,6 +26,11 @@ const repo = {
   incomeInRange: jest.fn(),
   sumPayments: jest.fn(),
   paymentsInRange: jest.fn(),
+  outstandingInvoices: jest.fn(),
+  sumPaymentsByPlan: jest.fn(),
+  sumPaymentsPrivate: jest.fn(),
+  invoiceItemsInRange: jest.fn(),
+  noShowAppointments: jest.fn(),
 };
 const r2 = { upload: jest.fn(), signedUrl: jest.fn() };
 const staff = { findById: jest.fn() };
@@ -174,6 +179,11 @@ describe("FinanceiroService", () => {
         { category: "Fornecimentos", _sum: { amount: "1000" } },
         { category: "Renda", _sum: { amount: "500" } },
       ]);
+      repo.outstandingInvoices.mockResolvedValue([]);
+      repo.sumPaymentsByPlan.mockResolvedValue({ _sum: { amount: null } });
+      repo.sumPaymentsPrivate.mockResolvedValue({ _sum: { amount: null } });
+      repo.invoiceItemsInRange.mockResolvedValue([]);
+      repo.noShowAppointments.mockResolvedValue([]);
     });
 
     it("combines payments and manual income into totalEntradas", async () => {
@@ -202,6 +212,87 @@ describe("FinanceiroService", () => {
         { category: "Fornecimentos", total: 1000 },
         { category: "Renda", total: 500 },
       ]);
+    });
+  });
+
+  describe("getSummary — niche additions", () => {
+    beforeEach(() => {
+      repo.sumPayments.mockResolvedValue({ _sum: { amount: null } });
+      repo.sumIncome.mockResolvedValue({ _sum: { amount: null } });
+      repo.sumApprovedExpenses.mockResolvedValue({ _sum: { amount: null } });
+      repo.paymentsInRange.mockResolvedValue([]);
+      repo.incomeInRange.mockResolvedValue([]);
+      repo.approvedExpensesInRange.mockResolvedValue([]);
+      repo.approvedExpensesByCategory.mockResolvedValue([]);
+      repo.outstandingInvoices.mockResolvedValue([]);
+      repo.sumPaymentsByPlan.mockResolvedValue({ _sum: { amount: null } });
+      repo.sumPaymentsPrivate.mockResolvedValue({ _sum: { amount: null } });
+      repo.invoiceItemsInRange.mockResolvedValue([]);
+      repo.noShowAppointments.mockResolvedValue([]);
+    });
+
+    it("sums outstanding invoices as total minus amountPaid, regardless of due date", async () => {
+      repo.outstandingInvoices.mockResolvedValue([
+        { total: "2000", amountPaid: "500", dueDate: new Date("2099-01-01") },
+        { total: "1000", amountPaid: "0", dueDate: new Date("2020-01-01") },
+      ]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.receivables.totalOutstanding).toBe(2500);
+    });
+
+    it("splits overdue invoices (past due date) out of the outstanding total", async () => {
+      repo.outstandingInvoices.mockResolvedValue([
+        { total: "2000", amountPaid: "0", dueDate: new Date("2099-01-01") },
+        { total: "1000", amountPaid: "0", dueDate: new Date("2020-01-01") },
+      ]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.receivables.totalOverdue).toBe(1000);
+      expect(result.receivables.overdueCount).toBe(1);
+    });
+
+    it("treats an invoice with no due date as not overdue", async () => {
+      repo.outstandingInvoices.mockResolvedValue([{ total: "500", amountPaid: "0", dueDate: null }]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.receivables.totalOverdue).toBe(0);
+      expect(result.receivables.totalOutstanding).toBe(500);
+    });
+
+    it("splits payment revenue by payer type", async () => {
+      repo.sumPaymentsByPlan.mockResolvedValue({ _sum: { amount: "4000" } });
+      repo.sumPaymentsPrivate.mockResolvedValue({ _sum: { amount: "2000" } });
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.byPayerType).toEqual({ privado: 2000, planoSaude: 4000 });
+    });
+
+    it("groups invoice line items into revenue by service, sorted descending", async () => {
+      repo.invoiceItemsInRange.mockResolvedValue([
+        { total: "1500", description: "Consulta Geral", service: { name: "Consulta Geral" } },
+        { total: "500", description: "Consulta Geral", service: { name: "Consulta Geral" } },
+        { total: "3000", description: "Ecografia", service: { name: "Ecografia" } },
+      ]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.byService).toEqual([
+        { service: "Ecografia", total: 3000 },
+        { service: "Consulta Geral", total: 2000 },
+      ]);
+    });
+
+    it("falls back to the line item's free-text description when it has no linked service", async () => {
+      repo.invoiceItemsInRange.mockResolvedValue([{ total: "800", description: "Ajuste manual", service: null }]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.byService).toEqual([{ service: "Ajuste manual", total: 800 }]);
+    });
+
+    it("sums lost revenue and counts no-show appointments", async () => {
+      repo.noShowAppointments.mockResolvedValue([{ service: { price: "1500" } }, { service: { price: "2500" } }]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.noShowImpact).toEqual({ count: 2, lostRevenue: 4000 });
+    });
+
+    it("treats a no-show with no linked service as zero lost revenue, still counted", async () => {
+      repo.noShowAppointments.mockResolvedValue([{ service: null }]);
+      const result = await service.getSummary("2026-08-01", "2026-08-31");
+      expect(result.noShowImpact).toEqual({ count: 1, lostRevenue: 0 });
     });
   });
 });

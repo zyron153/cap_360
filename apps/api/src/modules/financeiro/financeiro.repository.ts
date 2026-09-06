@@ -80,4 +80,42 @@ export class FinanceiroRepository {
   paymentsInRange(from: Date, to: Date) {
     return this.prisma.payment.findMany({ where: { paidAt: { gte: from, lte: to } }, select: { amount: true, paidAt: true } });
   }
+
+  // ── Receivables — a current snapshot, not date-range scoped (see FinanceiroSummary) ──
+  outstandingInvoices() {
+    return this.prisma.invoice.findMany({
+      where: { status: { in: ["issued", "partially_paid"] } },
+      select: { total: true, amountPaid: true, dueDate: true },
+    });
+  }
+
+  // ── Revenue by payer type ────────────────────────────────
+  sumPaymentsByPlan(from: Date, to: Date) {
+    return this.prisma.payment.aggregate({
+      where: { paidAt: { gte: from, lte: to }, invoice: { healthPlanId: { not: null } } },
+      _sum: { amount: true },
+    });
+  }
+  sumPaymentsPrivate(from: Date, to: Date) {
+    return this.prisma.payment.aggregate({
+      where: { paidAt: { gte: from, lte: to }, invoice: { healthPlanId: null } },
+      _sum: { amount: true },
+    });
+  }
+
+  // ── Revenue by service (billed, not collected — see FinanceiroSummary) ──
+  invoiceItemsInRange(from: Date, to: Date) {
+    return this.prisma.invoiceItem.findMany({
+      where: { invoice: { issuedAt: { gte: from, lte: to }, status: { notIn: ["draft", "cancelled"] } } },
+      select: { total: true, description: true, service: { select: { name: true } } },
+    });
+  }
+
+  // ── No-show financial impact ──────────────────────────────
+  noShowAppointments(from: Date, to: Date) {
+    return this.prisma.appointment.findMany({
+      where: { status: "no_show", scheduledAt: { gte: from, lte: to }, deletedAt: null },
+      select: { service: { select: { price: true } } },
+    });
+  }
 }

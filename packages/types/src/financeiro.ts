@@ -91,4 +91,13 @@ export interface FinanceiroSummary {
   balance: number;
   monthly: { month: string; entradas: number; despesas: number }[];
   byCategory: { category: string; total: number }[];
+  /** A current snapshot (unpaid invoices right now), not scoped to the summary's from/to range —
+   * accounts receivable is about what's owed today, not what happened to fall in a report window. */
+  receivables: { totalOutstanding: number; totalOverdue: number; overdueCount: number };
+  /** Payment revenue split by whether the invoice was billed against a health plan/company or paid
+   * privately — manual Income entries have no payer, so they're outside this breakdown entirely. */
+  byPayerType: { privado: number; planoSaude: number };
+  byService: { service: string; total: number }[];
+  /** Hypothetical revenue lost to no-show appointments (their service's price, never billed). */
+  noShowImpact: { count: number; lostRevenue: number };
 }
