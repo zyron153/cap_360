@@ -158,8 +158,12 @@ piece of groundwork already laid — ready to be pointed at a real send service.
 
 **Frontend**
 - [x] Browse products, subscribe/change/remove plan from the patient profile
+- [x] Company management (create/edit/deactivate/reactivate) — **Gestão de Acesso → Organização**,
+  the first frontend for the `Company` entity/`/companies` API, which existed backend-only until now.
+  Not a corporate HR portal (see below) — this is admin-side company-record management only.
 - [ ] Dedicated health plans list/detail pages
-- [ ] Corporate HR self-service portal (Phase 4)
+- [ ] Corporate HR self-service portal (Phase 4) — still nothing lets a `corporate_hr` account log in
+  and self-serve; Organização doesn't change this, it's an admin tool
 
 ~~Known bug: `planNumber` is client-computed (count+1), not a DB sequence — a race between two
 concurrent "add plan" submissions can collide on the unique constraint and surface as a raw `500`.~~
@@ -199,6 +203,21 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   endpoint to actually set it. `SessionAuthGuard` now also rejects a deactivated staff member's still-live
   session on their next request; login already rejected them for free via the existing `deletedAt: null` filter.
 - [x] ~~Leave request submission/approval endpoints (see M1 note — schema and availability-logic support exist, no way to create one via the API)~~ — corrected: same duplicate/contradictory line as M1's own corrected copy above; `POST /staff/me/leave-requests` etc. all exist
+
+**Frontend**
+- [x] Staff identity lifecycle (invite/edit/deactivate) consolidated into **Gestão de Acesso →
+  Utilizadores** as the one canonical place — the Staff page's own "Novo Colaborador"/"Editar"
+  actions and Settings' separate "Utilizadores" tab (a near-duplicate, independently-built) are
+  both removed. Staff page (`Equipa & Turnos`) is now a read-only roster of the same data, plus
+  the availability-blocking calendar, which stayed since it's a scheduling concern, not an identity
+  one. `Gestão de Acesso` (sidebar) is now the single 3-level surface — **Organização** (Company
+  CRUD, new — the `Company` entity and its `/companies` API already existed but had no frontend at
+  all), **Perfis** (the existing role-permission matrix, simplified to the 5 real `StaffRole` values
+  — dropped the old "create an arbitrary custom profile" flow, which produced profiles that could
+  never actually be assigned to anyone since `Staff.role` is a fixed Prisma enum), and
+  **Utilizadores** (the consolidated lifecycle above, plus pending-invitation visibility/cancel).
+  Settings' own duplicate "Gestão de Acesso" tab (`components/settings/AccessTab.tsx`, a
+  byte-for-byte copy of the same Perfis logic) is deleted outright.
 - [ ] Shift-planner calendar UI (drag-to-assign)
 
 ### M9 — Home Visit Manager — 🎭 not started

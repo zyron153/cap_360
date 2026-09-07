@@ -3,15 +3,13 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Building2, Bell, Users, Plug, Shield, ShieldCheck,
+  Building2, Bell, Plug, Shield,
   AlertCircle, Clock, Phone, Mail, Globe,
-  Key, Lock, Eye, EyeOff, Plus, ExternalLink, Receipt,
+  Key, Lock, Eye, EyeOff, ExternalLink, Receipt,
 } from "lucide-react";
-import type { StaffInvitationEntry } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
 import { CARD, inputCls, Field } from "../../../components/settings/shared";
-import { AccessTab } from "../../../components/settings/AccessTab";
 
 /* ── Types ───────────────────────────────────────────────── */
 
@@ -23,12 +21,6 @@ type ClinicSettings = {
 };
 
 type NotifSettings = Record<string, boolean>;
-
-type ApiStaff = {
-  id: string; fullName: string; email: string; role: string;
-  phone: string | null; specialtyCode: string | null;
-  availability: { dayOfWeek: number; startTime: string; endTime: string }[];
-};
 
 /* ── Defaults (used when DB has no saved settings yet) ───── */
 
@@ -241,408 +233,6 @@ function NotificationsTab({ initial }: { initial: NotifSettings }) {
       ))}
       <SaveButton saving={mutation.isPending} onClick={() => mutation.mutate()} />
     </div>
-  );
-}
-
-/* ── Users Tab ───────────────────────────────────────────── */
-
-const ROLE_LABEL: Record<string, string> = {
-  doctor: "Médico/a", nurse: "Enfermeiro/a", receptionist: "Recepcionista",
-  lab_tech: "Técnico/a Lab.", admin: "Administrador", corporate_hr: "RH",
-};
-const ROLE_COLOR: Record<string, string> = {
-  doctor: "bg-brand-100 text-brand-800", nurse: "bg-emerald-100 text-emerald-800",
-  receptionist: "bg-amber-100 text-amber-800", lab_tech: "bg-rose-100 text-rose-800",
-  admin: "bg-violet-100 text-violet-800", corporate_hr: "bg-violet-100 text-violet-800",
-};
-
-const DAYS = [
-  { dow: 1, label: "Seg" }, { dow: 2, label: "Ter" }, { dow: 3, label: "Qua" },
-  { dow: 4, label: "Qui" }, { dow: 5, label: "Sex" }, { dow: 6, label: "Sáb" }, { dow: 0, label: "Dom" },
-];
-
-const ROLE_OPTIONS = [
-  { value: "doctor",       label: "Médico/a"        },
-  { value: "nurse",        label: "Enfermeiro/a"     },
-  { value: "receptionist", label: "Recepcionista"    },
-  { value: "lab_tech",     label: "Técnico/a Lab."   },
-  { value: "admin",        label: "Administrador/a"  },
-] as const;
-
-type NewUserForm = {
-  fullName: string; email: string; role: string;
-  phone: string; specialtyCode: string;
-  days: number[]; shiftStart: string; shiftEnd: string;
-};
-
-const BLANK_USER: NewUserForm = {
-  fullName: "", email: "", role: "receptionist",
-  phone: "", specialtyCode: "",
-  days: [1, 2, 3, 4, 5], shiftStart: "08:00", shiftEnd: "17:00",
-};
-
-function useProfileOptions() {
-  return useQuery<{ id: number; valor: string; codigo: string | null }[]>({
-    queryKey: ["parametrizacao", "PROFILE_SETTINGS"],
-    queryFn: () => fetch("/api/parametrizacao/PROFILE_SETTINGS").then(r => r.json()),
-    staleTime: 120_000,
-  });
-}
-
-function UserFormFields({
-  form, errs, profileOptions,
-  set, toggleDay,
-}: {
-  form: NewUserForm;
-  errs: Record<string, string>;
-  profileOptions: { id: number | string; valor: string; codigo: string | null }[];
-  set: <K extends keyof NewUserForm>(k: K, v: NewUserForm[K]) => void;
-  toggleDay: (dow: number) => void;
-}) {
-  const needsSpecialty = form.role === "doctor" || form.role === "nurse";
-  const opts = profileOptions.length > 0
-    ? profileOptions
-    : ROLE_OPTIONS.map(o => ({ id: o.value, valor: o.label, codigo: o.value }));
-
-  return (
-    <div className="px-6 py-5 grid grid-cols-2 gap-4">
-      <div className="col-span-2">
-        <Field label="Nome Completo *">
-          <input className={inputCls} value={form.fullName} onChange={e => set("fullName", e.target.value)} placeholder="Ex: Dra. Ana Silva" />
-          {errs.fullName && <p className="text-[11px] text-red-600 mt-1">{errs.fullName}</p>}
-        </Field>
-      </div>
-      <Field label="Email *">
-        <input type="email" className={inputCls} value={form.email} onChange={e => set("email", e.target.value)} placeholder="nome@cap.cv" />
-        {errs.email && <p className="text-[11px] text-red-600 mt-1">{errs.email}</p>}
-      </Field>
-      <Field label="Perfil">
-        <select className={inputCls} value={form.role} onChange={e => set("role", e.target.value)}>
-          {opts.map(o => (
-            <option key={o.id} value={o.codigo ?? ""}>{o.valor}</option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Telefone">
-        <input className={inputCls} value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="+238 991 0000" />
-      </Field>
-      {needsSpecialty && (
-        <Field label="Especialidade">
-          <input className={inputCls} value={form.specialtyCode} onChange={e => set("specialtyCode", e.target.value)} placeholder="Ex: Cardiologia" />
-        </Field>
-      )}
-      <div className="col-span-2">
-        <label className="block text-[12px] font-semibold text-dim-700 mb-2">Dias de Trabalho</label>
-        <div className="flex gap-1.5 flex-wrap">
-          {DAYS.map(({ dow, label }) => (
-            <button
-              key={dow}
-              type="button"
-              onClick={() => toggleDay(dow)}
-              className={`px-3 py-1.5 rounded-[8px] text-[11px] font-semibold transition-colors border ${
-                form.days.includes(dow)
-                  ? "bg-brand-700 text-white border-brand-700"
-                  : "bg-white text-dim-500 border-dim-200 hover:border-dim-300"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <Field label="Início do Turno">
-        <input type="time" className={inputCls} value={form.shiftStart} onChange={e => set("shiftStart", e.target.value)} />
-      </Field>
-      <Field label="Fim do Turno">
-        <input type="time" className={inputCls} value={form.shiftEnd} onChange={e => set("shiftEnd", e.target.value)} />
-      </Field>
-    </div>
-  );
-}
-
-function AddUserModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { addMessage } = useMessage();
-  const queryClient = useQueryClient();
-  const [form, setForm] = useState<NewUserForm>(BLANK_USER);
-  const { data: profileOptions = [] } = useProfileOptions();
-  const [errs, setErrs] = useState<Record<string, string>>({});
-
-  function set<K extends keyof NewUserForm>(k: K, v: NewUserForm[K]) {
-    setForm(f => ({ ...f, [k]: v }));
-    setErrs(e => ({ ...e, [k]: "" }));
-  }
-  function toggleDay(dow: number) {
-    setForm(f => ({ ...f, days: f.days.includes(dow) ? f.days.filter(d => d !== dow) : [...f.days, dow] }));
-  }
-
-  const mutation = useMutation({
-    mutationFn: (body: object) => fetch("/api/staff/invite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then(async r => {
-      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao enviar convite"); }
-      return r.json();
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bff-staff"] });
-      queryClient.invalidateQueries({ queryKey: ["staff-invitations"] });
-      addMessage("Success", "Convite enviado! O colaborador vai receber um email para ativar a conta.");
-      setForm(BLANK_USER);
-      onClose();
-    },
-    onError: (e: Error) => addMessage("Error", e.message),
-  });
-
-  function submit(ev: React.FormEvent) {
-    ev.preventDefault();
-    const e2: Record<string, string> = {};
-    if (!form.fullName.trim()) e2.fullName = "Nome é obrigatório";
-    if (!form.email.trim()) e2.email = "Email é obrigatório";
-    if (Object.keys(e2).length) { setErrs(e2); return; }
-    mutation.mutate({
-      fullName: form.fullName.trim(),
-      email: form.email.trim(),
-      role: form.role,
-      phone: form.phone.trim() || undefined,
-      specialtyCode: form.specialtyCode.trim() || undefined,
-      availability: form.days.map(dow => ({ dayOfWeek: dow, startTime: form.shiftStart, endTime: form.shiftEnd })),
-    });
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Novo Utilizador" description="Enviar convite de acesso ao sistema" size="lg">
-      <form onSubmit={submit}>
-        <UserFormFields form={form} errs={errs} profileOptions={profileOptions} set={set} toggleDay={toggleDay} />
-        <div className="px-6 py-4 border-t border-dim-100 bg-dim-50/60 flex items-center gap-3">
-          <button type="submit" disabled={mutation.isPending} className="bg-brand-700 hover:bg-brand-800 disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors shadow-[0_1px_2px_rgba(0,0,0,.08)]">
-            {mutation.isPending ? "A enviar…" : "Enviar Convite"}
-          </button>
-          <button type="button" onClick={onClose} className="border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 font-medium px-5 py-2.5 rounded-[10px] text-[13px] transition-colors">Cancelar</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function EditUserModal({ staff, onClose }: { staff: ApiStaff; onClose: () => void }) {
-  const { addMessage } = useMessage();
-  const queryClient = useQueryClient();
-  const { data: profileOptions = [] } = useProfileOptions();
-  const [errs, setErrs] = useState<Record<string, string>>({});
-  const [form, setForm] = useState<NewUserForm>(() => ({
-    fullName: staff.fullName,
-    email: staff.email,
-    role: staff.role,
-    phone: staff.phone ?? "",
-    specialtyCode: staff.specialtyCode ?? "",
-    days: staff.availability.map(a => a.dayOfWeek),
-    shiftStart: staff.availability[0]?.startTime ?? "08:00",
-    shiftEnd: staff.availability[0]?.endTime ?? "17:00",
-  }));
-
-  function set<K extends keyof NewUserForm>(k: K, v: NewUserForm[K]) {
-    setForm(f => ({ ...f, [k]: v }));
-    setErrs(e => ({ ...e, [k]: "" }));
-  }
-  function toggleDay(dow: number) {
-    setForm(f => ({ ...f, days: f.days.includes(dow) ? f.days.filter(d => d !== dow) : [...f.days, dow] }));
-  }
-
-  const mutation = useMutation({
-    mutationFn: (body: object) => fetch(`/api/staff/${staff.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then(async r => {
-      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao guardar"); }
-      return r.json();
-    }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["bff-staff"] });
-      addMessage("Success", "Utilizador atualizado com sucesso!");
-      onClose();
-    },
-    onError: (e: Error) => addMessage("Error", e.message),
-  });
-
-  function submit(ev: React.FormEvent) {
-    ev.preventDefault();
-    const e2: Record<string, string> = {};
-    if (!form.fullName.trim()) e2.fullName = "Nome é obrigatório";
-    if (!form.email.trim()) e2.email = "Email é obrigatório";
-    if (Object.keys(e2).length) { setErrs(e2); return; }
-    mutation.mutate({
-      fullName: form.fullName.trim(),
-      email: form.email.trim(),
-      role: form.role,
-      phone: form.phone.trim() || undefined,
-      specialtyCode: form.specialtyCode.trim() || undefined,
-      availability: form.days.map(dow => ({ dayOfWeek: dow, startTime: form.shiftStart, endTime: form.shiftEnd })),
-    });
-  }
-
-  return (
-    <Modal open onClose={onClose} title="Editar Utilizador" description={`A editar ${staff.fullName}`} size="lg">
-      <form onSubmit={submit}>
-        <UserFormFields form={form} errs={errs} profileOptions={profileOptions} set={set} toggleDay={toggleDay} />
-        <div className="px-6 py-4 border-t border-dim-100 bg-dim-50/60 flex items-center gap-3">
-          <button type="submit" disabled={mutation.isPending} className="bg-brand-700 hover:bg-brand-800 disabled:opacity-60 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors shadow-[0_1px_2px_rgba(0,0,0,.08)]">
-            {mutation.isPending ? "A guardar…" : "Guardar Alterações"}
-          </button>
-          <button type="button" onClick={onClose} className="border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 font-medium px-5 py-2.5 rounded-[10px] text-[13px] transition-colors">Cancelar</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function UsersTab() {
-  const { addMessage } = useMessage();
-  const queryClient = useQueryClient();
-  const [addOpen, setAddOpen] = useState(false);
-  const [editing, setEditing] = useState<ApiStaff | null>(null);
-  const { data: staff = [], isLoading } = useQuery<ApiStaff[]>({
-    queryKey: ["bff-staff"],
-    queryFn: () => fetch("/api/bff/staff").then(r => r.json()),
-    staleTime: 60_000,
-  });
-  const { data: invitations = [] } = useQuery<StaffInvitationEntry[]>({
-    queryKey: ["staff-invitations"],
-    queryFn: () => fetch("/api/staff/invitations").then(r => r.json()),
-    staleTime: 30_000,
-  });
-
-  const cancelInviteMut = useMutation({
-    mutationFn: (id: string) => fetch(`/api/staff/invitations/${id}`, { method: "DELETE" })
-      .then(r => { if (!r.ok) throw new Error("Erro ao cancelar convite"); return r.json(); }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["staff-invitations"] }); addMessage("Success", "Convite cancelado."); },
-    onError: (e: Error) => addMessage("Error", e.message),
-  });
-
-  const totalRows = staff.length + invitations.length;
-
-  return (
-    <>
-      <div className={CARD}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-dim-100">
-          <div>
-            <h3 className="font-display text-[14px] font-semibold text-dim-900">Utilizadores do Sistema</h3>
-            <p className="text-[11px] text-dim-400 mt-0.5">
-              {staff.length} colaboradores registados{invitations.length > 0 ? ` · ${invitations.length} convite(s) pendente(s)` : ""}
-            </p>
-          </div>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[12px] font-semibold px-3.5 py-2 rounded-[10px] transition-colors shadow-[0_1px_2px_rgba(0,0,0,.08)]"
-          >
-            <Plus style={{ width: 13, height: 13 }} />
-            Novo Utilizador
-          </button>
-        </div>
-        <table className="w-full border-collapse">
-          <thead>
-            <tr>
-              {["Colaborador", "Perfil", "Email", "Telefone", "Estado", ""].map((h, i) => (
-                <th key={i} className="text-left text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 px-5 py-2.5 border-b border-dim-100 bg-dim-50">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <tr key={i} className="animate-pulse">
-                  {[140, 80, 160, 100, 60, 40].map((w, j) => (
-                    <td key={j} className="px-5 py-3.5 border-b border-dim-100">
-                      <div className="h-3 bg-dim-100 rounded" style={{ width: w }} />
-                    </td>
-                  ))}
-                </tr>
-              ))
-            ) : totalRows === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-[13px] text-dim-400">Nenhum utilizador registado.</td></tr>
-            ) : (
-              <>
-                {invitations.map(inv => {
-                  const initials = inv.fullName.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase();
-                  const expired = new Date(inv.expiresAt).getTime() < Date.now();
-                  return (
-                    <tr key={`inv-${inv.id}`} className="hover:bg-dim-50 transition-colors group opacity-70">
-                      <td className="px-5 py-3.5 border-b border-dim-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-dim-100 text-dim-500 font-semibold text-[10px] flex items-center justify-center shrink-0 border border-dashed border-dim-300">{initials}</div>
-                          <span className="text-[13px] font-medium text-dim-700">{inv.fullName}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 border-b border-dim-100">
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLOR[inv.role] ?? "bg-dim-100 text-dim-600"}`}>
-                          {ROLE_LABEL[inv.role] ?? inv.role}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{inv.email}</td>
-                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{inv.phone ?? "—"}</td>
-                      <td className="px-5 py-3.5 border-b border-dim-100">
-                        <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${expired ? "bg-red-50 text-red-600 ring-1 ring-red-200/80" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${expired ? "bg-red-400" : "bg-amber-400 animate-pulse"}`} />
-                          {expired ? "Convite Expirado" : "Convite Pendente"}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 border-b border-dim-100 text-right">
-                        <button
-                          onClick={() => cancelInviteMut.mutate(inv.id)}
-                          disabled={cancelInviteMut.isPending}
-                          className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold border border-dim-200 text-dim-500 rounded-[8px] hover:border-red-300 hover:text-red-600 transition-all"
-                        >
-                          Cancelar Convite
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {staff.map(u => {
-                  const initials = u.fullName.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase();
-                  const todayDow = new Date().getDay();
-                  const onDuty = u.availability.some(a => a.dayOfWeek === todayDow);
-                  return (
-                    <tr key={u.id} className="hover:bg-dim-50 transition-colors group">
-                      <td className="px-5 py-3.5 border-b border-dim-100">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 font-semibold text-[10px] flex items-center justify-center shrink-0">{initials}</div>
-                          <span className="text-[13px] font-medium text-dim-900">{u.fullName}</span>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 border-b border-dim-100">
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${ROLE_COLOR[u.role] ?? "bg-dim-100 text-dim-600"}`}>
-                          {ROLE_LABEL[u.role] ?? u.role}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{u.email}</td>
-                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{u.phone ?? "—"}</td>
-                      <td className="px-5 py-3.5 border-b border-dim-100">
-                        <div className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${onDuty ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80" : "bg-dim-100 text-dim-400"}`}>
-                          <div className={`w-1.5 h-1.5 rounded-full ${onDuty ? "bg-emerald-500" : "bg-dim-300"}`} />
-                          {onDuty ? "Em serviço" : "Fora"}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5 border-b border-dim-100 text-right">
-                        <button
-                          onClick={() => setEditing(u)}
-                          className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-all"
-                        >
-                          Editar
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <AddUserModal open={addOpen} onClose={() => setAddOpen(false)} />
-      {editing && <EditUserModal staff={editing} onClose={() => setEditing(null)} />}
-    </>
   );
 }
 
@@ -1207,12 +797,14 @@ function SecurityTab() {
 
 /* ── Main page ───────────────────────────────────────────── */
 
+// Utilizadores and Gestão de Acesso tabs were removed from here — all of that now lives at the
+// dedicated /access page (Organização / Perfis / Utilizadores), one canonical place instead of
+// three independently-duplicated implementations (this file had its own, so did AccessTab.tsx,
+// so did AccessPageContent.tsx).
 const TABS = [
   { key: "clinic",        label: "Clínica",         icon: Building2  },
   { key: "notifs",        label: "Notificações",     icon: Bell       },
-  { key: "users",         label: "Utilizadores",     icon: Users      },
   { key: "integrations",  label: "Integrações",      icon: Plug       },
-  { key: "access",        label: "Gestão de Acesso", icon: ShieldCheck },
   { key: "security",      label: "Segurança",        icon: Shield     },
 ] as const;
 
@@ -1272,9 +864,7 @@ export default function SettingsPage() {
             <>
               {activeTab === "clinic"        && <ClinicTab initial={clinic} />}
               {activeTab === "notifs"        && <NotificationsTab initial={notifs} />}
-              {activeTab === "users"         && <UsersTab />}
               {activeTab === "integrations"  && <IntegrationsTab />}
-              {activeTab === "access"        && <AccessTab />}
               {activeTab === "security"      && <SecurityTab />}
             </>
           )}
