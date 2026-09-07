@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { caboVerdePhoneSchema, dateOfBirthSchema } from "./common";
 
 export const PublicBookingSchema = z.object({
   fullName: z.string().min(2).max(120),
-  phone: z.string().min(7).max(20),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD"),
+  phone: caboVerdePhoneSchema,
+  dateOfBirth: dateOfBirthSchema,
   email: z.string().email().optional(),
   gender: z.enum(["male", "female", "other"]).default("other"),
   serviceId: z.string().uuid(),

@@ -1,11 +1,12 @@
 import { z } from "zod";
+import { caboVerdePhoneSchema, dateOfBirthSchema, nifSchema } from "./common";
 
 export const CreatePatientSchema = z.object({
   fullName: z.string().min(2).max(150),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format: YYYY-MM-DD"),
+  dateOfBirth: dateOfBirthSchema,
   gender: z.enum(["male", "female", "other"]),
-  nif: z.string().min(6).max(20).optional(),
-  phone: z.string().regex(/^\+?[1-9]\d{6,14}$/, "E.164 format required"),
+  nif: nifSchema.optional(),
+  phone: caboVerdePhoneSchema,
   email: z.string().email().optional(),
   address: z.string().max(300).optional(),
   emergencyContactName: z.string().max(150).optional(),

@@ -80,7 +80,8 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 **Backend**
 - [x] Full CRUD, search (name/phone/NIF), pagination, soft delete, timeline, notes
 - [x] `nif` and `dateOfBirth` encrypted at rest (AES-256-GCM); `nif` has a blind-index hash for exact-match search
-- [x] Phone normalization validates the +238 country code (previously just stripped characters)
+- [x] Phone normalization validates the +238 country code (previously just stripped characters); the rule now lives in a shared `normalizeCaboVerdePhone` helper (`@cap/types`) that both the service and the forms' Zod schema use
+- [x] Form validation (REVIEW.md §5.1) — shared `dateOfBirthSchema` (no future dates, year ≥ 1900), `nifSchema` (exactly 9 digits), `caboVerdePhoneSchema` in `@cap/types`; used by `Create/UpdatePatientSchema` + `PublicBookingSchema`; `max={today}` + format hints on the 3 patient forms
 - [x] NIF/phone uniqueness races (create and update) surface as `409 Conflict`, not a raw `500`
 - [x] `findOrCreateByPhone` (public booking path) no longer hardcodes `consentGiven: true` — requires the real value from the caller
 - [x] Right to erasure: soft-delete nulls every direct-PII field, not just `deletedAt`
@@ -281,6 +282,12 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [x] §4.3 — no-op global `ZodValidationPipe` removed from `main.ts`; the pipe's `schema` arg is now required (per-route usage unchanged)
 - [x] §4.4 — every `apps/api/src` `console.*` moved to NestJS `Logger`
 - [ ] §4.5 — service-level spec suites for the 4 still-untested modules (`companies`, `parametrizacao`, `public`, `services`)
+- [x] §5.1 — patient form validation gaps (DOB future dates, NIF/phone format) — see M2 backend above
+
+### UX (REVIEW.md §5)
+- [x] §5.1 — done (see Code Quality/M2)
+- §5.2 / §5.3 / §5.5 — verified fine at review time (color+label badges, loading/error/empty states, design consistency)
+- [x] §5.4 — sidebar "Beta" badges on mock modules (done earlier)
 
 ### DevOps
 - [ ] Staging/production environments — not live
@@ -292,9 +299,10 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 ## Immediate Next Steps
 
-REVIEW.md tracks the authoritative, prioritized list of what's actually next. Sections 1–3 and
-§4.1–4.4 are done; still open there: §4.5 (spec suites for 4 modules), Section 5 (UX/UI findings),
-Section 6 (redesign suggestions).
+REVIEW.md tracks the authoritative, prioritized list of what's actually next. Sections 1–3,
+§4.1–4.4, and Section 5 are done. Still open: §4.5 (spec suites for `companies`/`parametrizacao`/
+`public`/`services`) and Section 6 (redesign suggestions — a design exercise, not an
+implementation task).
 
 > 🟡 The 5-item "highlights" list this section used to carry here predates this file's Phase 1–3
 > roadmap work — items 2–5 (leave-requests, document upload, price floor, health-plan utilisation)

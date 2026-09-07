@@ -191,8 +191,10 @@ Response 200: TimelineEvent[] merging appointments + communications + invoices, 
 ```
 Body:
 {
-  "fullName": "string (2-150)", "dateOfBirth": "YYYY-MM-DD", "gender": "male | female | other",
-  "nif": "string (6-20, optional)", "phone": "E.164-ish, required",
+  "fullName": "string (2-150)", "dateOfBirth": "YYYY-MM-DD — real date, not future, year ≥ 1900",
+  "gender": "male | female | other",
+  "nif": "string (exactly 9 digits, optional)",
+  "phone": "Cabo Verde number — 7 local digits, with or without +238, required",
   "email": "string (optional)", "address": "string (optional, max 300)",
   "emergencyContactName": "string (optional)", "emergencyContactPhone": "string (optional)",
   "consentGiven": "boolean, required", "healthPlanId": "uuid (optional)"
@@ -442,7 +444,9 @@ POST /public/invitations/:token/activate       body: { fullName, password } — 
 ```
 PublicBookingSchema:
 {
-  "fullName": "string (2-120)", "phone": "string (7-20)", "dateOfBirth": "YYYY-MM-DD",
+  "fullName": "string (2-120)",
+  "phone": "Cabo Verde number — 7 local digits, with or without +238",
+  "dateOfBirth": "YYYY-MM-DD — real date, not future",
   "email": "string (optional)", "gender": "male | female | other (default other)",
   "serviceId": "uuid", "staffId": "uuid", "scheduledAt": "ISO8601 with offset",
   "notes": "string (optional)",
