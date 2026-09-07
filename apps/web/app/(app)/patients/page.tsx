@@ -9,6 +9,8 @@ import { useRouter } from "next/navigation";
 import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
+import { Field } from "../../../components/ui/field";
+import { useDebouncedValue } from "../../../lib/use-debounced-value";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
 import type { Patient, PaginatedResponse } from "@cap/types";
@@ -41,20 +43,6 @@ async function createPatient(data: CreatePatientDto) {
 
 const inputCls =
   "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300";
-
-function Field({ label, required, error, children }: {
-  label: string; required?: boolean; error?: string; children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">
-        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-      {children}
-      {error && <p className="text-[11px] text-red-600 mt-1.5">{error}</p>}
-    </div>
-  );
-}
 
 // ── New Patient Modal ──────────────────────────────────────────
 
@@ -421,6 +409,7 @@ export default function PatientsPage() {
   const { isLoading: permLoading, can, canDo } = usePermissions();
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [page, setPage] = useState(1);
   const [planFilter, setPlanFilter] = useState("all");
   const [newPatientOpen, setNewPatientOpen] = useState(false);
@@ -430,9 +419,12 @@ export default function PatientsPage() {
     if (!permLoading && !can("patients")) router.replace("/dashboard");
   }, [permLoading, can, router]);
 
+  // Reset to page 1 whenever the (debounced) search term settles on something new.
+  useEffect(() => { setPage(1); }, [debouncedSearch]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["patients", search, planFilter, page],
-    queryFn: () => fetchPatients(search, planFilter, page),
+    queryKey: ["patients", debouncedSearch, planFilter, page],
+    queryFn: () => fetchPatients(debouncedSearch, planFilter, page),
     placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
@@ -469,7 +461,7 @@ export default function PatientsPage() {
               type="text"
               placeholder="Pesquisar por nome, telefone ou NIF…"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 bg-white border border-dim-200 rounded-[10px] text-[13px] text-dim-900 placeholder:text-dim-400 focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-all"
             />
           </div>

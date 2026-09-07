@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { Process, Processor } from "@nestjs/bull";
 import { Job } from "bull";
 import * as nodemailer from "nodemailer";
@@ -8,6 +9,8 @@ interface SmtpConfig { host: string; port: string; username: string; password: s
 
 @Processor("notifications")
 export class NotificationsProcessor {
+  private readonly logger = new Logger(NotificationsProcessor.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   // ── helpers ────────────────────────────────────────────────
@@ -37,7 +40,7 @@ export class NotificationsProcessor {
     );
     if (!res.ok) {
       const err = await res.text();
-      console.error("[WhatsApp] send failed:", err);
+      this.logger.error(`[WhatsApp] send failed: ${err}`);
     }
   }
 

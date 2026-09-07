@@ -1,11 +1,11 @@
 import * as Sentry from "@sentry/node";
+import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { createServer } from "net";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
-import { ZodValidationPipe } from "./common/pipes/zod-validation.pipe";
 
 /** Binds a throwaway probe socket to find the first free port at or after `start` — a stray
  * leftover dev-server process still holding the preferred port no longer means killing it by
@@ -28,6 +28,8 @@ if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN, environment: process.env.NODE_ENV });
 }
 
+const logger = new Logger("Bootstrap");
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ["log", "warn", "error"],
@@ -44,21 +46,23 @@ async function bootstrap() {
     credentials: true,
   });
 
-  app.useGlobalPipes(new ZodValidationPipe());
+  // Validation is per-route: every controller wraps its @Body()/@Query() with
+  // `new ZodValidationPipe(SomeSchema)`. A global ZodValidationPipe with no schema is a no-op —
+  // it was registered here before and only gave false confidence when skimming this file.
   app.useGlobalFilters(new HttpExceptionFilter());
 
   const preferredPort = Number(process.env.API_PORT) || 3001;
   const port = await findAvailablePort(preferredPort);
   await app.listen(port);
   if (port !== preferredPort) {
-    console.warn(`Port ${preferredPort} was busy — API running on http://localhost:${port}/v1 instead`);
+    logger.warn(`Port ${preferredPort} was busy — API running on http://localhost:${port}/v1 instead`);
   } else {
-    console.warn(`API running on http://localhost:${port}/v1`);
+    logger.log(`API running on http://localhost:${port}/v1`);
   }
 }
 
 bootstrap().catch((err) => {
   Sentry.captureException(err);
-  console.error("Fatal error during bootstrap", err);
+  logger.error("Fatal error during bootstrap", err instanceof Error ? err.stack : String(err));
   process.exit(1);
 });

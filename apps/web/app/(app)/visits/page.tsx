@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { usePermissions } from "../hooks/use-permissions";
 import { Home, Clock, CheckCircle, MapPin, Plus, ChevronRight, AlertTriangle } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
+import { Field } from "@/components/ui/field";
 
 type Visit = {
   id: string;
@@ -58,14 +59,6 @@ const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rg
 
 const todayRef = "2026-06-19";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[12px] font-semibold text-dim-700">{label}</label>
-      {children}
-    </div>
-  );
-}
 
 const FALLBACK_VISIT_TYPES = [
   { value: "routine",   label: "Rotina"         },

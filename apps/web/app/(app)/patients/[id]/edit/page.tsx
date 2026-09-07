@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import type { Patient } from "@cap/types";
 import { useMessage } from "../../../../../components/ui/message-handler";
+import { Field } from "../../../../../components/ui/field";
 
 type FormState = {
   fullName: string;
@@ -21,14 +22,6 @@ type FormState = {
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)]";
 const INPUT = "w-full text-[13px] border border-dim-200 rounded-[8px] px-3 py-2 bg-white text-dim-900 focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 cursor-default">
-      <span className="text-[11px] font-semibold text-dim-500 uppercase tracking-wide">{label}</span>
-      {children}
-    </label>
-  );
-}
 
 export default function PatientEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);

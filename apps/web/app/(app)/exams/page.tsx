@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { FileSearch, Clock, CheckCircle, Upload, FlaskConical, Plus, ChevronRight } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Modal } from "@/components/ui/modal";
+import { Field } from "@/components/ui/field";
 
 type Exam = {
   id: string;
@@ -71,14 +72,6 @@ const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[12px] font-semibold text-dim-700">{label}</label>
-      {children}
-    </div>
-  );
-}
 
 const FALLBACK_CATEGORIES = [
   { value: "lab",   label: "Análise Laboratorial" },

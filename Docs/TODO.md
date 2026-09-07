@@ -275,6 +275,13 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [~] E2E tests (Playwright) — 3 specs / 10 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login), up from 1 spec; still not full coverage (nothing for Financeiro or health-plans end-to-end). Fixed along the way: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)
 
+### Code Quality (REVIEW.md §4)
+- [x] §4.1 — one shared `apps/web/components/ui/field.tsx` (implicit `<label>` wrapper), 10 copied `Field`/`FieldRow` definitions deleted and re-pointed at it; `components/settings/shared.tsx` re-exports it
+- [x] §4.2 — `apps/web/lib/use-debounced-value.ts`; patient search debounced (300ms), page-1 reset moved to fire on the settled term
+- [x] §4.3 — no-op global `ZodValidationPipe` removed from `main.ts`; the pipe's `schema` arg is now required (per-route usage unchanged)
+- [x] §4.4 — every `apps/api/src` `console.*` moved to NestJS `Logger`
+- [ ] §4.5 — service-level spec suites for the 4 still-untested modules (`companies`, `parametrizacao`, `public`, `services`)
+
 ### DevOps
 - [ ] Staging/production environments — not live
 - [ ] Sentry, Grafana/Prometheus, Loki — not set up
@@ -285,9 +292,9 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 ## Immediate Next Steps
 
-REVIEW.md tracks the authoritative, prioritized list of what's actually next (Sections 4–8:
-code quality, UX findings, redesign suggestions, and the phase-by-phase checklist this file
-mirrors).
+REVIEW.md tracks the authoritative, prioritized list of what's actually next. Sections 1–3 and
+§4.1–4.4 are done; still open there: §4.5 (spec suites for 4 modules), Section 5 (UX/UI findings),
+Section 6 (redesign suggestions).
 
 > 🟡 The 5-item "highlights" list this section used to carry here predates this file's Phase 1–3
 > roadmap work — items 2–5 (leave-requests, document upload, price floor, health-plan utilisation)

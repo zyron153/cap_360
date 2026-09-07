@@ -7,6 +7,7 @@ import { Shield, Users, TrendingUp, AlertTriangle, Plus, ChevronRight } from "lu
 import { usePermissions } from "../hooks/use-permissions";
 import { Modal } from "@/components/ui/modal";
 import { useMessage } from "@/components/ui/message-handler";
+import { Field } from "@/components/ui/field";
 
 /* ─── Types ──────────────────────────────────────────────────── */
 
@@ -53,20 +54,6 @@ const TYPE_ICON: Record<string, string> = {
 
 const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300 font-sans";
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
-
-function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <label className="text-[12px] font-semibold text-dim-700">
-          {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-        </label>
-        {hint && <span className="text-[10px] text-dim-400">{hint}</span>}
-      </div>
-      {children}
-    </div>
-  );
-}
 
 /* ─── Page ───────────────────────────────────────────────────── */
 

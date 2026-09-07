@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Field } from "../ui/field";
 
 export type ApiStaff = {
   id: string;
@@ -58,20 +59,6 @@ const DAYS_OF_WEEK = [
 
 export const inputCls =
   "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300";
-
-function FieldRow({ label, required, error, children }: {
-  label: string; required?: boolean; error?: string; children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">
-        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-      {children}
-      {error && <p className="text-[11px] text-red-600 mt-1.5">{error}</p>}
-    </div>
-  );
-}
 
 /** POST /staff/invite (create, InviteStaffSchema === CreateStaffSchema) or PATCH /staff/:id (edit) body. */
 export function toApiBody(form: FormValues) {
@@ -162,18 +149,18 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
     <form onSubmit={submit}>
       <div className="px-6 py-5 grid grid-cols-2 gap-4">
         <div className="col-span-2">
-          <FieldRow label="Nome Completo" required error={errs.name}>
+          <Field label="Nome Completo" required error={errs.name}>
             <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ex: Dra. Maria Silva" className={inputCls} />
-          </FieldRow>
+          </Field>
         </div>
 
-        <FieldRow label="Função" required>
+        <Field label="Função" required>
           <select value={selectedJobTitleValue} onChange={(e) => selectJobTitle(e.target.value)} className={inputCls}>
             {jobTitles.map((t) => <option key={t.id} value={t.codigo ?? t.valor}>{t.valor}</option>)}
           </select>
-        </FieldRow>
+        </Field>
 
-        <FieldRow label="Especialidade">
+        <Field label="Especialidade">
           {specialtyOptions.length > 0 ? (
             <select value={form.specialty} onChange={(e) => set("specialty", e.target.value)} className={inputCls}>
               <option value="">— Seleccionar —</option>
@@ -182,15 +169,15 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
           ) : (
             <input value={form.specialty} onChange={(e) => set("specialty", e.target.value)} placeholder="Ex: Cardiologia" className={inputCls} />
           )}
-        </FieldRow>
+        </Field>
 
-        <FieldRow label="Telefone" required error={errs.phone}>
+        <Field label="Telefone" required error={errs.phone}>
           <input value={form.phone} onChange={(e) => set("phone", e.target.value)} placeholder="+238 991 0000" className={inputCls} />
-        </FieldRow>
+        </Field>
 
-        <FieldRow label="Email" required error={errs.email}>
+        <Field label="Email" required error={errs.email}>
           <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="nome@cap.cv" className={inputCls} />
-        </FieldRow>
+        </Field>
 
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-2">Dias e Horário de Trabalho</label>

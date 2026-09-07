@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
   Inject,
+  Logger,
 } from "@nestjs/common";
 import { InjectQueue } from "@nestjs/bull";
 import { Queue } from "bull";
@@ -57,6 +58,8 @@ function parseLocalDateEndOfDay(dateStr: string): Date {
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     private readonly repo: AppointmentsRepository,
     private readonly gateway: AppointmentsGateway,
@@ -460,13 +463,13 @@ export class AppointmentsService {
           serviceName: appointment.service.name,
           unitPrice,
         }).catch((err: unknown) => {
-          console.error(`[billing] auto-invoice failed for appointment ${id}:`, err);
+          this.logger.error(`[billing] auto-invoice failed for appointment ${id}`, err instanceof Error ? err.stack : String(err));
         });
       }
 
       if (appointment.patient?.healthPlanId) {
         await this.healthPlansService.incrementUsage(appointment.patient.healthPlanId).catch((err: unknown) => {
-          console.error(`[health-plans] usage increment failed for appointment ${id}:`, err);
+          this.logger.error(`[health-plans] usage increment failed for appointment ${id}`, err instanceof Error ? err.stack : String(err));
         });
       }
     }
