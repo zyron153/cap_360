@@ -127,7 +127,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `@cap/types` — `Staff`, `Service`, `Room`/appointment types and Zod schemas all exist
 - [x] API rate limiting (`@nestjs/throttler`) — global default 300 req/min, public routes overridden to 60 req/min
 - [x] Request/performance logging (`PerformanceInterceptor`)
-- [x] Unit test suite (Jest) — 372 tests across guards, interceptors, services, repositories
+- [x] Unit test suite (Jest) — 386 tests across guards, interceptors, services, repositories
 - [x] **Self-hosted auth (2026-08-31, replaces Keycloak)**: argon2id password hashing, Redis-backed
   sessions (httpOnly/Secure/SameSite=Lax cookie), per-IP + per-account login rate-limiting/lockout,
   forgot/reset/change-password flows — `AUTH_BYPASS=true` dev bypass preserved, fails safe (requires
@@ -271,7 +271,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, services, companies, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 372 tests total (25 suites)
+- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 386 tests total (27 suites)
 - [x] ~~Integration tests against a real test DB~~ — this contradicted this file's own line 137 ([x], 4 specs / 9 tests); duplicate line removed
 - [~] E2E tests (Playwright) — 3 specs / 10 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login), up from 1 spec; still not full coverage (nothing for Financeiro or health-plans end-to-end). Fixed along the way: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)
@@ -281,7 +281,7 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [x] §4.2 — `apps/web/lib/use-debounced-value.ts`; patient search debounced (300ms), page-1 reset moved to fire on the settled term
 - [x] §4.3 — no-op global `ZodValidationPipe` removed from `main.ts`; the pipe's `schema` arg is now required (per-route usage unchanged)
 - [x] §4.4 — every `apps/api/src` `console.*` moved to NestJS `Logger`
-- [~] §4.5 — service-level spec suites: `services` (10 tests) + `companies` (7 tests) added; `parametrizacao` + `public` still uncovered
+- [x] §4.5 — service-level spec suites for `services`, `companies`, `parametrizacao`, `public` (33 tests). Every API module now has a service spec.
 - [x] §5.1 — patient form validation gaps (DOB future dates, NIF/phone format) — see M2 backend above
 
 ### UX (REVIEW.md §5)
@@ -299,10 +299,10 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 ## Immediate Next Steps
 
-REVIEW.md tracks the authoritative, prioritized list of what's actually next. Sections 1–3,
-§4.1–4.4, and Section 5 are done; §4.5 is mostly done (`services` + `companies` specs added,
-`parametrizacao` + `public` still uncovered). Still open: those 2 spec suites and Section 6
-(redesign suggestions — a design exercise, not an implementation task).
+REVIEW.md's entire fix list (Sections 1–5, incl. all of §4) is now closed. Section 6 is a
+redesign exercise, not an implementation task. What remains in this file below is all
+new-feature / infra work (M3, M5, M9, M10, Phase 4, k8s, backups, k6, ZAP, SMS infra) — each
+needs its own scoping conversation per the notes on those sections.
 
 > 🟡 The 5-item "highlights" list this section used to carry here predates this file's Phase 1–3
 > roadmap work — items 2–5 (leave-requests, document upload, price floor, health-plan utilisation)
