@@ -104,6 +104,7 @@ const TRANSITIONS: Record<string, { status: string; label: string; primary: bool
   pending:    [{ status: "confirmed",  label: "Confirmar",      primary: true  },
                { status: "cancelled",  label: "Cancelar",       primary: false }],
   confirmed:  [{ status: "checked_in", label: "Check-in feito", primary: true  },
+               { status: "no_show",    label: "Faltou",         primary: false },
                { status: "cancelled",  label: "Cancelar",       primary: false }],
   checked_in: [{ status: "completed",  label: "Concluída",      primary: true  },
                { status: "no_show",    label: "Faltou",         primary: false }],
