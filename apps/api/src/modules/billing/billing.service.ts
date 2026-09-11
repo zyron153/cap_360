@@ -186,7 +186,7 @@ export class BillingService {
     return { queued: true };
   }
 
-  async cancel(invoiceId: string) {
+  async cancel(invoiceId: string, reason: string) {
     const invoice = await this.repo.findByIdLite(invoiceId);
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
 
@@ -206,10 +206,19 @@ export class BillingService {
       );
     }
 
-    return this.repo.update(invoiceId, { status: "cancelled" });
+    // The generic AuditInterceptor already logs "POST invoices/:id/cancel" — this diff adds the
+    // semantic before/after (status + reason) to that same row, same mechanism as create()'s
+    // price-override diff above.
+    RequestContext.setAuditDiff({ status: invoice.status }, { status: "cancelled", cancelReason: reason });
+
+    return this.repo.update(invoiceId, {
+      status: "cancelled",
+      cancelReason: reason,
+      cancelledAt: new Date(),
+    });
   }
 
-  async recordPayment(invoiceId: string, dto: RecordPaymentDto) {
+  async recordPayment(invoiceId: string, dto: RecordPaymentDto, recordedById?: string) {
     // Checked first, before the invoice even loads: a retried request (double-click, client
     // timeout retry) must replay the original outcome, not re-validate against state that the
     // original request may have already changed (e.g. this payment is what made it "paid").
@@ -237,6 +246,7 @@ export class BillingService {
         reference: dto.reference,
         paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
         idempotencyKey: dto.idempotencyKey,
+        recordedById,
       },
       Number(invoice.total)
     );

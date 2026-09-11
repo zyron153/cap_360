@@ -16,9 +16,11 @@ import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decor
 import {
   CreateInvoiceSchema,
   RecordPaymentSchema,
+  CancelInvoiceSchema,
   InvoiceListQuerySchema,
   CreateInvoiceDto,
   RecordPaymentDto,
+  CancelInvoiceDto,
   InvoiceListQuery,
 } from "@cap/types";
 
@@ -55,14 +57,18 @@ export class BillingController {
   @Post(":id/payments")
   recordPayment(
     @Param("id", ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(RecordPaymentSchema)) dto: RecordPaymentDto
+    @Body(new ZodValidationPipe(RecordPaymentSchema)) dto: RecordPaymentDto,
+    @CurrentUser() user: JwtUser
   ) {
-    return this.service.recordPayment(id, dto);
+    return this.service.recordPayment(id, dto, user.sub);
   }
 
   @Post(":id/cancel")
-  cancel(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.cancel(id);
+  cancel(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(CancelInvoiceSchema)) dto: CancelInvoiceDto
+  ) {
+    return this.service.cancel(id, dto.reason);
   }
 
   @Get(":id/efatura")

@@ -90,6 +90,18 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
         expect.objectContaining({ data: expect.objectContaining({ pdfR2Key: null }) })
       );
     });
+
+    it("attributes the payment to the staff member who recorded it", async () => {
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: "2000" } });
+      await repo.recordPaymentAtomic(
+        "inv-1",
+        { amount: 2000, method: "cash" as never, paidAt: new Date(), recordedById: "staff-1" },
+        2000
+      );
+      expect(tx.payment.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ recordedById: "staff-1" }) })
+      );
+    });
   });
 
   it("decrypts the joined patient's NIF — the invoice preview and receipt PDF must never show ciphertext", async () => {

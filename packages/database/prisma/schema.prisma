@@ -182,6 +182,7 @@ model Staff {
   patientNotes      PatientNote[]
   requestedExpenses Expense[]           @relation("ExpenseRequestedBy")
   approvedExpenses  Expense[]           @relation("ExpenseApprovedBy")
+  paymentsRecorded  Payment[]
   clinicalNotes     ClinicalNote[]
   prescriptions     Prescription[]
   referralsSent     Referral[]          @relation("ReferralReferredBy")
@@ -632,6 +633,10 @@ model Invoice {
   dueDate       DateTime?     @db.Date
   issuedAt      DateTime?
   pdfR2Key      String?       @db.VarChar(300)
+  /// Set together with status → cancelled by BillingService.cancel(); required by the endpoint
+  /// so a cancellation always has an accompanying explanation for later audit.
+  cancelReason  String?       @db.VarChar(500)
+  cancelledAt   DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -676,10 +681,14 @@ model Payment {
   /// Client-supplied dedup key — a retried "record payment" request (double-click, timeout
   /// retry) with the same key returns the existing payment instead of recording it twice.
   idempotencyKey String?  @db.VarChar(100)
+  /// Who recorded this payment (accountability for cash/manual entries) — nullable since older
+  /// rows predate this field and some callers (e.g. future automated flows) may have no staff.
+  recordedById String?
   paidAt    DateTime      @default(now())
   createdAt DateTime      @default(now())
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  recordedBy Staff?  @relation(fields: [recordedById], references: [id])
 
   @@unique([idempotencyKey])
   @@index([invoiceId])

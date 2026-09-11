@@ -51,6 +51,11 @@ export const RecordPaymentSchema = z.object({
 });
 export type RecordPaymentDto = z.infer<typeof RecordPaymentSchema>;
 
+export const CancelInvoiceSchema = z.object({
+  reason: z.string().min(3).max(500),
+});
+export type CancelInvoiceDto = z.infer<typeof CancelInvoiceSchema>;
+
 export interface InvoiceItem {
   id: string;
   invoiceId: string;
@@ -67,6 +72,8 @@ export interface Payment {
   amount: number;
   method: PaymentMethod;
   reference?: string | null;
+  recordedById?: string | null;
+  recordedBy?: { id: string; fullName: string } | null;
   paidAt: string;
   createdAt: string;
 }
@@ -85,6 +92,8 @@ export interface Invoice {
   notes?: string | null;
   dueDate?: string | null;
   issuedAt?: string | null;
+  cancelReason?: string | null;
+  cancelledAt?: string | null;
   createdAt: string;
   updatedAt: string;
   items?: InvoiceItem[];

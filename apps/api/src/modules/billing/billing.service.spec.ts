@@ -78,6 +78,15 @@ describe("BillingService", () => {
       );
     });
 
+    it("passes the recording staff member's id through to the atomic repository call", async () => {
+      await service.recordPayment("inv-1", { amount: 800, method: "cash" }, "staff-1");
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ recordedById: "staff-1" }),
+        2000
+      );
+    });
+
     it("throws BadRequestException on a paid invoice, without recording a payment", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "paid" });
       await expect(
@@ -351,32 +360,50 @@ describe("BillingService", () => {
   describe("cancel", () => {
     it("throws NotFoundException for an unknown invoice", async () => {
       repo.findByIdLite.mockResolvedValue(null);
-      await expect(service.cancel("inv-x")).rejects.toThrow(NotFoundException);
+      await expect(service.cancel("inv-x", "Duplicado")).rejects.toThrow(NotFoundException);
     });
 
     it("throws BadRequestException when the invoice is already fully paid", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "paid" });
-      await expect(service.cancel("inv-1")).rejects.toThrow(BadRequestException);
+      await expect(service.cancel("inv-1", "Duplicado")).rejects.toThrow(BadRequestException);
       expect(repo.update).not.toHaveBeenCalled();
     });
 
     it("is idempotent — returns the invoice as-is when already cancelled, without re-cancelling", async () => {
       const cancelled = { ...INVOICE, status: "cancelled" };
       repo.findByIdLite.mockResolvedValue(cancelled);
-      expect(await service.cancel("inv-1")).toEqual(cancelled);
+      expect(await service.cancel("inv-1", "Duplicado")).toEqual(cancelled);
       expect(repo.update).not.toHaveBeenCalled();
       expect(efaturaQueue.add).not.toHaveBeenCalled();
     });
 
-    it("sets status to cancelled for an issued invoice with no E-Factura submission", async () => {
+    it("sets status to cancelled with the reason and a timestamp for an issued invoice with no E-Factura submission", async () => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
       prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
       repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
 
-      await service.cancel("inv-1");
+      await service.cancel("inv-1", "Paciente desistiu");
 
-      expect(repo.update).toHaveBeenCalledWith("inv-1", { status: "cancelled" });
+      expect(repo.update).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu", cancelledAt: expect.any(Date) })
+      );
       expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("records the before/after status and reason in the audit diff", async () => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
+      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
+      const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+
+      await service.cancel("inv-1", "Paciente desistiu");
+
+      expect(diffSpy).toHaveBeenCalledWith(
+        { status: "issued" },
+        expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu" })
+      );
+      diffSpy.mockRestore();
     });
 
     it("also enqueues an E-Factura cancel job when the invoice was already accepted there", async () => {
@@ -388,7 +415,7 @@ describe("BillingService", () => {
       });
       repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
 
-      await service.cancel("inv-1");
+      await service.cancel("inv-1", "Duplicado");
 
       expect(efaturaQueue.add).toHaveBeenCalledWith(
         "cancel",
@@ -406,7 +433,7 @@ describe("BillingService", () => {
       });
       repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
 
-      await service.cancel("inv-1");
+      await service.cancel("inv-1", "Duplicado");
 
       expect(efaturaQueue.add).not.toHaveBeenCalled();
     });

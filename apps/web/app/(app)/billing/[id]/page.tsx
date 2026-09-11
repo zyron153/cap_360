@@ -7,8 +7,21 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import Link from "next/link";
-import { ArrowLeft, Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield } from "lucide-react";
+import { ArrowLeft, Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield, XCircle } from "lucide-react";
 import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type EFaturaSubmission } from "@cap/types";
+
+async function cancelInvoice(id: string, reason: string) {
+  const res = await fetch(`/api/invoices/${id}/cancel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message ?? "Erro ao cancelar fatura");
+  }
+  return res.json();
+}
 
 async function fetchInvoice(id: string) {
   const res = await fetch(`/api/invoices/${id}`);
@@ -189,6 +202,19 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
     onSuccess: ({ url }) => window.open(url, "_blank"),
   });
 
+  const [cancelConfirm, setCancelConfirm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelInvoice(id, cancelReason.trim()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["invoice", id] });
+      queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-summary"] });
+      setCancelConfirm(false);
+      setCancelReason("");
+    },
+  });
+
   if (isLoading) {
     return (
       <div className="max-w-3xl flex flex-col gap-5 animate-pulse">
@@ -224,15 +250,60 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Faturação
         </Link>
-        <button
-          onClick={() => receiptMutation.mutate()}
-          disabled={receiptMutation.isPending}
-          className="flex items-center gap-2 border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 text-[13px] font-medium px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-colors cursor-pointer disabled:opacity-60"
-        >
-          <Download className="w-3.5 h-3.5" />
-          {receiptMutation.isPending ? "A obter…" : "Recibo PDF"}
-        </button>
+        <div className="flex items-center gap-2.5">
+          {!["paid", "cancelled"].includes(invoice.status) && !cancelConfirm && (
+            <button
+              onClick={() => setCancelConfirm(true)}
+              className="flex items-center gap-2 border border-dim-200 bg-white hover:bg-red-50 hover:border-red-200 text-dim-700 hover:text-red-700 text-[13px] font-medium px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-colors cursor-pointer"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Cancelar Fatura
+            </button>
+          )}
+          <button
+            onClick={() => receiptMutation.mutate()}
+            disabled={receiptMutation.isPending}
+            className="flex items-center gap-2 border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 text-[13px] font-medium px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-colors cursor-pointer disabled:opacity-60"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {receiptMutation.isPending ? "A obter…" : "Recibo PDF"}
+          </button>
+        </div>
       </div>
+
+      {/* Cancel invoice — two-step inline confirmation with a required reason */}
+      {cancelConfirm && (
+        <div className="bg-red-50 border border-red-200 rounded-[14px] p-4 flex flex-col gap-3">
+          <p className="text-[12px] text-red-700 font-medium">
+            Cancelar a fatura {invoice.invoiceNumber}? Esta ação não pode ser desfeita.
+          </p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            rows={2}
+            placeholder="Motivo do cancelamento (obrigatório)…"
+            className="w-full border border-red-200 rounded-[10px] px-3 py-2 text-[12px] text-dim-900 bg-white focus:outline-none focus:border-red-400 resize-none"
+          />
+          {cancelMutation.error && (
+            <p className="text-[11px] text-red-700">{(cancelMutation.error as Error).message}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => cancelMutation.mutate()}
+              disabled={cancelMutation.isPending || cancelReason.trim().length < 3}
+              className="flex-1 text-[12px] font-semibold py-2 rounded-[8px] bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+            >
+              {cancelMutation.isPending ? "A cancelar…" : "Confirmar Cancelamento"}
+            </button>
+            <button
+              onClick={() => { setCancelConfirm(false); setCancelReason(""); }}
+              className="flex-1 text-[12px] font-semibold py-2 rounded-[8px] border border-dim-200 text-dim-700 hover:bg-dim-50 transition-colors"
+            >
+              Voltar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Invoice card */}
       <div className={CARD}>
@@ -272,6 +343,17 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
           </div>
+
+          {/* Cancellation reason */}
+          {invoice.status === "cancelled" && invoice.cancelReason && (
+            <div className="mt-4 p-3 bg-dim-50 border border-dim-200 rounded-[10px]">
+              <p className="text-[11px] text-dim-500">
+                Cancelada
+                {invoice.cancelledAt && ` em ${format(new Date(invoice.cancelledAt), "d MMM yyyy HH:mm", { locale: pt })}`}
+                {" · "}<span className="text-dim-700">{invoice.cancelReason}</span>
+              </p>
+            </div>
+          )}
 
           {/* Progress bar */}
           {paidPercent > 0 && paidPercent < 100 && (
@@ -336,6 +418,7 @@ export default function InvoiceDetailPage({ params }: { params: Promise<{ id: st
                       <span className="font-mono">{format(new Date(p.paidAt), "d MMM yyyy", { locale: pt })}</span>
                       {" · "}<span className="capitalize">{p.method?.replace("_", " ")}</span>
                       {p.reference ? ` · ${p.reference}` : ""}
+                      {p.recordedBy ? ` · registado por ${p.recordedBy.fullName}` : ""}
                     </span>
                   </div>
                   <span className="font-mono text-[12px] font-semibold text-emerald-700 tabular-nums">

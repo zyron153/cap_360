@@ -72,16 +72,18 @@ Supported methods (`PaymentMethod` enum — exactly these four, no more):
 atomic insert+re-sum+status-update transaction and a hard guard rejecting any payment that would
 push `totalPaid` over the invoice total. ✅ Payments accept a client-supplied `idempotencyKey` — a
 retried "record payment" request replays the original result instead of double-charging.
-❌ Payments are **not** attributed to the staff member who recorded them — the `Payment` model has
-no staff/user field.
+✅ **Fixed.** Payments are now attributed to the staff member who recorded them —
+`Payment.recordedById` (FK to `Staff`), set from the authenticated caller, shown on the invoice
+detail page's payment history.
 
 ### 2.4 Receipt Delivery
 
 - 🟡 PDF receipt generated server-side using **PDFKit** (not Puppeteer), on-demand via
   `GET /invoices/:id/receipt` — not automatically "on full payment". It renders whatever the
   invoice's status/amountPaid is at request time, uploads to R2, and **caches the R2 key on the
-  invoice** — a known gap: if a receipt is generated after a partial payment, a later payment on
-  the same invoice does **not** regenerate the PDF, so the cached receipt can go stale
+  invoice** — ✅ the staleness gap once described here is fixed: `recordPaymentAtomic` nulls
+  `pdfR2Key` on every payment (`billing.repository.ts`), so a receipt generated after a partial
+  payment gets regenerated the next time it's requested rather than staying stale
 - ❌ No automatic delivery — nothing sends the receipt via WhatsApp or email; a staff member must
   open the invoice and fetch the receipt URL themselves
 
@@ -174,19 +176,25 @@ design.
 
 ## 7. Business Rules
 
-- 🟡 Invoices cannot be deleted, only cancelled — true, but `POST /invoices/:id/cancel` takes
-  **no reason field**; cancelling a `paid` invoice is rejected, cancelling an already-cancelled one
-  is a no-op (idempotent), and an accepted E-Fatura submission gets a queued cancel job to the tax
-  authority too
-- 🟡 "Cancelled invoices retain full audit trail" — the invoice row itself is retained (never hard
-  deleted), but nothing writes a dedicated `audit_log` entry for invoice cancellation specifically
-- ❌ "Receipts issued for each payment" — one receipt is generated per **invoice**, on demand, and
-  can go stale after a later payment (see §2.4) — there's no per-payment receipt
+- ✅ Invoices cannot be deleted, only cancelled — `POST /invoices/:id/cancel` now **requires a
+  reason** (`CancelInvoiceSchema`, min 3 chars, stored on `Invoice.cancelReason`/`cancelledAt`);
+  cancelling a `paid` invoice is rejected, cancelling an already-cancelled one is a no-op
+  (idempotent), and an accepted E-Fatura submission gets a queued cancel job to the tax authority
+  too. A cancel button + reason prompt now also exists on the invoice detail page — it didn't
+  before, despite the endpoint being real.
+- ✅ **Fixed.** "Cancelled invoices retain full audit trail" — the invoice row itself is retained
+  (never hard deleted), and cancellation now writes a semantic before/after diff (status +
+  `cancelReason`) onto its `audit_log` row via the same mechanism §1.4 introduced, not just the
+  generic "a POST happened" row the interceptor logs for every mutation.
+- 🟡 "Receipts issued for each payment" — one receipt is generated per **invoice**, on demand
+  (not automatically per payment) — there's no per-payment receipt. The staleness half of this gap
+  is closed: `recordPaymentAtomic` nulls `pdfR2Key` on every payment, so a cached receipt can no
+  longer be served after a later payment changes the balance.
 - ❌ Health-plan utilisation/co-pay check — not implemented (see §2.1/§2.3)
-- ❌ Payment-to-staff attribution — not implemented (see §2.3)
+- ✅ **Fixed.** Payment-to-staff attribution — `Payment.recordedById` (see §2.3).
 
 ---
 
-*Module M6 · v1.3 · updated 2026-09-06 — seeded real Financeiro demo data (which surfaced and fixed
-a receivables bug: `overdue` invoices were invisible to the Contas a Receber card), plus the Faturas
-list now shows an invoice's linked consultation*
+*Module M6 · v1.4 · updated 2026-09-11 — payment-to-staff attribution, invoice-cancel reason +
+audit diff + the frontend cancel UI that was missing entirely, plus doc corrections (price floor
+and receipt staleness were already fixed, "New invoice form" in TODO.md was stale)*

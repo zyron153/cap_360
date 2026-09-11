@@ -37,7 +37,7 @@ export class BillingRepository {
       where: { id },
       include: {
         items: { include: { service: { select: { name: true } } } },
-        payments: true,
+        payments: { include: { recordedBy: { select: { id: true, fullName: true } } } },
         patient: { select: { id: true, fullName: true, phone: true, nif: true } },
       },
     });
@@ -93,18 +93,19 @@ export class BillingRepository {
    */
   recordPaymentAtomic(
     invoiceId: string,
-    payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string },
+    payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string; recordedById?: string },
     invoiceTotal: number,
   ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
         data: {
-          invoice: { connect: { id: invoiceId } },
+          invoiceId,
           amount: payment.amount,
           method: payment.method,
           reference: payment.reference,
           paidAt: payment.paidAt,
           idempotencyKey: payment.idempotencyKey,
+          recordedById: payment.recordedById,
         },
       });
 

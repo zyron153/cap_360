@@ -111,14 +111,18 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
 - [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables
-- [ ] Server-side price floor (a hard minimum below catalogue price, independent of the admin-override gate)
+- [x] ~~Server-side price floor (a hard minimum below catalogue price, independent of the admin-override gate)~~ — corrected, this line was stale: `create()` requires `priceOverrideReason` whenever an admin bills below catalogue (`billing.service.ts`); REVIEW.md §1.3 already documents this as fully fixed
 - [x] ~~Invoice-to-health-plan linkage (`health_plan_id` on invoices was never implemented)~~ — corrected: `Invoice.healthPlanId` exists and is now actually read (the new payer-type breakdown above), this line was stale
+- [x] Payment-to-staff attribution — `Payment.recordedById` (FK to `Staff`), set from the authenticated caller in `POST /invoices/:id/payments`; previously no field existed at all
+- [x] Invoice cancellation now requires a `reason` (`CancelInvoiceSchema`, min 3 chars) and writes a semantic before/after audit diff (status + reason), not just the generic "POST" row the interceptor already logged
 
 **Frontend**
 - [x] Invoice list with status filters + KPI cards, invoice detail with payment recording
 - [x] Financeiro tabs (Overview / Entradas / Despesas / Faturas)
 - [x] Financeiro Overview date-range selector (this month / last 3 months / this year / custom) — previously hardcoded to Jan 1 of the current year with no way to change it
-- [ ] New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form
+- [x] ~~New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form~~ — corrected, this line was stale: `billing/new/page.tsx` is a real form posting to `POST /invoices`
+- [x] Cancel-invoice UI — the backend endpoint existed but nothing in the frontend called it; added a "Cancelar Fatura" button on the invoice detail page with the app's standard two-step inline confirmation + required reason textarea, plus a cancelled-invoice banner showing the reason/timestamp
+- [x] Payment history now shows who recorded each payment ("registado por …") when `recordedBy` is present
 
 ---
 
