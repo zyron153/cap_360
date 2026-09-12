@@ -6,7 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Plus, Trash2, ArrowLeft } from "lucide-react";
 
-type ServiceOption = { id: string; name: string; price: number };
+// price arrives as a string — it's a Prisma Decimal, serialized to JSON as text to avoid float rounding.
+type ServiceOption = { id: string; name: string; price: string };
 type LineItem = { serviceId: string; description: string; quantity: number; unitPrice: number };
 
 const inputCls =
@@ -44,7 +45,7 @@ export default function BillingNewPage() {
 
   function pickService(i: number, serviceId: string) {
     const svc = services?.find((s) => s.id === serviceId);
-    setItem(i, { serviceId, description: svc?.name ?? "", unitPrice: svc?.price ?? 0 });
+    setItem(i, { serviceId, description: svc?.name ?? "", unitPrice: svc ? Number(svc.price) : 0 });
   }
 
   const total = items.reduce((sum, it) => sum + it.quantity * it.unitPrice, 0);
