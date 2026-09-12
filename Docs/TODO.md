@@ -258,15 +258,27 @@ tracking, no assignment logic.
 
 ## Phase 4 — Growth
 
-### M10 — Analytics & Reporting — 🎭 mostly mock, revenue now real
-UI mostly mockup (`analytics/page.tsx`) — appointments, active-patient count, peak hours, and plan
-distribution are still hardcoded const arrays. The "Receita YTD" KPI and "Receita Mensal" chart are
-the one exception: both now fetch `GET /financeiro/summary` (year-to-date) and render the real
-`totalEntradas`/`monthly` figures, same data the Financeiro Overview tab uses. No
-`apps/api/src/modules/analytics` directory, no materialised views. The Financeiro Overview tab
-remains the template for what this module should actually look like — now covering receivables,
-revenue by payer type, revenue by service, no-show impact, and Faturas Pagas as Entrada on top of
-the original expenses/income summary.
+### M10 — Analytics & Reporting — 🟢 real backend for the appointment/patient side, exports still not built
+- [x] `apps/api/src/modules/analytics` (new, 2026-09-12): `GET /analytics/summary?from=&to=` —
+  appointments-by-month, total appointments, attendance rate (`completed / (completed + no_show)`,
+  pending/confirmed/cancelled excluded from both sides), top services, peak hours-of-day, all
+  scoped to the query range; plus two current-snapshot fields independent of that range — active
+  patients (>=1 appointment in the trailing 12 months) and their plan-product distribution
+  (`"Particular"` bucket for no active coverage). See `API-SPEC.md` §12.
+- [x] `analytics/page.tsx` rewritten to consume it — every KPI/chart that was a hardcoded const
+  array (`MONTHLY_APPTS`, `SERVICES`, `PEAK_HOURS`, `PLAN_DIST`, the "834 pacientes activos" and
+  "87% taxa de presença" numbers) is gone. Added the same date-range selector
+  (mês/trimestre/ano/personalizado) `billing/ResumoTab.tsx` already has, replacing the static
+  "Jan – Jun 2026" badge — Receita YTD/Mensal now respect the selected range too, not hardcoded to
+  calendar-year-to-date.
+- [ ] Materialised views (`mv_daily_appointments`, `mv_monthly_revenue`) — current queries are
+  plain live-table aggregation, fine at this data volume, revisit if it stops being fine
+- [ ] PDF/Excel/CSV export (`GET /analytics/export`)
+- [ ] Per-doctor/staff productivity breakdown, patient demographics (age band, neighbourhood),
+  booking-source attribution, health-plan renewal/churn rate — everything in
+  `M10-analytics-reporting.md` §§2.4–2.6 beyond what's listed done above
+- [ ] Corporate HR's own scoped view (§7 of that doc) — blocked on the same "no company-scoped
+  data isolation" gap as the rest of the corporate_hr role (see TODO.md's Self-Service Portals note)
 
 ### Self-Service Portals — not started
 No patient-facing login path exists at all — the auth system built 2026-08-31 (replacing

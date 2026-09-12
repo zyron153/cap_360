@@ -1,73 +1,37 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { TrendingUp, Users, Calendar, Banknote } from "lucide-react";
-import type { FinanceiroSummary } from "@cap/types";
+import type { FinanceiroSummary, AnalyticsSummary } from "@cap/types";
 import { usePermissions } from "../hooks/use-permissions";
 
-/* ── Static mock data (appointments/patients — not part of the Financeiro wiring) ── */
+const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
+const inputCls = "border border-dim-200 rounded-[10px] px-3 py-1.5 text-[12px] text-dim-900 bg-white focus:outline-none focus:border-brand-500";
 
-const MONTHLY_APPTS = [65, 72, 58, 81, 76, 88, 92, 79, 85, 91, 78, 95];
-const MONTHS_PT     = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+// Cycled by index for plan-distribution segments — "Particular" always pinned to slate below.
+const PALETTE = ["#0f9191", "#6d28d9", "#f59e0b", "#e11d48", "#0ea5e9", "#10b981", "#6366f1", "#ec4899"];
+const PARTICULAR_COLOR = "#94a3b8";
 
-const SERVICES = [
-  { name: "Medicina Geral",  count: 145, color: "bg-brand-500"    },
-  { name: "Enfermagem",      count: 120, color: "bg-teal-500"     },
-  { name: "Pediatria",       count: 98,  color: "bg-violet-500"   },
-  { name: "Cardiologia",     count: 76,  color: "bg-amber-500"    },
-  { name: "Ginecologia",     count: 65,  color: "bg-rose-500"     },
-  { name: "Fisioterapia",    count: 52,  color: "bg-sky-500"      },
-];
+type RangeMode = "month" | "quarter" | "year" | "custom";
+const RANGE_LABELS: Record<RangeMode, string> = {
+  month: "Este mês", quarter: "Últimos 3 meses", year: "Este ano", custom: "Personalizado",
+};
 
-const PEAK_HOURS = [
-  { hour: "08h", count: 4  },
-  { hour: "09h", count: 12 },
-  { hour: "10h", count: 18 },
-  { hour: "11h", count: 22 },
-  { hour: "12h", count: 8  },
-  { hour: "13h", count: 14 },
-  { hour: "14h", count: 19 },
-  { hour: "15h", count: 16 },
-  { hour: "16h", count: 11 },
-  { hour: "17h", count: 7  },
-  { hour: "18h", count: 3  },
-];
-
-const PLAN_DIST = [
-  { label: "Familiar",      pct: 38, color: "#0f9191" },
-  { label: "Corporativo",   pct: 44, color: "#6d28d9" },
-  { label: "Particular",    pct: 18, color: "#94a3b8" },
-];
-
-/* ── Chart computations ───────────────────────────────────── */
-
-// Bar chart: 560 wide, 180 tall; bars start at y=10
-const BAR_MAX  = Math.max(...MONTHLY_APPTS);
-const BAR_H    = 130;
-const BAR_W    = 36;
-const BAR_GAP  = 9;
-const BAR_SLOT = BAR_W + BAR_GAP;
-const BAR_OFF  = (560 - (12 * BAR_SLOT - BAR_GAP)) / 2;
-
-const barRects = MONTHLY_APPTS.map((v, i) => {
-  const bh = (v / BAR_MAX) * BAR_H;
-  return { x: BAR_OFF + i * BAR_SLOT, y: 10 + BAR_H - bh, w: BAR_W, h: bh, label: MONTHS_PT[i], value: v };
-});
-
-// Line chart: 500 wide, 120 tall — built from real Financeiro data at render time (see buildRevenueChart)
-const REV_CHART_H = 90;
+function fmtDateParam(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 function monthLabel(month: string) {
   const [y, m] = month.split("-").map(Number);
   return format(new Date(y, m - 1, 1), "MMM", { locale: pt });
 }
 
-/** Turns FinanceiroSummary.monthly (real Entradas, faturas pagas + manuais) into the same
- * {x,y,value,label} point shape the static mock used, so the existing SVG markup needn't change. */
+/** Turns FinanceiroSummary.monthly (real Entradas, faturas pagas + manuais) into an {x,y,value,label} point series. */
 function buildRevenueChart(monthly: FinanceiroSummary["monthly"]) {
+  const REV_CHART_H = 90;
   const points = monthly.map((m) => ({ month: m.month, value: m.entradas, label: monthLabel(m.month) }));
   const values = points.map((p) => p.value);
   const max = Math.max(1, ...values);
@@ -87,31 +51,42 @@ function buildRevenueChart(monthly: FinanceiroSummary["monthly"]) {
   return { plotted, line, area, min, max, guides };
 }
 
-// Donut chart: r=44, cx=cy=60
-const DONUT_R = 44;
-const DONUT_C = 2 * Math.PI * DONUT_R; // ≈ 276.46
-
-function planSegments() {
-  let offset = 0;
-  return PLAN_DIST.map((p) => {
-    const dash   = (p.pct / 100) * DONUT_C;
-    const gap    = DONUT_C - dash;
-    const result = { ...p, dash, gap, offset: -offset };
-    offset      += dash;
-    return result;
+/** Turns appointmentsByMonth into the same {x,y,w,h,label,value} bar shape the page's SVG expects. */
+function buildApptBars(monthly: AnalyticsSummary["appointmentsByMonth"]) {
+  const BAR_H = 130, BAR_W = 36, BAR_GAP = 9;
+  const slot = BAR_W + BAR_GAP;
+  const max = Math.max(1, ...monthly.map((m) => m.count));
+  const totalW = Math.max(1, monthly.length) * slot - BAR_GAP;
+  const offset = (560 - totalW) / 2;
+  return monthly.map((m, i) => {
+    const h = (m.count / max) * BAR_H;
+    return { x: offset + i * slot, y: 10 + BAR_H - h, w: BAR_W, h, label: monthLabel(m.month), value: m.count };
   });
 }
-const segments = planSegments();
 
-const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
-
-function fmtDateParam(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function donutSegments(dist: AnalyticsSummary["planDistribution"]) {
+  const DONUT_R = 44;
+  const DONUT_C = 2 * Math.PI * DONUT_R;
+  let offset = 0;
+  return dist.map((d, i) => {
+    const dash = (d.pct / 100) * DONUT_C;
+    const gap = DONUT_C - dash;
+    const color = d.label === "Particular" ? PARTICULAR_COLOR : PALETTE[i % PALETTE.length];
+    const seg = { ...d, dash, gap, offset: -offset, color };
+    offset += dash;
+    return seg;
+  });
 }
 
 async function fetchFinanceiroSummary(from: string, to: string): Promise<FinanceiroSummary> {
   const res = await fetch(`/api/financeiro/summary?from=${from}&to=${to}`);
   if (!res.ok) throw new Error("Erro ao carregar resumo financeiro");
+  return res.json();
+}
+
+async function fetchAnalyticsSummary(from: string, to: string): Promise<AnalyticsSummary> {
+  const res = await fetch(`/api/analytics/summary?from=${from}&to=${to}`);
+  if (!res.ok) throw new Error("Erro ao carregar resumo de analytics");
   return res.json();
 }
 
@@ -121,47 +96,98 @@ export default function AnalyticsPage() {
   useEffect(() => {
     if (!permLoading && !can("analytics")) router.replace("/dashboard");
   }, [permLoading, can, router]);
-  const peakMax = Math.max(...PEAK_HOURS.map((h) => h.count));
-  const svcMax  = Math.max(...SERVICES.map((s) => s.count));
-  const totalAppts = MONTHLY_APPTS.reduce((a, b) => a + b, 0);
 
-  const today = new Date();
+  const [rangeMode, setRangeMode] = useState<RangeMode>("year");
+  const today = useMemo(() => new Date(), []);
+  const [customFrom, setCustomFrom] = useState(fmtDateParam(new Date(today.getFullYear(), 0, 1)));
+  const [customTo, setCustomTo] = useState(fmtDateParam(today));
+
+  const { from, to } = useMemo(() => {
+    if (rangeMode === "custom") return { from: customFrom, to: customTo };
+    if (rangeMode === "month") return { from: fmtDateParam(new Date(today.getFullYear(), today.getMonth(), 1)), to: fmtDateParam(today) };
+    if (rangeMode === "quarter") return { from: fmtDateParam(new Date(today.getFullYear(), today.getMonth() - 2, 1)), to: fmtDateParam(today) };
+    return { from: fmtDateParam(new Date(today.getFullYear(), 0, 1)), to: fmtDateParam(today) };
+  }, [rangeMode, customFrom, customTo, today]);
+
   const { data: financeiro } = useQuery({
-    queryKey: ["analytics-financeiro-summary"],
-    queryFn: () => fetchFinanceiroSummary(fmtDateParam(new Date(today.getFullYear(), 0, 1)), fmtDateParam(today)),
+    queryKey: ["analytics-financeiro-summary", from, to],
+    queryFn: () => fetchFinanceiroSummary(from, to),
     staleTime: 60_000,
   });
+  const { data: analytics, isLoading: analyticsLoading, error: analyticsError } = useQuery({
+    queryKey: ["analytics-summary", from, to],
+    queryFn: () => fetchAnalyticsSummary(from, to),
+    staleTime: 60_000,
+  });
+
   const revenueChart = buildRevenueChart(financeiro?.monthly ?? []);
-  const receitaYtd = financeiro?.totalEntradas ?? 0;
+  const receita = financeiro?.totalEntradas ?? 0;
+
+  if (analyticsLoading || !analytics) {
+    return (
+      <div className="flex flex-col gap-5">
+        <div className="grid grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className={`${CARD} h-28 animate-pulse`} />)}
+        </div>
+        <div className={`${CARD} h-56 animate-pulse`} />
+      </div>
+    );
+  }
+
+  if (analyticsError) {
+    return (
+      <div className={CARD}>
+        <p className="text-[13px] text-dim-500 text-center py-16">Erro ao carregar analytics.</p>
+      </div>
+    );
+  }
+
+  const apptBars = buildApptBars(analytics.appointmentsByMonth);
+  const barMax = Math.max(1, ...apptBars.map((b) => b.value));
+  const svcMax = Math.max(1, ...analytics.topServices.map((s) => s.count));
+  const peakMax = Math.max(1, ...analytics.peakHours.map((h) => h.count));
+  const segments = donutSegments(analytics.planDistribution);
+  const attendanceLabel = analytics.attendanceRate.rate === null ? "—" : `${analytics.attendanceRate.rate}%`;
 
   return (
     <div className="flex flex-col gap-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display text-[22px] font-bold text-dim-900">Analytics</h1>
-          <p className="text-[13px] text-dim-500 mt-0.5">Métricas e indicadores de desempenho — 2026</p>
+          <p className="text-[13px] text-dim-500 mt-0.5">
+            Período: <span className="font-semibold text-dim-700">{format(new Date(`${from}T12:00:00`), "dd/MM/yyyy")} – {format(new Date(`${to}T12:00:00`), "dd/MM/yyyy")}</span>
+          </p>
         </div>
-        <span className="flex items-center gap-1.5 border border-dim-200 bg-white text-dim-600 text-[12px] font-medium px-3.5 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.04)]">
-          Jan – Jun 2026
-        </span>
+        <div className="flex items-center gap-2">
+          <select value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)} className={inputCls}>
+            {(Object.keys(RANGE_LABELS) as RangeMode[]).map((m) => <option key={m} value={m}>{RANGE_LABELS[m]}</option>)}
+          </select>
+          {rangeMode === "custom" && (
+            <>
+              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className={inputCls} />
+              <span className="text-dim-400 text-[12px]">–</span>
+              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className={inputCls} />
+            </>
+          )}
+        </div>
       </div>
 
       {/* KPI cards */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { icon: Calendar,  label: "Consultas (YTD)",   value: totalAppts,       sub: "+12% vs ano anterior",  bg: "bg-brand-50",   cls: "text-brand-600",   fmt: (v: number) => v.toString()                              },
-          { icon: Users,     label: "Pacientes Activos", value: 834,              sub: "+48 este mês",          bg: "bg-violet-50",  cls: "text-violet-600",  fmt: (v: number) => v.toString()                              },
-          { icon: Banknote,  label: "Receita YTD",       value: receitaYtd,       sub: "Faturas pagas + entradas manuais", bg: "bg-emerald-50", cls: "text-emerald-600", fmt: (v: number) => `${(v/1000).toFixed(0)}k CVE` },
-          { icon: TrendingUp,label: "Taxa de Presença",  value: 87,               sub: "meta: 90%",             bg: "bg-amber-50",   cls: "text-amber-600",   fmt: (v: number) => `${v}%`                                   },
+          { icon: Calendar,   label: "Consultas",         display: analytics.totalAppointments.toString(),         sub: "no período selecionado", bg: "bg-brand-50",   cls: "text-brand-600"   },
+          { icon: Users,      label: "Pacientes Activos", display: analytics.activePatients.toString(),            sub: "últimos 12 meses",       bg: "bg-violet-50",  cls: "text-violet-600"  },
+          { icon: Banknote,   label: "Receita",           display: `${(receita/1000).toFixed(0)}k CVE`,            sub: "Faturas pagas + entradas manuais", bg: "bg-emerald-50", cls: "text-emerald-600" },
+          { icon: TrendingUp, label: "Taxa de Presença",  display: attendanceLabel, sub: `${analytics.attendanceRate.completed} concluídas · ${analytics.attendanceRate.noShow} faltas`, bg: "bg-amber-50", cls: "text-amber-600" },
         ].map((s) => (
           <div key={s.label} className={CARD}>
             <div className="px-5 py-5">
               <div className={`w-9 h-9 ${s.bg} rounded-[10px] flex items-center justify-center mb-3`}>
                 <s.icon className={s.cls} style={{ width: 18, height: 18 }} />
               </div>
-              <p className="font-display font-bold text-[26px] text-dim-900 leading-none font-mono">{s.fmt(s.value)}</p>
+              <p className="font-display font-bold text-[26px] text-dim-900 leading-none font-mono">{s.display}</p>
               <p className="text-[12px] font-semibold text-dim-700 mt-1">{s.label}</p>
               <p className="text-[11px] text-dim-400 mt-0.5">{s.sub}</p>
             </div>
@@ -174,51 +200,46 @@ export default function AnalyticsPage() {
         <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
           <div>
             <h2 className="font-display text-[14px] font-semibold text-dim-900">Consultas por Mês</h2>
-            <p className="text-[11px] text-dim-400 mt-0.5">Total: <span className="font-mono font-semibold text-dim-700">{totalAppts}</span> em 2026</p>
+            <p className="text-[11px] text-dim-400 mt-0.5">Total: <span className="font-mono font-semibold text-dim-700">{analytics.totalAppointments}</span> no período</p>
           </div>
-          <span className="font-mono text-[11px] text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full">Pico: {BAR_MAX} consultas</span>
+          <span className="font-mono text-[11px] text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full">Pico: {barMax} consultas</span>
         </div>
         <div className="px-4 py-4">
-          <svg viewBox="0 0 560 180" className="w-full" style={{ height: 180 }}>
-            <defs>
-              <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0f9191" stopOpacity="1" />
-                <stop offset="100%" stopColor="#13A3A3" stopOpacity="0.7" />
-              </linearGradient>
-            </defs>
-            {/* Horizontal guide lines */}
-            {[0, 25, 50, 75, 100].map((pct) => {
-              const y = 10 + BAR_H - (pct / 100) * BAR_H;
-              const val = Math.round((pct / 100) * BAR_MAX);
-              return (
-                <g key={pct}>
-                  <line x1="0" y1={y} x2="560" y2={y} stroke="#e2e8f0" strokeWidth="1" strokeDasharray={pct === 0 ? "none" : "3,3"} />
-                  {pct > 0 && (
-                    <text x="2" y={y - 2} fontSize="8" fill="#94a3b8" fontFamily="monospace">{val}</text>
+          {apptBars.length === 0 ? (
+            <p className="text-[13px] text-dim-400 text-center py-10">Sem consultas registadas neste período.</p>
+          ) : (
+            <svg viewBox="0 0 560 180" className="w-full" style={{ height: 180 }}>
+              <defs>
+                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0f9191" stopOpacity="1" />
+                  <stop offset="100%" stopColor="#13A3A3" stopOpacity="0.7" />
+                </linearGradient>
+              </defs>
+              {[0, 25, 50, 75, 100].map((pct) => {
+                const y = 10 + 130 - (pct / 100) * 130;
+                const val = Math.round((pct / 100) * barMax);
+                return (
+                  <g key={pct}>
+                    <line x1="0" y1={y} x2="560" y2={y} stroke="#e2e8f0" strokeWidth="1" strokeDasharray={pct === 0 ? "none" : "3,3"} />
+                    {pct > 0 && <text x="2" y={y - 2} fontSize="8" fill="#94a3b8" fontFamily="monospace">{val}</text>}
+                  </g>
+                );
+              })}
+              {apptBars.map((b, i) => (
+                <g key={i}>
+                  <rect x={b.x} y={b.y} width={b.w} height={b.h} fill="url(#barGrad)" rx="4" />
+                  {b.h > 20 && (
+                    <text x={b.x + b.w / 2} y={b.y + 12} textAnchor="middle" fontSize="8" fill="white" fontFamily="monospace" fontWeight="bold">
+                      {b.value}
+                    </text>
                   )}
-                </g>
-              );
-            })}
-            {/* Bars */}
-            {barRects.map((b, i) => (
-              <g key={i}>
-                <rect
-                  x={b.x} y={b.y} width={b.w} height={b.h}
-                  fill="url(#barGrad)" rx="4"
-                />
-                {/* Value label on tall bars */}
-                {b.h > 20 && (
-                  <text x={b.x + b.w / 2} y={b.y + 12} textAnchor="middle" fontSize="8" fill="white" fontFamily="monospace" fontWeight="bold">
-                    {b.value}
+                  <text x={b.x + b.w / 2} y="168" textAnchor="middle" fontSize="9" fill="#64748b" fontFamily="sans-serif">
+                    {b.label}
                   </text>
-                )}
-                {/* Month label */}
-                <text x={b.x + b.w / 2} y="168" textAnchor="middle" fontSize="9" fill="#64748b" fontFamily="sans-serif">
-                  {b.label}
-                </text>
-              </g>
-            ))}
-          </svg>
+                </g>
+              ))}
+            </svg>
+          )}
         </div>
       </div>
 
@@ -230,7 +251,7 @@ export default function AnalyticsPage() {
           <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
             <div>
               <h2 className="font-display text-[14px] font-semibold text-dim-900">Receita Mensal</h2>
-              <p className="text-[11px] text-dim-400 mt-0.5">Entradas (faturas pagas + manuais) · {today.getFullYear()} · em CVE</p>
+              <p className="text-[11px] text-dim-400 mt-0.5">Entradas (faturas pagas + manuais) · em CVE</p>
             </div>
             {revenueChart.plotted.length > 0 && (
               <span className="font-mono text-[12px] text-emerald-700 font-bold">
@@ -250,9 +271,8 @@ export default function AnalyticsPage() {
                     <stop offset="100%" stopColor="#13A3A3" stopOpacity="0.01" />
                   </linearGradient>
                 </defs>
-                {/* Guide lines */}
                 {revenueChart.guides.map((v) => {
-                  const y = 100 - ((v - revenueChart.min) / Math.max(1, revenueChart.max - revenueChart.min)) * REV_CHART_H;
+                  const y = 100 - ((v - revenueChart.min) / Math.max(1, revenueChart.max - revenueChart.min)) * 90;
                   return (
                     <g key={v}>
                       <line x1="10" y1={y.toFixed(1)} x2="490" y2={y.toFixed(1)} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="3,3" />
@@ -260,11 +280,8 @@ export default function AnalyticsPage() {
                     </g>
                   );
                 })}
-                {/* Filled area */}
                 <path d={revenueChart.area} fill="url(#areaGrad)" />
-                {/* Line */}
                 <path d={revenueChart.line} fill="none" stroke="#0f9191" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-                {/* Points */}
                 {revenueChart.plotted.map((p, i) => (
                   <g key={i}>
                     <circle cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r="4" fill="white" stroke="#0f9191" strokeWidth="2" />
@@ -282,37 +299,43 @@ export default function AnalyticsPage() {
         <div className={CARD}>
           <div className="px-5 py-4 border-b border-dim-100">
             <h2 className="font-display text-[14px] font-semibold text-dim-900">Distribuição por Plano</h2>
-            <p className="text-[11px] text-dim-400 mt-0.5">Pacientes activos</p>
+            <p className="text-[11px] text-dim-400 mt-0.5">Pacientes activos (últimos 12 meses)</p>
           </div>
           <div className="px-5 py-4 flex flex-col items-center gap-5">
-            <svg viewBox="0 0 120 120" width="120" height="120">
-              {segments.map((seg) => (
-                <circle
-                  key={seg.label}
-                  cx="60" cy="60" r={DONUT_R}
-                  fill="none"
-                  stroke={seg.color}
-                  strokeWidth="16"
-                  strokeDasharray={`${seg.dash.toFixed(2)} ${seg.gap.toFixed(2)}`}
-                  strokeDashoffset={seg.offset.toFixed(2)}
-                  style={{ transform: "rotate(-90deg)", transformOrigin: "60px 60px" }}
-                />
-              ))}
-              <text x="60" y="56" textAnchor="middle" fontSize="14" fontWeight="bold" fill="#1A1A2E" fontFamily="monospace">834</text>
-              <text x="60" y="68" textAnchor="middle" fontSize="8" fill="#94a3b8" fontFamily="sans-serif">pacientes</text>
-            </svg>
+            {segments.length === 0 ? (
+              <p className="text-[13px] text-dim-400 text-center py-8">Sem pacientes activos.</p>
+            ) : (
+              <>
+                <svg viewBox="0 0 120 120" width="120" height="120">
+                  {segments.map((seg) => (
+                    <circle
+                      key={seg.label}
+                      cx="60" cy="60" r="44"
+                      fill="none"
+                      stroke={seg.color}
+                      strokeWidth="16"
+                      strokeDasharray={`${seg.dash.toFixed(2)} ${seg.gap.toFixed(2)}`}
+                      strokeDashoffset={seg.offset.toFixed(2)}
+                      style={{ transform: "rotate(-90deg)", transformOrigin: "60px 60px" }}
+                    />
+                  ))}
+                  <text x="60" y="56" textAnchor="middle" fontSize="14" fontWeight="bold" fill="#1A1A2E" fontFamily="monospace">{analytics.activePatients}</text>
+                  <text x="60" y="68" textAnchor="middle" fontSize="8" fill="#94a3b8" fontFamily="sans-serif">pacientes</text>
+                </svg>
 
-            <div className="w-full flex flex-col gap-2">
-              {segments.map((seg) => (
-                <div key={seg.label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
-                    <span className="text-[12px] text-dim-600">{seg.label}</span>
-                  </div>
-                  <span className="font-mono text-[12px] font-semibold text-dim-900">{seg.pct}%</span>
+                <div className="w-full flex flex-col gap-2">
+                  {segments.map((seg) => (
+                    <div key={seg.label} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: seg.color }} />
+                        <span className="text-[12px] text-dim-600 truncate">{seg.label}</span>
+                      </div>
+                      <span className="font-mono text-[12px] font-semibold text-dim-900 shrink-0">{seg.pct}%</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -324,26 +347,27 @@ export default function AnalyticsPage() {
         <div className={CARD}>
           <div className="px-5 py-4 border-b border-dim-100">
             <h2 className="font-display text-[14px] font-semibold text-dim-900">Serviços mais Solicitados</h2>
-            <p className="text-[11px] text-dim-400 mt-0.5">Consultas por especialidade</p>
+            <p className="text-[11px] text-dim-400 mt-0.5">Consultas por especialidade, no período</p>
           </div>
           <div className="px-5 py-4 flex flex-col gap-3.5">
-            {SERVICES.map((s, i) => (
-              <div key={s.name}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[10px] text-dim-400 w-3 text-right shrink-0">{i + 1}</span>
-                    <span className="text-[12px] font-medium text-dim-800">{s.name}</span>
+            {analytics.topServices.length === 0 ? (
+              <p className="text-[13px] text-dim-400 text-center py-6">Sem consultas registadas neste período.</p>
+            ) : (
+              analytics.topServices.map((s, i) => (
+                <div key={s.service}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] text-dim-400 w-3 text-right shrink-0">{i + 1}</span>
+                      <span className="text-[12px] font-medium text-dim-800">{s.service}</span>
+                    </div>
+                    <span className="font-mono text-[12px] font-semibold text-dim-700">{s.count}</span>
                   </div>
-                  <span className="font-mono text-[12px] font-semibold text-dim-700">{s.count}</span>
+                  <div className="h-1.5 bg-dim-100 rounded-full overflow-hidden ml-5">
+                    <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${(s.count / svcMax) * 100}%` }} />
+                  </div>
                 </div>
-                <div className="h-1.5 bg-dim-100 rounded-full overflow-hidden ml-5">
-                  <div
-                    className={`h-full ${s.color} rounded-full transition-all`}
-                    style={{ width: `${(s.count / svcMax) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
@@ -351,25 +375,26 @@ export default function AnalyticsPage() {
         <div className={CARD}>
           <div className="px-5 py-4 border-b border-dim-100">
             <h2 className="font-display text-[14px] font-semibold text-dim-900">Horários de Pico</h2>
-            <p className="text-[11px] text-dim-400 mt-0.5">Distribuição de consultas por hora</p>
+            <p className="text-[11px] text-dim-400 mt-0.5">Distribuição de consultas por hora, no período</p>
           </div>
           <div className="px-5 py-4 flex flex-col gap-2">
-            {PEAK_HOURS.map((h) => {
-              const pct = (h.count / peakMax) * 100;
-              const isPeak = h.count >= peakMax * 0.8;
-              return (
-                <div key={h.hour} className="flex items-center gap-3">
-                  <span className="font-mono text-[10px] text-dim-400 w-8 shrink-0">{h.hour}</span>
-                  <div className="flex-1 h-4 bg-dim-100 rounded-md overflow-hidden">
-                    <div
-                      className={`h-full rounded-md transition-all ${isPeak ? "bg-brand-700" : "bg-brand-300"}`}
-                      style={{ width: `${pct}%` }}
-                    />
+            {analytics.peakHours.length === 0 ? (
+              <p className="text-[13px] text-dim-400 text-center py-6">Sem consultas registadas neste período.</p>
+            ) : (
+              analytics.peakHours.map((h) => {
+                const pct = (h.count / peakMax) * 100;
+                const isPeak = h.count >= peakMax * 0.8;
+                return (
+                  <div key={h.hour} className="flex items-center gap-3">
+                    <span className="font-mono text-[10px] text-dim-400 w-8 shrink-0">{String(h.hour).padStart(2, "0")}h</span>
+                    <div className="flex-1 h-4 bg-dim-100 rounded-md overflow-hidden">
+                      <div className={`h-full rounded-md transition-all ${isPeak ? "bg-brand-700" : "bg-brand-300"}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="font-mono text-[10px] text-dim-600 w-4 text-right shrink-0">{h.count}</span>
                   </div>
-                  <span className="font-mono text-[10px] text-dim-600 w-4 text-right shrink-0">{h.count}</span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>

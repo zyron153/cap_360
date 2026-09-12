@@ -49,6 +49,8 @@ Guard section below).
 | `/settings` | `(app)/settings/page.tsx` | admin |
 | `/parametrizacoes` | `(app)/parametrizacoes/page.tsx` | admin — service pricing, business hours, clinic info; not in the original doc |
 | `/access` | `(app)/access/page.tsx` | admin — not in the original doc; role/permission-related |
+| `/records` | `(app)/records/page.tsx` | admin, doctor, nurse — M7 Clinical Records, real backend (see below, this table previously had it as a mockup) |
+| `/analytics` | `(app)/analytics/page.tsx` | admin, doctor, nurse — M10 Analytics; appointment/attendance/plan-mix metrics real since 2026-09-12 (see `API-SPEC.md` §12), revenue KPIs real since an earlier session — exports and per-doctor/staff-productivity views from the original design remain unbuilt |
 
 🎭 **Mockup shells with no real backend** (see each module's doc for what's actually built, if anything):
 
@@ -56,9 +58,7 @@ Guard section below).
 |---|---|---|
 | `/whatsapp` | `(app)/whatsapp/page.tsx` | M3 — WhatsApp Integration |
 | `/exams` | `(app)/exams/page.tsx` | M5 — Exam Results |
-| `/records` | `(app)/records/page.tsx` | M7 — Clinical Records |
 | `/visits` | `(app)/visits/page.tsx` | M9 — Home Visits |
-| `/analytics` | `(app)/analytics/page.tsx` | M10 — Analytics |
 
 ❌ Doesn't exist at all: `/appointments/[id]` detail page, `/appointments/waitlist`,
 `/patients/[id]/documents`, `/companies*` (no page — Companies is only ever managed inline from the

@@ -531,7 +531,39 @@ There is **no upload endpoint** — nothing in the running app can currently cre
 
 ---
 
-## 12. Not implemented
+## 12. Analytics (M10)
+
+Added 2026-09-12. Covers the appointment/patient-side metrics Financeiro's own summary (§3)
+doesn't — that endpoint remains the place for revenue/expense reporting; this one is appointment
+volume, attendance, and plan-mix. No materialised views, no exports (PDF/Excel/CSV) — those parts
+of `modules/M10-analytics-reporting.md`'s original design remain unimplemented.
+
+### GET `/analytics/summary`
+**Roles:** admin, doctor, nurse
+```
+Query: ?from=YYYY-MM-DD&to=YYYY-MM-DD   (both optional — default from = Jan 1 of the current
+                                          year, to = now, same convention as /financeiro/summary)
+Response 200: {
+  "appointmentsByMonth": [{ "month": "2026-09", "count": 32 }],
+  "totalAppointments": 32,
+  "attendanceRate": { "completed": 8, "noShow": 0, "rate": 100 },  // rate is null with no
+                                                                     // completed/no_show at all
+  "topServices": [{ "service": "Consulta Dentária", "count": 24 }],  // top 8
+  "peakHours": [{ "hour": 9, "count": 20 }],   // only hours with >=1 appointment; hour is 0-23
+  "activePatients": 7,           // snapshot: patients with >=1 appointment in the trailing 12
+                                  // months from now — NOT scoped to from/to, same reasoning as
+                                  // FinanceiroSummary.receivables
+  "planDistribution": [{ "label": "Particular", "count": 7, "pct": 100 }]  // same active-patient
+                                                                             // snapshot, grouped
+                                                                             // by health-plan
+                                                                             // product name or
+                                                                             // "Particular"
+}
+```
+
+---
+
+## 13. Not implemented
 
 The following modules from the original design have **no backend at all** — no controller, no
 service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail):
@@ -540,13 +572,11 @@ service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail):
 |---|---|
 | M3 — WhatsApp Integration | 🎭 UI mockup only. No `/whatsapp/*` routes, no webhook handler, no bot |
 | M5 — Exam Results | Only `exam_requests` exists as a schema stub, no controller/service at all; no result field, no `/exam-requests/:id/results`, no token-based download |
-| M7 — Clinical Records | 🎭 UI mockup only. No `/appointments/:id/clinical-note`, no prescriptions/referrals |
 | M9 — Home Visits | 🎭 UI mockup only. No `/home-visits/*` routes |
-| M10 — Analytics | 🎭 UI mockup only. No `/analytics/*` routes — the Financeiro summary (§3) is the one place with real aggregate data today |
 
 ---
 
-## 13. Common HTTP Status Codes
+## 14. Common HTTP Status Codes
 
 | Code | Meaning | When Used |
 |---|---|---|
