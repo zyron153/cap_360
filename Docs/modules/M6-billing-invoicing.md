@@ -134,8 +134,10 @@ reporting engine — everything below lives on the Financeiro Overview tab speci
   outside this specific breakdown
 - ✅ Revenue by service — billed (not necessarily collected) totals per `InvoiceItem.serviceId`,
   falling back to the line item's free-text description when it has none
-- ✅ No-show financial impact — count of `no_show` appointments in range, plus the hypothetical
-  revenue lost (their service's price, never actually billed)
+- ✅ No-show financial impact — count of "faltas" (`no_show` **and** `cancelled` appointments) in
+  range, plus the hypothetical revenue lost (their service's price, never actually billed). Widened
+  from `no_show`-only after the card showed 0/0 for periods with only cancellations
+  (`FinanceiroRepository.noShowAppointments`) — field name (`noShowImpact`) predates the widening.
 - ❌ No revenue-by-doctor breakdown, no daily (as opposed to monthly-chart/period-snapshot)
   granularity, no Excel/PDF export
 - ❌ **M10 Analytics still doesn't exist as its own module** (see
@@ -166,7 +168,7 @@ design.
 |---|---|---|
 | Check-in & Invoice | Receptionist | ✅ Check in patient triggers an auto-created draft invoice |
 | Invoice List | Receptionist / Admin | ✅ Filterable list of all invoices |
-| Invoice Detail | Receptionist / Admin | ✅ Line items, payment history, cancel action |
+| Invoice Detail | Receptionist / Admin | ✅ Line items, payment history, cancel action — available both as a full `/billing/:id` page and as a modal opened from the Faturas list's "Detalhes" button (same shared component, `InvoiceDetailBody.tsx`, so the two can't drift) |
 | Payment Modal | Receptionist | ✅ Record payment — method, amount, reference |
 | Outstanding Balances | Admin | ❌ No dedicated screen (see §2.5) |
 | Revenue Dashboard | Admin | ❌ Doesn't exist (see §3) |
@@ -195,6 +197,8 @@ design.
 
 ---
 
-*Module M6 · v1.4 · updated 2026-09-11 — payment-to-staff attribution, invoice-cancel reason +
-audit diff + the frontend cancel UI that was missing entirely, plus doc corrections (price floor
-and receipt staleness were already fixed, "New invoice form" in TODO.md was stale)*
+*Module M6 · v1.5 · updated 2026-09-12 — "Detalhes" on the Faturas list now opens the invoice
+detail experience as a modal instead of navigating away (extracted into shared
+`InvoiceDetailBody.tsx`, reused by the full `/billing/:id` page); "faltas" financial impact widened
+from `no_show`-only to `no_show` + `cancelled`; patient-name null-safety fix (right-to-erasure
+leaves `fullName: null`) applied across the dashboard and billing screens*

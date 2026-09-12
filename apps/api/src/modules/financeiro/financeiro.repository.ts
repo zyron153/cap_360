@@ -113,10 +113,10 @@ export class FinanceiroRepository {
     });
   }
 
-  // ── No-show financial impact ──────────────────────────────
+  // ── Faltas financial impact (no-show + cancelled — both are billable time that went unbilled) ──
   noShowAppointments(from: Date, to: Date) {
     return this.prisma.appointment.findMany({
-      where: { status: "no_show", scheduledAt: { gte: from, lte: to }, deletedAt: null },
+      where: { status: { in: ["no_show", "cancelled"] }, scheduledAt: { gte: from, lte: to }, deletedAt: null },
       select: { service: { select: { price: true } } },
     });
   }

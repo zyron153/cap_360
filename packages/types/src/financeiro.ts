@@ -98,6 +98,7 @@ export interface FinanceiroSummary {
    * privately — manual Income entries have no payer, so they're outside this breakdown entirely. */
   byPayerType: { privado: number; planoSaude: number };
   byService: { service: string; total: number }[];
-  /** Hypothetical revenue lost to no-show appointments (their service's price, never billed). */
+  /** Hypothetical revenue lost to faltas — no-show AND cancelled appointments alike (their
+   * service's price, never billed). Field name predates the cancelled-appointment inclusion. */
   noShowImpact: { count: number; lostRevenue: number };
 }
