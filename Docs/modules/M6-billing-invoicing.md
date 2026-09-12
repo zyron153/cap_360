@@ -11,9 +11,14 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 
 > **Implementation status:** invoice creation (auto-draft on Consulta completion + manual), payments
 > (idempotent, transactional, overpayment-guarded), cancellation, PDF receipts, and E-Fatura tax
-> submission are built and tested. ❌ Nothing computes health-plan co-pay/discounts or tracks plan
-> utilisation — `health_plan` is only a `PaymentMethod` enum value (though `Invoice.healthPlanId`
-> itself is real and now actually read, by the payer-type breakdown in §2.6/§3). ❌ No automatic
+> submission are built and tested. ✅ **Health-plan co-pay is now computed** — a patient with an
+> active plan gets an automatic negative "Desconto Plano de Saúde" line on invoice creation (manual
+> and auto-draft alike), sized from the plan product's `coverageRules.coverage` %
+> (`HealthPlansService.getActiveCoverage`); plan **utilisation** (`HealthPlan.usageCount`) is
+> separately incremented on appointment completion regardless of how the resulting invoice gets
+> paid (`AppointmentsService`, unrelated to this discount). `health_plan` as a `PaymentMethod` value
+> is still just a label with no discount logic of its own — the discount is applied once, up front,
+> at invoice creation. ❌ No automatic
 > WhatsApp/email receipt delivery — a receipt is only ever generated on request via
 > `GET /invoices/:id/receipt`. ✅ Receivables (outstanding/overdue invoices) and a handful of
 > revenue breakdowns exist now (§2.5/§3) — real numbers, not a mockup, but scoped to what's
@@ -29,8 +34,9 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 
 - ✅ Admin-managed list of billable services with base price (CVE) — plain per-service price, no
   bulk-update endpoint
-- ❌ Health-plan-specific pricing/co-pay tiers — no such field or logic exists anywhere in the
-  codebase; a health plan is a simple FK on the patient, not a pricing table
+- ✅ **Fixed.** Health-plan co-pay — a flat coverage % per product (`coverageRules.coverage`), not
+  per-service tiers; applied as one discount line covering the whole invoice, not per catalogue
+  item (see the module-level implementation status note above)
 - ✅ **Price-override guard (not in the original design):** billing a catalogued service at a price
   different from `Service.price` requires the `admin` role and is logged (`Logger.warn`) with the
   patient/service/override amount; custom off-catalogue line items (no `serviceId`) aren't
@@ -206,7 +212,8 @@ design.
   (not automatically per payment) — there's no per-payment receipt. The staleness half of this gap
   is closed: `recordPaymentAtomic` nulls `pdfR2Key` on every payment, so a cached receipt can no
   longer be served after a later payment changes the balance.
-- ❌ Health-plan utilisation/co-pay check — not implemented (see §2.1/§2.3)
+- ✅ **Fixed.** Health-plan co-pay — see §1/§2.1. Utilisation (`usageCount`) was already tracked
+  separately (`AppointmentsService`, on appointment completion) before this fix.
 - ✅ **Fixed.** Payment-to-staff attribution — `Payment.recordedById` (see §2.3).
 
 ---

@@ -11,7 +11,11 @@
   `endDate` não expirada, e `coverageRules.coverage` > 0 (capado a 100%); quando aplicável,
   `BillingService.applyHealthPlanDiscount` acrescenta uma linha negativa "Desconto Plano de Saúde
   (N%) — {produto}" ao subtotal, mantendo os itens de catálogo intactos para auditoria, e liga a
-  fatura ao `healthPlanId` do plano (a menos que um tenha sido explicitamente indicado). Resolve o
+  fatura ao `healthPlanId` do plano (a menos que um tenha sido explicitamente indicado). Também
+  corrigido de caminho: `InvoiceDetailBody.tsx` identificava "o item gerado pelo agendamento" por
+  `invoice.items.length === 1`, o que deixaria de funcionar assim que uma segunda linha (o
+  desconto) coexistisse no mesmo rascunho — passa a comparar `item.serviceId` com
+  `invoice.appointment.serviceId` (campo novo, exposto por `BillingRepository.findById`). Resolve o
   item "Health-plan co-pay/utilização" que estava listado em Próximo. Não cobre
   `HealthPlan.usageCount` (já incrementado antes, via `AppointmentsService`) nem e2e da própria
   percentagem — só unitário (`billing.service.spec.ts` + `health-plans.service.spec.ts`, 14 testes

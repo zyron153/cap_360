@@ -22,8 +22,9 @@ Manages the clinic's two plan types — **Plano Familiar** (Family) and **Plano 
 ### 2.1 Plano Familiar
 - 🟡 Single patient on one plan — real, but it's one direct FK (`patients.healthPlanId`), not a
   "family unit" grouping; there's no concept of a family linking multiple patients to one plan
-- 🟡 Coverage tiers/pricing exist as a JSON `coverageRules` blob on the product — nothing reads or
-  enforces it against consultations/exams (see §3.3)
+- ✅ **Fixed.** Coverage % in the `coverageRules` JSON blob is now read — `BillingService` applies
+  it as an automatic invoice-level discount for a patient with an active plan (see
+  `M6-billing-invoicing.md` §1/§2.1). Still a flat % per product, not per-consultation/exam tiers.
 - ❌ Auto-renewal and the 30/15/7-day WhatsApp expiry notifications: not implemented — no job
   queries expiring plans at all
 
@@ -60,10 +61,12 @@ member, soft-delete removal, and CSV export all have nothing to attach to.
 
 ### 3.3 Utilisation Tracking
 
-❌ Not implemented. `health_plans.usageCount` exists as a column but **nothing in the codebase ever
-increments it** — no appointment or exam completion touches it. There is no
-`consultations_used/included` or `exams_used/included` pair, no "Incluído no seu plano" booking-time
-check, and no limit-reached alert.
+🟡 Partially real — corrected, this section was stale. `AppointmentsService.updateStatus()`'s
+`completed` branch calls `HealthPlansService.incrementUsage()` whenever the patient has a
+`healthPlanId`, unconditionally (no active/expired check, unlike the co-pay discount in
+`M6-billing-invoicing.md` §1, which does gate on that). There is still no
+`consultations_used/included` or `exams_used/included` pair, no "Incluído no seu plano"
+booking-time check, and no limit-reached alert — `usageCount` is tallied but nothing reads it back.
 
 ### 3.4 Renewal Reminders
 
@@ -113,9 +116,11 @@ See `API-SPEC.md` → Section 4 (Health Plans) and Section 5 (Companies)
 
 - ✅ A patient can hold only one active plan at a time — true by construction, since it's a single
   `healthPlanId` FK, not an enforced business rule over a membership table
-- ❌ Plan-period utilisation reset: moot, nothing tracks utilisation at all (§3.3)
-- ✅ Services booked outside plan coverage are billed at standard rates — true only because no
-  plan-aware pricing path exists to apply a discount in the first place (see `M6-billing-invoicing.md` §2.1)
+- ❌ Plan-period utilisation reset — `usageCount` is tallied (§3.3) but never reset per period and
+  nothing reads it back, so there's no limit to reset against yet
+- ✅ **Fixed.** Services booked outside plan coverage are billed at standard rates — now true
+  because a plan-aware pricing path exists and simply applies no discount without an active plan,
+  not because none exists at all (see `M6-billing-invoicing.md` §2.1)
 - ❌ "Corporate plan members cannot see other members' clinical data" — moot, no membership model
 - ❌ Admin manual utilisation adjustment with audit entry: not implemented
 
