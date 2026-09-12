@@ -90,8 +90,14 @@ test("walking a pending appointment through confirmed → checked_in → complet
   await modal.getByRole("button", { name: "Check-in feito" }).click();
   await expect(modal.getByText("Presente")).toBeVisible();
 
+  // "Concluída" only opens the duration-confirmation panel (added later, to derive the
+  // auto-drafted invoice's price from the confirmed duration) — it doesn't fire the transition
+  // itself. Accept the pre-filled scheduled duration via "Confirmar Conclusão".
   await modal.getByRole("button", { name: "Concluída" }).click();
-  await expect(modal.getByText("Concluída")).toBeVisible();
+  await modal.getByRole("button", { name: "Confirmar Conclusão" }).click();
+  // Longer timeout: this PATCH also creates the draft invoice (+ health-plan discount lookup),
+  // slower than the plain status-only transitions above.
+  await expect(modal.getByText("Concluída")).toBeVisible({ timeout: 10_000 });
 
   // Give the async createDraft a moment to persist (mirrors booking-flow.spec.ts).
   await new Promise((r) => setTimeout(r, 500));

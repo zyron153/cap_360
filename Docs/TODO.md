@@ -192,6 +192,13 @@ concurrent "add plan" submissions can collide on the unique constraint and surfa
 **Fixed** — `planNumber` is now generated server-side (`HealthPlansRepository.nextPlanNumber`), race-safe
 via a Postgres advisory lock keyed by product code + year, same pattern as `billing.repository.ts`'s
 invoice numbering. Caller-supplied `planNumber` is still honored as-is when provided (now optional).
+~~The lock itself was briefly broken (2026-09-12): `pg_advisory_lock`/`unlock` as two separate
+top-level Prisma calls don't reliably land on the same pooled connection, so the unlock could
+silently no-op while the lock leaked forever on an idle connection — reproduced live, a genuine
+deadlock, not a theoretical one. Fixed same day: lock/query/unlock now run inside one
+`prisma.$transaction` using `pg_advisory_xact_lock` (transaction-scoped, self-releasing on
+commit/rollback), which pins a single physical connection for the whole critical section. Same fix
+applied to `billing.repository.ts`'s invoice numbering, which had the identical bug.~~
 
 ### M5 — Exam Results Portal — 🟡 stub only
 `ExamRequest` exists as a schema stub (self-labelled "Phase 1 stub"), no controller/service at

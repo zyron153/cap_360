@@ -229,7 +229,7 @@ Canonical ports are: Web=3000, API=3001, WhatsApp Hub=3002. Implemented and cons
 
 ### GAP-10 · Invoice Number Sequence ✅ RESOLVED
 
-Implemented using `pg_advisory_lock` keyed on the year in `BillingRepository.nextInvoiceNumber()`. Format: `INV-YYYY-NNNN`. Thread-safe; no PostgreSQL sequence or Redis dependency needed.
+Implemented using `pg_advisory_xact_lock` keyed on the year, inside a `prisma.$transaction`, in `BillingRepository.nextInvoiceNumber()`. Format: `INV-YYYY-NNNN`. No PostgreSQL sequence or Redis dependency needed. (Originally shipped with plain `pg_advisory_lock`/`unlock` as two separate top-level calls — a real deadlock under Prisma's connection pool, since lock and unlock aren't guaranteed to land on the same physical connection. Fixed 2026-09-12 by moving the whole critical section into one transaction with the transaction-scoped lock variant, which self-releases on commit/rollback.)
 
 ---
 
