@@ -115,4 +115,27 @@ export class HealthPlansService {
   findExpiringBetween(from: Date, to: Date) {
     return this.repo.findExpiringBetween(from, to);
   }
+
+  /** Coverage % (0-100) to apply as a billing discount, or null when the patient has no plan, the
+   * plan/product is inactive, the plan has expired, or the product's `coverageRules.coverage` is
+   * unset/zero. Deliberately separate from `incrementUsage` above, which currently increments
+   * regardless of any of these checks — that's a usage tally, this is a money calculation, and the
+   * two shouldn't share the same (looser) gate. */
+  async getActiveCoverage(
+    patientId: string
+  ): Promise<{ healthPlanId: string; coveragePercent: number; productName: string } | null> {
+    const result = await this.repo.findActiveHealthPlanForPatient(patientId);
+    const plan = result?.healthPlan;
+    if (!plan || !plan.active || !plan.product.active) return null;
+    if (plan.endDate && plan.endDate < new Date()) return null;
+
+    const coverage = (plan.product.coverageRules as { coverage?: number } | null)?.coverage;
+    if (!coverage || coverage <= 0) return null;
+
+    return {
+      healthPlanId: plan.id,
+      coveragePercent: Math.min(100, coverage),
+      productName: plan.product.name,
+    };
+  }
 }

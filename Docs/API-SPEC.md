@@ -336,6 +336,10 @@ GET    /financeiro/entradas                    query: from,to,page,limit
 POST   /financeiro/entradas                    body: description,category,amount,date,notes?
 PATCH  /financeiro/entradas/:id
 DELETE /financeiro/entradas/:id
+GET    /financeiro/entradas/faturas            query: from,to,page,limit — paid invoices (Payment
+                                                rows) projected as Entrada rows: description,
+                                                category (billed service), amount, date, payerType.
+                                                Read-only, derived — no Income rows are created.
 
 GET    /financeiro/summary?from&to              → { totalEntradas, totalDespesas, balance, monthly[], byCategory[],
                                                      receivables, byPayerType, byService[], noShowImpact }

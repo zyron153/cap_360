@@ -26,6 +26,8 @@ const repo = {
   incomeInRange: jest.fn(),
   sumPayments: jest.fn(),
   paymentsInRange: jest.fn(),
+  findPaidInvoicePayments: jest.fn(),
+  countPaidInvoicePayments: jest.fn(),
   outstandingInvoices: jest.fn(),
   sumPaymentsByPlan: jest.fn(),
   sumPaymentsPrivate: jest.fn(),
@@ -164,6 +166,95 @@ describe("FinanceiroService", () => {
       await service.deleteIncome("inc-1");
 
       expect(diffSpy).toHaveBeenCalledWith(full, null);
+    });
+  });
+
+  describe("listPaidInvoices — Faturas Pagas shown as Entrada", () => {
+    const basePayment = {
+      id: "pay-1",
+      invoiceId: "inv-1",
+      amount: "3000",
+      method: "cash",
+      paidAt: new Date("2026-08-10"),
+      invoice: {
+        invoiceNumber: "FT-2026-0001",
+        healthPlanId: null,
+        patient: { fullName: "Maria Silva" },
+        items: [{ description: "Consulta Individual", service: { name: "Consulta Individual" } }],
+      },
+    };
+
+    it("projects a payment as an Entrada-shaped row, private payer by default", async () => {
+      repo.findPaidInvoicePayments.mockResolvedValue([basePayment]);
+      repo.countPaidInvoicePayments.mockResolvedValue(1);
+
+      const result = await service.listPaidInvoices({ page: 1, limit: 20 });
+
+      expect(result.data).toEqual([
+        {
+          id: "pay-1",
+          invoiceId: "inv-1",
+          invoiceNumber: "FT-2026-0001",
+          patientName: "Maria Silva",
+          description: "Fatura FT-2026-0001 — Maria Silva",
+          category: "Consulta Individual",
+          amount: 3000,
+          date: "2026-08-10",
+          payerType: "privado",
+          method: "cash",
+        },
+      ]);
+      expect(result.total).toBe(1);
+    });
+
+    it("marks the payer as planoSaude when the invoice was billed against a health plan", async () => {
+      repo.findPaidInvoicePayments.mockResolvedValue([
+        { ...basePayment, invoice: { ...basePayment.invoice, healthPlanId: "plan-1" } },
+      ]);
+      repo.countPaidInvoicePayments.mockResolvedValue(1);
+
+      const result = await service.listPaidInvoices({ page: 1, limit: 20 });
+
+      expect(result.data[0].payerType).toBe("planoSaude");
+    });
+
+    it("falls back to a patient's missing name and an item's free-text description", async () => {
+      repo.findPaidInvoicePayments.mockResolvedValue([
+        {
+          ...basePayment,
+          invoice: {
+            ...basePayment.invoice,
+            patient: { fullName: null },
+            items: [{ description: "Ajuste manual", service: null }],
+          },
+        },
+      ]);
+      repo.countPaidInvoicePayments.mockResolvedValue(1);
+
+      const result = await service.listPaidInvoices({ page: 1, limit: 20 });
+
+      expect(result.data[0].patientName).toBe("Paciente");
+      expect(result.data[0].category).toBe("Ajuste manual");
+    });
+
+    it("collapses multiple billed services into 'first +N' for the category", async () => {
+      repo.findPaidInvoicePayments.mockResolvedValue([
+        {
+          ...basePayment,
+          invoice: {
+            ...basePayment.invoice,
+            items: [
+              { description: "Consulta Individual", service: { name: "Consulta Individual" } },
+              { description: "Terapia de Casal", service: { name: "Terapia de Casal" } },
+            ],
+          },
+        },
+      ]);
+      repo.countPaidInvoicePayments.mockResolvedValue(1);
+
+      const result = await service.listPaidInvoices({ page: 1, limit: 20 });
+
+      expect(result.data[0].category).toBe("Consulta Individual +1");
     });
   });
 

@@ -501,7 +501,9 @@ export function InvoiceDetailBody({ id }: { id: string }) {
                   invoiceId={id}
                   item={item}
                   editable={invoice.status === "draft"}
-                  isAppointmentItem={!!invoice.appointment && invoice.items?.length === 1}
+                  // Matched by service, not "the only item" — a health-plan discount line can now
+                  // sit alongside the appointment-generated item on the same draft invoice.
+                  isAppointmentItem={!!invoice.appointment && item.serviceId === invoice.appointment.serviceId}
                   appointmentDuration={invoice.appointment?.durationMinutes}
                   onSaved={() => {
                     queryClient.invalidateQueries({ queryKey: ["invoice", id] });

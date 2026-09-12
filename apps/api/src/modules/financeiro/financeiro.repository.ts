@@ -81,6 +81,29 @@ export class FinanceiroRepository {
     return this.prisma.payment.findMany({ where: { paidAt: { gte: from, lte: to } }, select: { amount: true, paidAt: true } });
   }
 
+  // ── Faturas Pagas (invoice payments, listed as Entradas in the UI) ──
+  findPaidInvoicePayments(where: Prisma.PaymentWhereInput, skip: number, take: number) {
+    return this.prisma.payment.findMany({
+      where,
+      orderBy: { paidAt: "desc" },
+      skip,
+      take,
+      include: {
+        invoice: {
+          select: {
+            invoiceNumber: true,
+            healthPlanId: true,
+            patient: { select: { fullName: true } },
+            items: { select: { description: true, service: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+  }
+  countPaidInvoicePayments(where: Prisma.PaymentWhereInput) {
+    return this.prisma.payment.count({ where });
+  }
+
   // ── Receivables — a current snapshot, not date-range scoped (see FinanceiroSummary) ──
   outstandingInvoices() {
     return this.prisma.invoice.findMany({

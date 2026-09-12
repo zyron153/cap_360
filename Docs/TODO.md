@@ -115,10 +115,16 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] ~~Invoice-to-health-plan linkage (`health_plan_id` on invoices was never implemented)~~ — corrected: `Invoice.healthPlanId` exists and is now actually read (the new payer-type breakdown above), this line was stale
 - [x] Payment-to-staff attribution — `Payment.recordedById` (FK to `Staff`), set from the authenticated caller in `POST /invoices/:id/payments`; previously no field existed at all
 - [x] Invoice cancellation now requires a `reason` (`CancelInvoiceSchema`, min 3 chars) and writes a semantic before/after audit diff (status + reason), not just the generic "POST" row the interceptor already logged
+- [x] Faturas Pagas listed as Entrada — `GET /financeiro/entradas/faturas` projects paid-invoice
+  `Payment` rows into an Entrada-shaped row (description, billed-service category, amount, date,
+  payer type), derived on read rather than duplicated into the `Income` table. `getSummary()`'s
+  totals/monthly-chart already counted these payments before this addition — only the Entradas
+  *list* was missing them.
 
 **Frontend**
 - [x] Invoice list with status filters + KPI cards, invoice detail with payment recording
-- [x] Financeiro tabs (Overview / Entradas / Despesas / Faturas)
+- [x] Financeiro tabs (Overview / Entradas / Despesas / Faturas) — Entradas now has a "Faturas
+  Pagas" sub-tab (read-only, paginated) alongside the pre-existing manual-entries table
 - [x] Financeiro Overview date-range selector (this month / last 3 months / this year / custom) — previously hardcoded to Jan 1 of the current year with no way to change it
 - [x] ~~New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form~~ — corrected, this line was stale: `billing/new/page.tsx` is a real form posting to `POST /invoices`
 - [x] Cancel-invoice UI — the backend endpoint existed but nothing in the frontend called it; added a "Cancelar Fatura" button on the invoice detail page with the app's standard two-step inline confirmation + required reason textarea, plus a cancelled-invoice banner showing the reason/timestamp
@@ -131,7 +137,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `@cap/types` — `Staff`, `Service`, `Room`/appointment types and Zod schemas all exist
 - [x] API rate limiting (`@nestjs/throttler`) — global default 300 req/min, public routes overridden to 60 req/min
 - [x] Request/performance logging (`PerformanceInterceptor`)
-- [x] Unit test suite (Jest) — 386 tests across guards, interceptors, services, repositories
+- [x] Unit test suite (Jest) — 421 tests across guards, interceptors, services, repositories (27 spec files)
 - [x] **Self-hosted auth (2026-08-31, replaces Keycloak)**: argon2id password hashing, Redis-backed
   sessions (httpOnly/Secure/SameSite=Lax cookie), per-IP + per-account login rate-limiting/lockout,
   forgot/reset/change-password flows — `AUTH_BYPASS=true` dev bypass preserved, fails safe (requires
@@ -158,6 +164,11 @@ piece of groundwork already laid — ready to be pointed at a real send service.
 - [x] Plan products, company linkage, patient subscription — all implemented (`health-plans.controller.ts`)
 - [x] ~~Utilisation counter — `usageCount` column exists, nothing increments it~~ — corrected: `AppointmentsService.updateStatus()`'s completed branch calls `healthPlansService.incrementUsage()`, unit-tested; this line was stale
 - [x] ~~Expiry notification job (30/15/7 days)~~ — corrected: `NotificationsProcessor.handleHealthPlanExpiring()` exists, scheduled daily at 08:00 (`notifications.service.ts`), 4 tests; this line was stale
+- [x] Co-pay/coverage discount — `HealthPlansService.getActiveCoverage()` (active plan+product,
+  unexpired, `coverageRules.coverage` > 0) + `BillingService.applyHealthPlanDiscount()` apply the
+  patient's coverage % as a negative line item on invoice creation and on the appointment-completion
+  auto-draft alike; invoice gets linked to that `healthPlanId` when the caller didn't already supply
+  one. 14 new unit tests (`billing.service.spec.ts`, `health-plans.service.spec.ts`).
 - [ ] Auto-renew logic
 - [ ] `POST /health-plans/:id/members` / member roster — a `HealthPlan` links to one holder patient directly today, not a membership join table
 
@@ -234,12 +245,15 @@ tracking, no assignment logic.
 
 ## Phase 4 — Growth
 
-### M10 — Analytics & Reporting — 🎭 not started
-UI mockup only (`analytics/page.tsx`, 8 hardcoded const arrays). No `apps/api/src/modules/analytics`
-directory, no materialised views. The Financeiro Overview tab is the one piece of real, live-data
-analytics anywhere in the app — now covering receivables, revenue by payer type, revenue by
-service, and no-show impact on top of the original expenses/income summary — worth treating as
-the template for what this module should actually look like, more so than when this was written.
+### M10 — Analytics & Reporting — 🎭 mostly mock, revenue now real
+UI mostly mockup (`analytics/page.tsx`) — appointments, active-patient count, peak hours, and plan
+distribution are still hardcoded const arrays. The "Receita YTD" KPI and "Receita Mensal" chart are
+the one exception: both now fetch `GET /financeiro/summary` (year-to-date) and render the real
+`totalEntradas`/`monthly` figures, same data the Financeiro Overview tab uses. No
+`apps/api/src/modules/analytics` directory, no materialised views. The Financeiro Overview tab
+remains the template for what this module should actually look like — now covering receivables,
+revenue by payer type, revenue by service, no-show impact, and Faturas Pagas as Entrada on top of
+the original expenses/income summary.
 
 ### Self-Service Portals — not started
 No patient-facing login path exists at all — the auth system built 2026-08-31 (replacing
@@ -275,7 +289,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 386 tests total (27 suites)
+- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 421 tests total (27 suites)
 - [x] ~~Integration tests against a real test DB~~ — this contradicted this file's own line 137 ([x], 4 specs / 9 tests); duplicate line removed
 - [~] E2E tests (Playwright) — 7 specs / 15 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login, `manual-invoice-payment`, `expense-approval`, `invoice-cancellation`, `health-plan-payment`), up from 3 specs / 9 tests. Financeiro now has real e2e coverage (manual invoice creation, partial→full payment, receipt, expense approval, invoice cancellation, health-plan payment method); still nothing for health-plans end-to-end, or a real e-Fatura submission (only the config-less "pending" state is asserted). Fixed along the way: `/billing/new` (Nova Fatura form) sent `unitPrice` as a string to `POST /invoices`, which always 400'd — writing the new spec caught a manual-invoice-creation feature that was fully broken. Older note: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)

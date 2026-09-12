@@ -40,7 +40,7 @@ export class BillingRepository {
         payments: { include: { recordedBy: { select: { id: true, fullName: true } } } },
         patient: { select: { id: true, fullName: true, phone: true, nif: true } },
         appointment: {
-          select: { id: true, durationMinutes: true, service: { select: { durationMinutes: true } } },
+          select: { id: true, serviceId: true, durationMinutes: true, service: { select: { durationMinutes: true } } },
         },
       },
     });

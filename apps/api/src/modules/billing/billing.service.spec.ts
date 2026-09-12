@@ -5,6 +5,7 @@ import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { RequestContext } from "../../common/context/request-context";
 
@@ -35,6 +36,7 @@ const prisma = {
   setting: { findUnique: jest.fn() },
 };
 const efaturaQueue = { add: jest.fn() };
+const healthPlansService = { getActiveCoverage: jest.fn() };
 const generateReceiptPdfMock = generateReceiptPdf as jest.Mock;
 
 const INVOICE = {
@@ -54,12 +56,17 @@ describe("BillingService", () => {
         { provide: BillingRepository, useValue: repo },
         { provide: R2Service, useValue: r2 },
         { provide: PrismaService, useValue: prisma },
+        { provide: HealthPlansService, useValue: healthPlansService },
         { provide: getQueueToken("efatura"), useValue: efaturaQueue },
       ],
     }).compile();
     service = mod.get(BillingService);
     jest.clearAllMocks();
     r2.isConfigured.mockReturnValue(false);
+    // No active health plan by default — individual tests below override this to exercise the
+    // discount path. Without this default, every pre-existing create()/createDraft() test would
+    // need its own mock just to avoid a hanging jest.fn() promise.
+    healthPlansService.getActiveCoverage.mockResolvedValue(null);
   });
 
   // The actual status-machine math (paid / partially_paid) now lives inside
@@ -283,6 +290,79 @@ describe("BillingService", () => {
     });
   });
 
+  describe("create — health-plan discount", () => {
+    beforeEach(() => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0004");
+      repo.create.mockResolvedValue({});
+    });
+
+    it("adds no discount line when the patient has no active health plan", async () => {
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 1000 }],
+      } as never, ["receptionist"]);
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.items.create).toHaveLength(1);
+      expect(call.subtotal).toBe(1000);
+      expect(call.total).toBe(1000);
+    });
+
+    it("appends a negative discount line and reduces the total when the patient has an active plan", async () => {
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 1000 }],
+      } as never, ["receptionist"]);
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.items.create).toHaveLength(2);
+      expect(call.items.create[1]).toEqual(
+        expect.objectContaining({ serviceId: null, unitPrice: -800, total: -800 })
+      );
+      expect(call.items.create[1].description).toContain("80%");
+      expect(call.subtotal).toBe(200);
+      expect(call.total).toBe(200);
+      expect(call.healthPlan).toEqual({ connect: { id: "plan-1" } });
+    });
+
+    it("prefers the caller-supplied healthPlanId over the patient's own active plan for the invoice link", async () => {
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+
+      await service.create({
+        patientId: "patient-1",
+        healthPlanId: "explicit-plan",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 1000 }],
+      } as never, ["receptionist"]);
+
+      expect(repo.create.mock.calls[0][0].healthPlan).toEqual({ connect: { id: "explicit-plan" } });
+    });
+
+    it("does not add a discount line for a zero-value invoice", async () => {
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item gratuito", quantity: 1, unitPrice: 0 }],
+      } as never, ["receptionist"]);
+
+      expect(repo.create.mock.calls[0][0].items.create).toHaveLength(1);
+    });
+  });
+
   describe("createDraft", () => {
     it("creates a draft invoice with status=draft and correct totals", async () => {
       repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0002");
@@ -304,6 +384,33 @@ describe("BillingService", () => {
           status: "draft",
         })
       );
+    });
+
+    it("adds a health-plan discount line to the auto-generated draft too", async () => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0005");
+      repo.create.mockResolvedValue({});
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 50,
+        productName: "Plano Individual",
+      });
+
+      await service.createDraft({
+        patientId: "patient-1",
+        appointmentId: "appt-1",
+        serviceId: "service-1",
+        serviceName: "Consulta Geral",
+        unitPrice: 1500,
+      });
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.items.create).toHaveLength(2);
+      expect(call.items.create[1]).toEqual(
+        expect.objectContaining({ serviceId: null, unitPrice: -750, total: -750 })
+      );
+      expect(call.subtotal).toBe(750);
+      expect(call.total).toBe(750);
+      expect(call.healthPlan).toEqual({ connect: { id: "plan-1" } });
     });
   });
 

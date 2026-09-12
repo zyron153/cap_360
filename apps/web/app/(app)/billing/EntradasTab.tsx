@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { Plus, TrendingUp, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
-import type { IncomeEntry, PaginatedResponse } from "@cap/types";
+import { Plus, TrendingUp, ChevronLeft, ChevronRight, AlertCircle, Receipt } from "lucide-react";
+import type { IncomeEntry, PaidInvoiceEntry, PaginatedResponse } from "@cap/types";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
@@ -15,6 +15,13 @@ async function fetchIncome(page: number) {
   const res = await fetch(`/api/financeiro/entradas?${params}`);
   if (!res.ok) throw new Error("Erro ao carregar entradas");
   return res.json() as Promise<PaginatedResponse<IncomeEntry>>;
+}
+
+async function fetchPaidInvoices(page: number) {
+  const params = new URLSearchParams({ page: String(page), limit: "20" });
+  const res = await fetch(`/api/financeiro/entradas/faturas?${params}`);
+  if (!res.ok) throw new Error("Erro ao carregar faturas pagas");
+  return res.json() as Promise<PaginatedResponse<PaidInvoiceEntry>>;
 }
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
@@ -34,7 +41,34 @@ function SkeletonRow() {
   );
 }
 
+function SubTabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-[13px] font-semibold rounded-[10px] transition-colors ${
+        active ? "bg-brand-700 text-white shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-600 hover:bg-dim-100"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function EntradasTab() {
+  const [subTab, setSubTab] = useState<"manual" | "faturas">("manual");
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex items-center gap-1.5 bg-dim-50 border border-dim-200 rounded-[12px] p-1 w-fit">
+        <SubTabButton active={subTab === "manual"} onClick={() => setSubTab("manual")}>Entradas Manuais</SubTabButton>
+        <SubTabButton active={subTab === "faturas"} onClick={() => setSubTab("faturas")}>Faturas Pagas</SubTabButton>
+      </div>
+      {subTab === "manual" ? <ManualIncomeSection /> : <PaidInvoicesSection />}
+    </div>
+  );
+}
+
+function ManualIncomeSection() {
   const { canDo, isAdmin } = usePermissions();
   const { addMessage } = useMessage();
   const queryClient = useQueryClient();
@@ -106,7 +140,8 @@ export function EntradasTab() {
       </div>
 
       <p className="text-[11px] text-dim-400 -mt-3">
-        Receitas de faturas pagas aparecem automaticamente no Resumo — use isto apenas para entradas manuais (ex: subsídios, outras receitas).
+        Use isto apenas para entradas manuais (ex: subsídios, outras receitas). Faturas pagas aparecem no separador
+        &quot;Faturas Pagas&quot; e no Resumo automaticamente.
       </p>
 
       <div className={CARD}>
@@ -226,6 +261,109 @@ export function EntradasTab() {
           </button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+const PAYER_LABEL: Record<PaidInvoiceEntry["payerType"], string> = {
+  privado: "Privado",
+  planoSaude: "Plano de Saúde",
+};
+
+function PaidInvoicesSection() {
+  const [page, setPage] = useState(1);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["paid-invoices", page],
+    queryFn: () => fetchPaidInvoices(page),
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
+  });
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-[13px] text-dim-500">
+        {isLoading ? "A carregar…" : error ? "Erro ao carregar faturas pagas" : `${data?.total ?? 0} faturas pagas`}
+      </p>
+
+      <p className="text-[11px] text-dim-400 -mt-3">
+        Pagamentos de faturas emitidas, geridos no separador Faturas — mostrados aqui apenas como Entrada. Também contam
+        para os totais e gráficos do Resumo.
+      </p>
+
+      <div className={CARD}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr>
+                {["Descrição", "Categoria", "Tipo Pagador", "Valor", "Data"].map((h) => (
+                  <th key={h} className="text-left text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 px-5 py-2.5 border-b border-dim-100 bg-dim-50">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading
+                ? Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
+                : error
+                ? (
+                  <tr>
+                    <td colSpan={5} className="py-16 text-center">
+                      <div className="w-12 h-12 bg-red-50 rounded-[16px] flex items-center justify-center mx-auto mb-3">
+                        <AlertCircle className="w-6 h-6 text-red-500" />
+                      </div>
+                      <p className="text-[13px] font-medium text-dim-700">Erro ao carregar faturas pagas</p>
+                    </td>
+                  </tr>
+                )
+                : data?.data.length === 0
+                ? (
+                  <tr>
+                    <td colSpan={5} className="py-16 text-center">
+                      <div className="w-12 h-12 bg-dim-100 rounded-[16px] flex items-center justify-center mx-auto mb-3">
+                        <Receipt className="w-6 h-6 text-dim-400" />
+                      </div>
+                      <p className="text-[13px] font-medium text-dim-600">Nenhuma fatura paga ainda</p>
+                    </td>
+                  </tr>
+                )
+                : data?.data.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-dim-50 transition-colors">
+                      <td className="px-5 py-3.5 border-b border-dim-100 text-[13px] font-medium text-dim-900">{inv.description}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 text-[12px] text-dim-600">{inv.category}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 text-[12px] text-dim-600">{PAYER_LABEL[inv.payerType]}</td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[13px] font-semibold text-emerald-700 tabular-nums">
+                        +{Number(inv.amount).toLocaleString("pt-CV")}<span className="text-[10px] font-normal text-dim-400 ml-1">CVE</span>
+                      </td>
+                      <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">
+                        {format(new Date(inv.date), "d MMM yyyy", { locale: pt })}
+                      </td>
+                    </tr>
+                  ))
+              }
+            </tbody>
+          </table>
+        </div>
+
+        {data && data.totalPages > 1 && (
+          <div className="px-5 py-3.5 border-t border-dim-100 flex items-center justify-between">
+            <span className="text-[12px] text-dim-500">
+              {data.total} faturas pagas · Página <span className="font-semibold text-dim-700">{page}</span> de {data.totalPages}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}
+                className="w-8 h-8 flex items-center justify-center rounded-md border border-dim-200 text-dim-600 hover:bg-dim-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button disabled={page === data.totalPages} onClick={() => setPage((p) => p + 1)}
+                className="w-8 h-8 flex items-center justify-center rounded-md border border-dim-200 text-dim-600 hover:bg-dim-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

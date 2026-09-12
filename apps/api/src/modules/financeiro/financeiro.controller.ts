@@ -110,6 +110,11 @@ export class FinanceiroController {
     return this.service.deleteIncome(id);
   }
 
+  @Get("entradas/faturas")
+  listPaidInvoices(@Query(new ZodValidationPipe(FinanceiroListQuerySchema)) query: FinanceiroListQuery) {
+    return this.service.listPaidInvoices(query);
+  }
+
   // ── Resumo ───────────────────────────────────────────────
   @Get("summary")
   getSummary(@Query("from") from?: string, @Query("to") to?: string) {

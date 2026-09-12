@@ -5,6 +5,30 @@
 
 ## Done
 
+- Health-plan co-pay: `BillingService` agora aplica automaticamente o desconto do plano de saúde
+  ativo do paciente ao criar uma fatura (manual ou o rascunho automático gerado na conclusão da
+  consulta). `HealthPlansService.getActiveCoverage(patientId)` (novo) valida plano+produto ativos,
+  `endDate` não expirada, e `coverageRules.coverage` > 0 (capado a 100%); quando aplicável,
+  `BillingService.applyHealthPlanDiscount` acrescenta uma linha negativa "Desconto Plano de Saúde
+  (N%) — {produto}" ao subtotal, mantendo os itens de catálogo intactos para auditoria, e liga a
+  fatura ao `healthPlanId` do plano (a menos que um tenha sido explicitamente indicado). Resolve o
+  item "Health-plan co-pay/utilização" que estava listado em Próximo. Não cobre
+  `HealthPlan.usageCount` (já incrementado antes, via `AppointmentsService`) nem e2e da própria
+  percentagem — só unitário (`billing.service.spec.ts` + `health-plans.service.spec.ts`, 14 testes
+  novos). `Docs/TESTING.md` (v1.5) atualizado.
+
+- Faturas Pagas listadas como Entrada no Financeiro: novo endpoint `GET
+  /financeiro/entradas/faturas` projeta os `Payment` de faturas pagas no mesmo formato de uma
+  Entrada (descrição, categoria = serviço faturado, valor, data, tipo de pagador) sem criar
+  registos `Income` novos — são sempre derivados do `Payment` existente. O separador Entradas
+  (`EntradasTab.tsx`) ganhou um sub-separador "Faturas Pagas" (lista só-leitura, paginada,
+  separada das Entradas Manuais) ao lado do já existente; os totais/gráficos do Resumo já incluíam
+  pagamentos de faturas antes desta sessão (`getSummary()`), não precisaram de alteração. A página
+  `/analytics` (M10, até agora 100% mock) teve o KPI "Receita YTD" e o gráfico "Receita Mensal"
+  ligados aos mesmos dados reais do Resumo — o resto da página (consultas, pacientes, horários de
+  pico, distribuição por plano) continua mock, fora do âmbito desta sessão. 4 testes novos em
+  `financeiro.service.spec.ts` (29 no total do módulo).
+
 - Cobertura e2e do Financeiro (uma das opções em aberto listadas na sessão anterior): 2 specs
   Playwright novas, `apps/web/e2e/manual-invoice-payment.spec.ts` (criação manual de fatura via
   `/billing/new` → pagamento em duas parcelas, parcial→`partially_paid`→total→`paid` → botão
@@ -78,8 +102,8 @@
 ## Próximo
 
 - Opções levantadas na análise do M6 (sessões anteriores), ainda por escolher/agendar:
-  - Health-plan co-pay/utilização — `health_plan` continua a ser só um valor de enum em
-    `PaymentMethod`; nada calcula desconto nem incrementa `HealthPlan.usageCount`.
+  - ~~Health-plan co-pay/utilização~~ — feita nesta sessão (ver Done acima): desconto de cobertura
+    aplicado automaticamente; `usageCount` já era incrementado antes.
   - Ecrã de "outstanding balances" por paciente/fatura.
   - ~~Cobertura e2e do Financeiro~~ — feita nesta sessão (ver Done acima), incluindo o
     cancelamento de fatura e o pagamento via health-plan. E-Factura só coberta no estado

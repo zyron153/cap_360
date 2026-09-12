@@ -76,6 +76,21 @@ export interface IncomeEntry {
   updatedAt: string;
 }
 
+/** A paid invoice payment, shaped to read like an Entrada row — Faturas Pagas are real Payment
+ * rows (not Income), so this is a projection built in FinanceiroService, never persisted as-is. */
+export interface PaidInvoiceEntry {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  patientName: string;
+  description: string;
+  category: string;
+  amount: number;
+  date: string;
+  payerType: "privado" | "planoSaude";
+  method: PaymentMethod;
+}
+
 export const FinanceiroListQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

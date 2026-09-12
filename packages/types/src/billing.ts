@@ -77,7 +77,8 @@ export type UpdateInvoiceItemDto = z.infer<typeof UpdateInvoiceItemSchema>;
 export interface InvoiceItem {
   id: string;
   invoiceId: string;
-  serviceId: string;
+  // Null on off-catalogue/custom lines — a health-plan discount line has no underlying Service.
+  serviceId: string | null;
   description: string;
   quantity: number;
   unitPrice: number;
@@ -86,6 +87,7 @@ export interface InvoiceItem {
 
 export interface InvoiceAppointmentContext {
   id: string;
+  serviceId: string;
   durationMinutes: number;
   service?: { durationMinutes: number } | null;
 }

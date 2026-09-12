@@ -1,11 +1,11 @@
 # CAP 360 — Testing Strategy
 
-> **Version:** 1.4 · **Date:** updated 2026-09-12 against the current implementation
+> **Version:** 1.5 · **Date:** updated 2026-09-12 against the current implementation
 > Tools: Jest (unit + a real integration tier), Playwright (7 real E2E specs, wired to `test:e2e`)
 
 > **Implementation status:** this document was written before implementation and describes a
-> testing program most of which now genuinely exists. What's real: **22 Jest unit spec files,
-> ~292 tests**, colocated with source (`apps/api/src/**/*.spec.ts`); a separate **integration tier**
+> testing program most of which now genuinely exists. What's real: **27 Jest unit spec files,
+> 421 tests**, colocated with source (`apps/api/src/**/*.spec.ts`); a separate **integration tier**
 > (`apps/api/test/integration/*.integration-spec.ts`, 4 files / 9 tests, supertest against the real
 > dev Postgres + Redis, run via `pnpm --filter @cap/api test:integration`); **7** real Playwright
 > specs (`apps/web/e2e/*.spec.ts`, 15 tests total), wired to `pnpm --filter @cap/web test:e2e`. No
@@ -36,7 +36,7 @@ Closer to shape now, though still unit-heavy — no k6/ZAP layer on top:
       ╱   9    ╲       4 integration spec files — supertest + real
      ╱  tests    ╲     dev Postgres/Redis, no testcontainers yet
     ╱──────────────╲
-   ╱     ~292        ╲  22 Jest unit spec files, colocated with source,
+   ╱      421        ╲  27 Jest unit spec files, colocated with source,
   ╱      tests         ╲ repository layer mocked
  ╱──────────────────────╲
 ```
@@ -70,10 +70,16 @@ describe('AppointmentService', () => {
 })
 ```
 
-#### Health Plan Service — ❌ doesn't exist
-No such test suite — the health-plans module has no service-layer spec file, and none of
-utilisation-decrementing, plan-exhaustion blocking, renewal reminders, or co-pay exist to test
-(see `M4-health-plan-management.md`).
+#### Health Plan Service — ✅ real, in `health-plans.service.spec.ts`
+```typescript
+describe('HealthPlansService', () => {
+  it('getActiveCoverage returns null when the patient has no health plan', async () => { ... })      // ✅ real
+  it('getActiveCoverage returns null for an inactive plan/product or a lapsed endDate', async () => { ... }) // ✅ real
+  it('getActiveCoverage returns null when coverageRules has no coverage %', async () => { ... })      // ✅ real
+  it('getActiveCoverage caps coveragePercent at 100', async () => { ... })                             // ✅ real
+  // ❌ plan-exhaustion blocking, renewal reminders: still don't exist (see M4-health-plan-management.md)
+})
+```
 
 #### Billing Service — ✅ mostly real, in `billing.service.spec.ts` / `billing.repository.spec.ts`
 ```typescript
@@ -83,7 +89,20 @@ describe('BillingService', () => {
   it('marks invoice as partially_paid for partial payment', async () => { ... })        // ✅ real
   it('rejects a payment that would push totalPaid over the invoice total', async () => { ... }) // ✅ real
   it('replays an idempotent payment instead of double-charging', async () => { ... })   // ✅ real
-  // ❌ "apply health plan discount": nothing computes one (see M6 doc §2.1/§2.3)
+  it('applies the patient\'s active health-plan coverage % as a negative line item, on create and on appointment-completion auto-draft alike', async () => { ... }) // ✅ real
+  it('leaves the subtotal untouched when the patient has no active coverage', async () => { ... })     // ✅ real
+})
+```
+
+#### Financeiro Service — ✅ real, in `financeiro.service.spec.ts`
+```typescript
+describe('FinanceiroService', () => {
+  // Faturas Pagas listed as Entrada (GET /financeiro/entradas/faturas) — projects Payment rows,
+  // not a new table; getSummary()'s totals/monthly-chart already included payments before this.
+  it('projects a payment as an Entrada-shaped row, private payer by default', async () => { ... })     // ✅ real
+  it('marks the payer as planoSaude when the invoice was billed against a health plan', async () => { ... }) // ✅ real
+  it('collapses multiple billed services into "first +N" for the category', async () => { ... })       // ✅ real
+  // … plus the pre-existing Despesas/Entradas/Resumo suite (getSummary, audit diffs, etc.)
 })
 ```
 
@@ -202,10 +221,13 @@ Every other spec that records a payment leaves the method on its default (cash) 
 the "Plano de Saúde" option in the method `<select>`. Covers only the existing pass-through
 behavior (it's just another `PaymentMethod` enum value as far as `POST /invoices/:id/payments` is
 concerned) — it does **not** cover co-pay/discount calculation or `HealthPlan.usageCount`
-incrementing on invoice payments, since neither exists yet (see PROGRESS.md's M6 backlog); there's
-nothing to assert there. Minor finding while writing this spec: the payment-history line renders
-the raw enum value (`method.replace("_", " ")` → "health plan"), not the form's PT-PT label
-("Plano de Saúde") — cosmetic/untranslated, not fixed as part of this pass.
+incrementing on invoice payments. `HealthPlan.usageCount` incrementing was already covered
+elsewhere (`appointments.service.spec.ts`, see TODO.md's M4 note); coverage-% discount calculation
+now exists too (`BillingService.applyHealthPlanDiscount`, unit-tested in `billing.service.spec.ts`
+and `health-plans.service.spec.ts` — see §3.2 above) but this e2e spec wasn't updated to assert the
+discounted amount, so it's unit-level coverage only for now. Minor finding while writing this spec:
+the payment-history line renders the raw enum value (`method.replace("_", " ")` → "health plan"),
+not the form's PT-PT label ("Plano de Saúde") — cosmetic/untranslated, not fixed as part of this pass.
 
 Run with `pnpm --filter @cap/web test:e2e` (wired to the `test:e2e` script). All 7 specs need both
 dev servers up (`apps/api` on 4001, `apps/web` on 3000) — they hit the real running stack, not a

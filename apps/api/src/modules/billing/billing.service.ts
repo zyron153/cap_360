@@ -10,6 +10,7 @@ import { Queue } from "bull";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cap/database";
 import { RequestContext } from "../../common/context/request-context";
@@ -28,12 +29,47 @@ export class BillingService {
     private readonly repo: BillingRepository,
     private readonly r2: R2Service,
     private readonly prisma: PrismaService,
+    private readonly healthPlansService: HealthPlansService,
     @InjectQueue("efatura") private readonly efaturaQueue: Queue,
   ) {}
 
+  /** Appends a negative "Desconto Plano de Saúde" line to `itemsData` when the patient has an
+   * active health plan with a coverage % configured, keeping catalogue-price items untouched for
+   * auditability. Returns the (possibly reduced) subtotal and a healthPlanId to connect the
+   * invoice to, if one wasn't already supplied. Applied identically at manual creation and at the
+   * appointment-completion auto-draft — a patient's coverage shouldn't depend on which path built
+   * the invoice. */
+  private async applyHealthPlanDiscount(
+    patientId: string,
+    subtotal: number,
+    itemsData: { serviceId?: string | null; description: string; quantity: number; unitPrice: number; total: number }[],
+    explicitHealthPlanId?: string
+  ): Promise<{ subtotal: number; healthPlanId?: string }> {
+    if (subtotal <= 0) return { subtotal, healthPlanId: explicitHealthPlanId };
+
+    const coverage = await this.healthPlansService.getActiveCoverage(patientId);
+    if (!coverage) return { subtotal, healthPlanId: explicitHealthPlanId };
+
+    const discountAmount = Math.round(subtotal * (coverage.coveragePercent / 100) * 100) / 100;
+    if (discountAmount <= 0) return { subtotal, healthPlanId: explicitHealthPlanId };
+
+    itemsData.push({
+      serviceId: null,
+      description: `Desconto Plano de Saúde (${coverage.coveragePercent}%) — ${coverage.productName}`,
+      quantity: 1,
+      unitPrice: -discountAmount,
+      total: -discountAmount,
+    });
+
+    return {
+      subtotal: subtotal - discountAmount,
+      healthPlanId: explicitHealthPlanId ?? coverage.healthPlanId,
+    };
+  }
+
   async create(dto: CreateInvoiceDto, callerRoles: string[] = []) {
     let subtotal = 0;
-    const itemsData = [];
+    const itemsData: { serviceId?: string | null; description: string; quantity: number; unitPrice: number; total: number }[] = [];
     const overrides: { serviceId: string; cataloguePrice: number; billedPrice: number }[] = [];
 
     for (const item of dto.items) {
@@ -86,6 +122,9 @@ export class BillingService {
       RequestContext.setAuditDiff(null, { priceOverrides: overrides, reason: dto.priceOverrideReason ?? null });
     }
 
+    const discounted = await this.applyHealthPlanDiscount(dto.patientId, subtotal, itemsData, dto.healthPlanId);
+    subtotal = discounted.subtotal;
+
     const invoiceNumber = await this.repo.nextInvoiceNumber();
 
     const invoice = await this.repo.create({
@@ -94,8 +133,8 @@ export class BillingService {
       ...(dto.appointmentId
         ? { appointment: { connect: { id: dto.appointmentId } } }
         : {}),
-      ...(dto.healthPlanId
-        ? { healthPlan: { connect: { id: dto.healthPlanId } } }
+      ...(discounted.healthPlanId
+        ? { healthPlan: { connect: { id: discounted.healthPlanId } } }
         : {}),
       subtotal,
       total: subtotal,
@@ -260,22 +299,28 @@ export class BillingService {
     serviceName: string;
     unitPrice: number;
   }) {
+    const itemsData: { serviceId?: string | null; description: string; quantity: number; unitPrice: number; total: number }[] = [{
+      serviceId: data.serviceId,
+      description: data.serviceName,
+      quantity: 1,
+      unitPrice: data.unitPrice,
+      total: data.unitPrice,
+    }];
+    const discounted = await this.applyHealthPlanDiscount(data.patientId, data.unitPrice, itemsData);
+
     const invoiceNumber = await this.repo.nextInvoiceNumber();
     return this.repo.create({
       invoiceNumber,
       patient: { connect: { id: data.patientId } },
       appointment: { connect: { id: data.appointmentId } },
-      subtotal: data.unitPrice,
-      total: data.unitPrice,
+      ...(discounted.healthPlanId
+        ? { healthPlan: { connect: { id: discounted.healthPlanId } } }
+        : {}),
+      subtotal: discounted.subtotal,
+      total: discounted.subtotal,
       status: "draft",
       items: {
-        create: [{
-          serviceId: data.serviceId,
-          description: data.serviceName,
-          quantity: 1,
-          unitPrice: data.unitPrice,
-          total: data.unitPrice,
-        }],
+        create: itemsData,
       },
     });
   }

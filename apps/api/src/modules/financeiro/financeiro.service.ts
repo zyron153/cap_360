@@ -6,7 +6,7 @@ import { RequestContext } from "../../common/context/request-context";
 import {
   CreateExpenseDto, UpdateExpenseDto, ExpenseDecisionDto,
   CreateIncomeDto, UpdateIncomeDto,
-  FinanceiroListQuery, FinanceiroSummary,
+  FinanceiroListQuery, FinanceiroSummary, PaidInvoiceEntry,
 } from "@cap/types";
 
 interface UploadedReceipt {
@@ -149,6 +149,39 @@ export class FinanceiroService {
     const result = await this.repo.deleteIncome(id);
     RequestContext.setAuditDiff(existing, null);
     return result;
+  }
+
+  // ── Faturas Pagas (invoice payments, listed as Entradas) ─
+  async listPaidInvoices(query: FinanceiroListQuery) {
+    const { from, to, page, limit } = query;
+    const where = from || to ? { paidAt: dateRange(from, to) } : {};
+    const skip = (page - 1) * limit;
+    const [rows, total] = await Promise.all([
+      this.repo.findPaidInvoicePayments(where, skip, limit),
+      this.repo.countPaidInvoicePayments(where),
+    ]);
+    const data: PaidInvoiceEntry[] = rows.map((p) => {
+      const patientName = p.invoice.patient.fullName ?? "Paciente";
+      const serviceNames = Array.from(
+        new Set(p.invoice.items.map((item) => item.service?.name ?? item.description))
+      );
+      const category = serviceNames.length > 1
+        ? `${serviceNames[0]} +${serviceNames.length - 1}`
+        : serviceNames[0] ?? "Fatura";
+      return {
+        id: p.id,
+        invoiceId: p.invoiceId,
+        invoiceNumber: p.invoice.invoiceNumber,
+        patientName,
+        description: `Fatura ${p.invoice.invoiceNumber} — ${patientName}`,
+        category,
+        amount: Number(p.amount),
+        date: p.paidAt.toISOString().slice(0, 10),
+        payerType: p.invoice.healthPlanId ? "planoSaude" : "privado",
+        method: p.method,
+      };
+    });
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   // ── Resumo (dashboard) ──────────────────────────────────

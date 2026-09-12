@@ -93,6 +93,22 @@ export class HealthPlansRepository {
     });
   }
 
+  findActiveHealthPlanForPatient(patientId: string) {
+    return this.prisma.patient.findUnique({
+      where: { id: patientId },
+      select: {
+        healthPlan: {
+          select: {
+            id: true,
+            active: true,
+            endDate: true,
+            product: { select: { name: true, active: true, coverageRules: true } },
+          },
+        },
+      },
+    });
+  }
+
   /** holderPatientId has no Prisma @relation (it's a soft reference, unlike companyId) — callers
    * that need the holder's contact info must look the patient up separately by that id. */
   findExpiringBetween(from: Date, to: Date) {

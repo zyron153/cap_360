@@ -1,16 +1,17 @@
 "use client";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { pt } from "date-fns/locale";
 import { TrendingUp, Users, Calendar, Banknote } from "lucide-react";
+import type { FinanceiroSummary } from "@cap/types";
 import { usePermissions } from "../hooks/use-permissions";
 
-/* ── Static mock data ─────────────────────────────────────── */
+/* ── Static mock data (appointments/patients — not part of the Financeiro wiring) ── */
 
 const MONTHLY_APPTS = [65, 72, 58, 81, 76, 88, 92, 79, 85, 91, 78, 95];
 const MONTHS_PT     = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-
-const REVENUE_DATA   = [182000, 195000, 168000, 210000, 198000, 225000];
-const REVENUE_MONTHS = ["Jan","Fev","Mar","Abr","Mai","Jun"];
 
 const SERVICES = [
   { name: "Medicina Geral",  count: 145, color: "bg-brand-500"    },
@@ -56,17 +57,35 @@ const barRects = MONTHLY_APPTS.map((v, i) => {
   return { x: BAR_OFF + i * BAR_SLOT, y: 10 + BAR_H - bh, w: BAR_W, h: bh, label: MONTHS_PT[i], value: v };
 });
 
-// Line chart: 500 wide, 120 tall
-const REV_MIN    = 155000;
-const REV_RANGE  = 70000;
+// Line chart: 500 wide, 120 tall — built from real Financeiro data at render time (see buildRevenueChart)
 const REV_CHART_H = 90;
-const revPoints  = REVENUE_DATA.map((v, i) => ({
-  x: 10 + i * 96,
-  y: 100 - ((v - REV_MIN) / REV_RANGE) * REV_CHART_H,
-  value: v,
-}));
-const revLine  = revPoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-const revArea  = `${revLine} L ${revPoints[revPoints.length - 1].x},100 L 10,100 Z`;
+
+function monthLabel(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  return format(new Date(y, m - 1, 1), "MMM", { locale: pt });
+}
+
+/** Turns FinanceiroSummary.monthly (real Entradas, faturas pagas + manuais) into the same
+ * {x,y,value,label} point shape the static mock used, so the existing SVG markup needn't change. */
+function buildRevenueChart(monthly: FinanceiroSummary["monthly"]) {
+  const points = monthly.map((m) => ({ month: m.month, value: m.entradas, label: monthLabel(m.month) }));
+  const values = points.map((p) => p.value);
+  const max = Math.max(1, ...values);
+  const min = values.length ? Math.min(0, ...values) : 0;
+  const range = Math.max(1, max - min);
+  const gap = points.length > 1 ? 480 / (points.length - 1) : 0;
+  const plotted = points.map((p, i) => ({
+    ...p,
+    x: 10 + i * gap,
+    y: 100 - ((p.value - min) / range) * REV_CHART_H,
+  }));
+  const line = plotted.length
+    ? plotted.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
+    : "";
+  const area = plotted.length ? `${line} L ${plotted[plotted.length - 1].x},100 L 10,100 Z` : "";
+  const guides = [0, 0.25, 0.5, 0.75, 1].map((f) => min + f * range);
+  return { plotted, line, area, min, max, guides };
+}
 
 // Donut chart: r=44, cx=cy=60
 const DONUT_R = 44;
@@ -86,6 +105,16 @@ const segments = planSegments();
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
 
+function fmtDateParam(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+async function fetchFinanceiroSummary(from: string, to: string): Promise<FinanceiroSummary> {
+  const res = await fetch(`/api/financeiro/summary?from=${from}&to=${to}`);
+  if (!res.ok) throw new Error("Erro ao carregar resumo financeiro");
+  return res.json();
+}
+
 export default function AnalyticsPage() {
   const { isLoading: permLoading, can } = usePermissions();
   const router = useRouter();
@@ -95,6 +124,15 @@ export default function AnalyticsPage() {
   const peakMax = Math.max(...PEAK_HOURS.map((h) => h.count));
   const svcMax  = Math.max(...SERVICES.map((s) => s.count));
   const totalAppts = MONTHLY_APPTS.reduce((a, b) => a + b, 0);
+
+  const today = new Date();
+  const { data: financeiro } = useQuery({
+    queryKey: ["analytics-financeiro-summary"],
+    queryFn: () => fetchFinanceiroSummary(fmtDateParam(new Date(today.getFullYear(), 0, 1)), fmtDateParam(today)),
+    staleTime: 60_000,
+  });
+  const revenueChart = buildRevenueChart(financeiro?.monthly ?? []);
+  const receitaYtd = financeiro?.totalEntradas ?? 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -115,7 +153,7 @@ export default function AnalyticsPage() {
         {[
           { icon: Calendar,  label: "Consultas (YTD)",   value: totalAppts,       sub: "+12% vs ano anterior",  bg: "bg-brand-50",   cls: "text-brand-600",   fmt: (v: number) => v.toString()                              },
           { icon: Users,     label: "Pacientes Activos", value: 834,              sub: "+48 este mês",          bg: "bg-violet-50",  cls: "text-violet-600",  fmt: (v: number) => v.toString()                              },
-          { icon: Banknote,  label: "Receita YTD",       value: 1178000,          sub: "+8.4% vs objectivo",    bg: "bg-emerald-50", cls: "text-emerald-600", fmt: (v: number) => `${(v/1000).toFixed(0)}k CVE`             },
+          { icon: Banknote,  label: "Receita YTD",       value: receitaYtd,       sub: "Faturas pagas + entradas manuais", bg: "bg-emerald-50", cls: "text-emerald-600", fmt: (v: number) => `${(v/1000).toFixed(0)}k CVE` },
           { icon: TrendingUp,label: "Taxa de Presença",  value: 87,               sub: "meta: 90%",             bg: "bg-amber-50",   cls: "text-amber-600",   fmt: (v: number) => `${v}%`                                   },
         ].map((s) => (
           <div key={s.label} className={CARD}>
@@ -192,42 +230,51 @@ export default function AnalyticsPage() {
           <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
             <div>
               <h2 className="font-display text-[14px] font-semibold text-dim-900">Receita Mensal</h2>
-              <p className="text-[11px] text-dim-400 mt-0.5">Jan – Jun 2026 · em CVE</p>
+              <p className="text-[11px] text-dim-400 mt-0.5">Entradas (faturas pagas + manuais) · {today.getFullYear()} · em CVE</p>
             </div>
-            <span className="font-mono text-[12px] text-emerald-700 font-bold">225 000 CVE <span className="text-[10px] font-normal text-dim-400">Junho</span></span>
+            {revenueChart.plotted.length > 0 && (
+              <span className="font-mono text-[12px] text-emerald-700 font-bold">
+                {revenueChart.plotted[revenueChart.plotted.length - 1].value.toLocaleString("pt-CV")} CVE{" "}
+                <span className="text-[10px] font-normal text-dim-400">{revenueChart.plotted[revenueChart.plotted.length - 1].label}</span>
+              </span>
+            )}
           </div>
           <div className="px-4 py-4">
-            <svg viewBox="0 0 500 120" className="w-full" style={{ height: 130 }}>
-              <defs>
-                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#13A3A3" stopOpacity="0.18" />
-                  <stop offset="100%" stopColor="#13A3A3" stopOpacity="0.01" />
-                </linearGradient>
-              </defs>
-              {/* Guide lines */}
-              {[155000, 175000, 195000, 215000].map((v) => {
-                const y = 100 - ((v - REV_MIN) / REV_RANGE) * REV_CHART_H;
-                return (
-                  <g key={v}>
-                    <line x1="10" y1={y.toFixed(1)} x2="490" y2={y.toFixed(1)} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="3,3" />
-                    <text x="10" y={y - 2} fontSize="7" fill="#94a3b8" fontFamily="monospace">{(v/1000).toFixed(0)}k</text>
+            {revenueChart.plotted.length === 0 ? (
+              <p className="text-[13px] text-dim-400 text-center py-10">Sem movimentos registados ainda.</p>
+            ) : (
+              <svg viewBox="0 0 500 120" className="w-full" style={{ height: 130 }}>
+                <defs>
+                  <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#13A3A3" stopOpacity="0.18" />
+                    <stop offset="100%" stopColor="#13A3A3" stopOpacity="0.01" />
+                  </linearGradient>
+                </defs>
+                {/* Guide lines */}
+                {revenueChart.guides.map((v) => {
+                  const y = 100 - ((v - revenueChart.min) / Math.max(1, revenueChart.max - revenueChart.min)) * REV_CHART_H;
+                  return (
+                    <g key={v}>
+                      <line x1="10" y1={y.toFixed(1)} x2="490" y2={y.toFixed(1)} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="3,3" />
+                      <text x="10" y={y - 2} fontSize="7" fill="#94a3b8" fontFamily="monospace">{(v/1000).toFixed(0)}k</text>
+                    </g>
+                  );
+                })}
+                {/* Filled area */}
+                <path d={revenueChart.area} fill="url(#areaGrad)" />
+                {/* Line */}
+                <path d={revenueChart.line} fill="none" stroke="#0f9191" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+                {/* Points */}
+                {revenueChart.plotted.map((p, i) => (
+                  <g key={i}>
+                    <circle cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r="4" fill="white" stroke="#0f9191" strokeWidth="2" />
+                    <text x={p.x.toFixed(1)} y="115" textAnchor="middle" fontSize="8" fill="#64748b" fontFamily="sans-serif">
+                      {p.label}
+                    </text>
                   </g>
-                );
-              })}
-              {/* Filled area */}
-              <path d={revArea} fill="url(#areaGrad)" />
-              {/* Line */}
-              <path d={revLine} fill="none" stroke="#0f9191" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-              {/* Points */}
-              {revPoints.map((p, i) => (
-                <g key={i}>
-                  <circle cx={p.x.toFixed(1)} cy={p.y.toFixed(1)} r="4" fill="white" stroke="#0f9191" strokeWidth="2" />
-                  <text x={p.x.toFixed(1)} y="115" textAnchor="middle" fontSize="8" fill="#64748b" fontFamily="sans-serif">
-                    {REVENUE_MONTHS[i]}
-                  </text>
-                </g>
-              ))}
-            </svg>
+                ))}
+              </svg>
+            )}
           </div>
         </div>
 
