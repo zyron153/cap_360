@@ -81,6 +81,29 @@ export class FinanceiroRepository {
     return this.prisma.payment.findMany({ where: { paidAt: { gte: from, lte: to } }, select: { amount: true, paidAt: true } });
   }
 
+  // ── Faturas Pagas (invoice payments, listed as Entradas in the UI) ──
+  findPaidInvoicePayments(where: Prisma.PaymentWhereInput, skip: number, take: number) {
+    return this.prisma.payment.findMany({
+      where,
+      orderBy: { paidAt: "desc" },
+      skip,
+      take,
+      include: {
+        invoice: {
+          select: {
+            invoiceNumber: true,
+            healthPlanId: true,
+            patient: { select: { fullName: true } },
+            items: { select: { description: true, service: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+  }
+  countPaidInvoicePayments(where: Prisma.PaymentWhereInput) {
+    return this.prisma.payment.count({ where });
+  }
+
   // ── Receivables — a current snapshot, not date-range scoped (see FinanceiroSummary) ──
   outstandingInvoices() {
     return this.prisma.invoice.findMany({
@@ -88,6 +111,33 @@ export class FinanceiroRepository {
       // billing.service.ts) — it must count as outstanding too, not just issued/partially_paid.
       where: { status: { in: ["issued", "partially_paid", "overdue"] } },
       select: { total: true, amountPaid: true, dueDate: true },
+    });
+  }
+
+  // Same status filter as outstandingInvoices() above, one row per invoice instead of a flat sum —
+  // grouped/sorted in the service layer (dataset is clinic-scale, not worth a raw-SQL groupBy).
+  outstandingInvoicesDetailed() {
+    return this.prisma.invoice.findMany({
+      where: { status: { in: ["issued", "partially_paid", "overdue"] } },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        patientId: true,
+        total: true,
+        amountPaid: true,
+        status: true,
+        dueDate: true,
+        patient: { select: { fullName: true } },
+      },
+      orderBy: { dueDate: "asc" },
+    });
+  }
+
+  outstandingInvoicesForPatient(patientId: string) {
+    return this.prisma.invoice.findMany({
+      where: { patientId, status: { in: ["issued", "partially_paid", "overdue"] } },
+      select: { id: true, invoiceNumber: true, total: true, amountPaid: true, status: true, dueDate: true },
+      orderBy: { dueDate: "asc" },
     });
   }
 
@@ -113,10 +163,10 @@ export class FinanceiroRepository {
     });
   }
 
-  // ── No-show financial impact ──────────────────────────────
+  // ── Faltas financial impact (no-show + cancelled — both are billable time that went unbilled) ──
   noShowAppointments(from: Date, to: Date) {
     return this.prisma.appointment.findMany({
-      where: { status: "no_show", scheduledAt: { gte: from, lte: to }, deletedAt: null },
+      where: { status: { in: ["no_show", "cancelled"] }, scheduledAt: { gte: from, lte: to }, deletedAt: null },
       select: { service: { select: { price: true } } },
     });
   }

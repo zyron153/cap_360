@@ -18,7 +18,7 @@ type TodayAppt = {
   durationMinutes: number;
   status: string;
   source: string;
-  patient: { fullName: string };
+  patient: { fullName: string | null };
   staff: { fullName: string } | null;
   service: { name: string } | null;
 };
@@ -31,7 +31,7 @@ type MonthAppt = {
 
 type RecentPatient = {
   id: string;
-  fullName: string;
+  fullName: string | null;
   phone: string | null;
   healthPlanId: string | null;
   createdAt: string;
@@ -42,7 +42,7 @@ type InvoiceRow = {
   invoiceNumber: string;
   total: number;
   status: string;
-  patient: { fullName: string };
+  patient: { fullName: string | null };
 };
 
 type BillingSummary = {
@@ -101,8 +101,10 @@ const AVATAR_CLS: Record<string, string> = {
 
 const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)]";
 
-function initials(name: string) {
-  const p = name.trim().split(/\s+/);
+function initials(name: string | null | undefined) {
+  // A right-to-erasure soft-delete nulls Patient.fullName (patients.repository.ts:90) while
+  // the appointment/invoice row referencing that patient is retained — name can be null here.
+  const p = (name ?? "").trim().split(/\s+/);
   return ((p[0]?.[0] ?? "") + (p[1]?.[0] ?? "")).toUpperCase();
 }
 
@@ -422,7 +424,7 @@ export default function DashboardPage() {
                         {initials(appt.patient.fullName) || "?"}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-[13px] text-dim-900 truncate">{appt.patient.fullName}</div>
+                        <div className="font-semibold text-[13px] text-dim-900 truncate">{appt.patient.fullName ?? "Paciente removido"}</div>
                         <div className="text-[11px] text-dim-500 mt-0.5">{appt.service?.name ?? "—"}</div>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -526,7 +528,7 @@ export default function DashboardPage() {
                 <td className="px-5 py-2.5 border-b border-dim-100">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-full flex items-center justify-center font-semibold text-[10px] bg-brand-100 text-brand-800">{initials(p.fullName) || "?"}</div>
-                    <span className="text-[12px] text-dim-900 font-medium">{p.fullName}</span>
+                    <span className="text-[12px] text-dim-900 font-medium">{p.fullName ?? "Paciente removido"}</span>
                   </div>
                 </td>
                 <td className="px-5 py-2.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{p.phone ?? "—"}</td>
@@ -569,7 +571,7 @@ export default function DashboardPage() {
                 const st = INVOICE_STATUS[inv.status] ?? INVOICE_STATUS.draft;
                 return (
                   <tr key={inv.id} className="hover:bg-dim-50 transition-colors">
-                    <td className="px-4 py-2.5 border-b border-dim-100 text-[12px] text-dim-900">{inv.patient.fullName}</td>
+                    <td className="px-4 py-2.5 border-b border-dim-100 text-[12px] text-dim-900">{inv.patient.fullName ?? "Paciente removido"}</td>
                     <td className="px-4 py-2.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{inv.invoiceNumber}</td>
                     <td className={`px-4 py-2.5 border-b border-dim-100 font-mono text-[12px] font-semibold text-right ${st.amtCls}`}>{Number(inv.total).toLocaleString("pt-CV")} CVE</td>
                     <td className="px-4 py-2.5 border-b border-dim-100">

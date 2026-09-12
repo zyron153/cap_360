@@ -51,14 +51,45 @@ export const RecordPaymentSchema = z.object({
 });
 export type RecordPaymentDto = z.infer<typeof RecordPaymentSchema>;
 
+export const CancelInvoiceSchema = z.object({
+  reason: z.string().min(3).max(500),
+});
+export type CancelInvoiceDto = z.infer<typeof CancelInvoiceSchema>;
+
+export const UpdateInvoiceItemSchema = z
+  .object({
+    quantity: z.number().int().positive().optional(),
+    unitPrice: z.number().positive().optional(),
+    // When set, unitPrice is recomputed server-side as (durationMinutes / service's standard
+    // duration) * catalogue price — only valid on the line item generated from this invoice's
+    // appointment, since that's the only item with a duration to scale against.
+    durationMinutes: z.number().int().positive().max(600).optional(),
+    // Same rule as CreateInvoiceSchema: required only when a manual unitPrice undercuts the
+    // catalogue price on a catalogued item.
+    priceOverrideReason: z.string().min(3).max(300).optional(),
+  })
+  .refine(
+    (d) => d.quantity !== undefined || d.unitPrice !== undefined || d.durationMinutes !== undefined,
+    { message: "At least one of quantity, unitPrice or durationMinutes must be provided" }
+  );
+export type UpdateInvoiceItemDto = z.infer<typeof UpdateInvoiceItemSchema>;
+
 export interface InvoiceItem {
   id: string;
   invoiceId: string;
-  serviceId: string;
+  // Null on off-catalogue/custom lines — a health-plan discount line has no underlying Service.
+  serviceId: string | null;
   description: string;
   quantity: number;
   unitPrice: number;
   total: number;
+}
+
+export interface InvoiceAppointmentContext {
+  id: string;
+  serviceId: string;
+  durationMinutes: number;
+  service?: { durationMinutes: number } | null;
 }
 
 export interface Payment {
@@ -67,6 +98,8 @@ export interface Payment {
   amount: number;
   method: PaymentMethod;
   reference?: string | null;
+  recordedById?: string | null;
+  recordedBy?: { id: string; fullName: string } | null;
   paidAt: string;
   createdAt: string;
 }
@@ -85,10 +118,13 @@ export interface Invoice {
   notes?: string | null;
   dueDate?: string | null;
   issuedAt?: string | null;
+  cancelReason?: string | null;
+  cancelledAt?: string | null;
   createdAt: string;
   updatedAt: string;
   items?: InvoiceItem[];
   payments?: Payment[];
+  appointment?: InvoiceAppointmentContext | null;
 }
 
 export const EFaturaStatus = {

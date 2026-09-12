@@ -443,7 +443,12 @@ export class AppointmentsService {
     if (dto.cancellationReason)
       data.cancellationReason = dto.cancellationReason;
     if (dto.status === "checked_in") data.checkedInAt = new Date();
-    if (dto.status === "completed") data.completedAt = new Date();
+    if (dto.status === "completed") {
+      data.completedAt = new Date();
+      // The actual time spent, as confirmed at completion — kept even when the service's
+      // standard duration is unknown, since it's still the correct record of what happened.
+      if (dto.durationMinutes) data.durationMinutes = dto.durationMinutes;
+    }
 
     const updated = await this.repo.update(id, data);
     this.gateway.emitAppointmentUpdated(updated);
@@ -454,7 +459,17 @@ export class AppointmentsService {
     }
 
     if (dto.status === "completed" && appointment.service) {
-      const unitPrice = Number(appointment.service.price);
+      // Price is proportional to the confirmed duration only when both the caller supplied one
+      // and the service has a known standard duration to scale against — otherwise this falls
+      // back to the flat catalogue price, exactly as before duration became editable.
+      const unitPrice =
+        dto.durationMinutes && appointment.service.durationMinutes
+          ? Math.round(
+              (dto.durationMinutes / appointment.service.durationMinutes) *
+                Number(appointment.service.price) *
+                100
+            ) / 100
+          : Number(appointment.service.price);
       if (unitPrice > 0) {
         await this.billingService.createDraft({
           patientId: appointment.patientId,

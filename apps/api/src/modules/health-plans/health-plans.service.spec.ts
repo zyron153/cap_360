@@ -12,6 +12,7 @@ const repo = {
   findProductById: jest.fn(),
   nextPlanNumber: jest.fn(),
   createPlan: jest.fn(),
+  findActiveHealthPlanForPatient: jest.fn(),
 };
 const staffRepo = { findById: jest.fn() };
 
@@ -147,6 +148,87 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
         service.createPlan({ productId: "ghost", holderPatientId: "pat-1", startDate: "2026-01-01" } as never)
       ).rejects.toThrow(NotFoundException);
       expect(repo.createPlan).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getActiveCoverage", () => {
+    const activePlan = (overrides: Record<string, unknown> = {}) => ({
+      healthPlan: {
+        id: "plan-1",
+        active: true,
+        endDate: null,
+        product: {
+          name: "Plano Familiar",
+          active: true,
+          coverageRules: { type: "familiar", coverage: 80 } as Record<string, unknown> | null,
+        },
+        ...overrides,
+      },
+    });
+
+    it("returns null when the patient has no health plan at all", async () => {
+      repo.findActiveHealthPlanForPatient.mockResolvedValue({ healthPlan: null });
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns null when the plan itself is inactive", async () => {
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(activePlan({ active: false }));
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns null when the plan's product is inactive", async () => {
+      const plan = activePlan();
+      plan.healthPlan.product = { ...plan.healthPlan.product, active: false };
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns null when the plan has expired", async () => {
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(
+        activePlan({ endDate: new Date("2020-01-01") })
+      );
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns null when coverageRules has no coverage percentage set", async () => {
+      const plan = activePlan();
+      plan.healthPlan.product = { ...plan.healthPlan.product, coverageRules: { type: "familiar" } };
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns null when coverage is explicitly 0", async () => {
+      const plan = activePlan();
+      plan.healthPlan.product = { ...plan.healthPlan.product, coverageRules: { coverage: 0 } };
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns the coverage percentage, plan id, and product name for a valid active plan", async () => {
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(activePlan());
+      await expect(service.getActiveCoverage("patient-1")).resolves.toEqual({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+    });
+
+    it("does not expire a plan with a future endDate", async () => {
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(
+        activePlan({ endDate: new Date("2099-01-01") })
+      );
+      await expect(service.getActiveCoverage("patient-1")).resolves.toEqual(
+        expect.objectContaining({ coveragePercent: 80 })
+      );
+    });
+
+    it("caps coverage at 100% even if the stored value is higher", async () => {
+      const plan = activePlan();
+      plan.healthPlan.product = { ...plan.healthPlan.product, coverageRules: { coverage: 150 } };
+      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      await expect(service.getActiveCoverage("patient-1")).resolves.toEqual(
+        expect.objectContaining({ coveragePercent: 100 })
+      );
     });
   });
 });

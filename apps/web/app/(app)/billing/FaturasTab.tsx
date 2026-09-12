@@ -10,9 +10,10 @@ import type { Invoice, PaginatedResponse, EFaturaStatus, EFaturaSubmission } fro
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
+import { InvoiceDetailBody } from "./InvoiceDetailBody";
 
 type InvoiceRow = Invoice & {
-  patient: { fullName: string };
+  patient: { fullName: string | null };
   appointment?: { id: string; scheduledAt: string; service: { name: string } } | null;
 };
 
@@ -107,7 +108,7 @@ function SkeletonRow() {
 /* ─── Fatura Preview (E-Fatura template) ─────────────────────────────── */
 
 type PreviewInvoice = Invoice & {
-  patient: { fullName: string; nif: string | null };
+  patient: { fullName: string | null; nif: string | null };
   items: { id: string; description: string; quantity: number; unitPrice: number; total: number }[];
 };
 
@@ -182,7 +183,7 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
           <div className="grid grid-cols-2 gap-4 text-[12px]">
             <div>
               <p className="text-dim-400 uppercase text-[10px] font-bold tracking-[0.06em] mb-1">Cliente</p>
-              <p className="text-dim-900 font-semibold">{invoice.patient.fullName}</p>
+              <p className="text-dim-900 font-semibold">{invoice.patient.fullName ?? "Paciente removido"}</p>
               <p className="font-mono text-dim-500 mt-0.5">NIF: {invoice.patient.nif || "Consumidor Final"}</p>
             </div>
             <div className="text-right">
@@ -253,6 +254,16 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
   );
 }
 
+function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: string | null; onClose: () => void }) {
+  return (
+    <Modal open={!!invoiceId} onClose={onClose} title="Detalhes da Fatura" size="lg">
+      <div className="px-6 py-6">
+        {invoiceId && <InvoiceDetailBody id={invoiceId} />}
+      </div>
+    </Modal>
+  );
+}
+
 export function FaturasTab() {
   const { canDo } = usePermissions();
   const { addMessage } = useMessage();
@@ -262,6 +273,7 @@ export function FaturasTab() {
   const [newOpen, setNewOpen] = useState(false);
   const [form, setForm] = useState(BLANK_FORM);
   const [previewInvoiceId, setPreviewInvoiceId] = useState<string | null>(null);
+  const [detailsInvoiceId, setDetailsInvoiceId] = useState<string | null>(null);
 
   function set(k: keyof typeof BLANK_FORM, v: string) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -460,10 +472,10 @@ export function FaturasTab() {
                       <td className="px-5 py-3.5 border-b border-dim-100">
                         <div className="flex items-center gap-2.5">
                           <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-800 text-[10px] font-semibold flex items-center justify-center shrink-0">
-                            {inv.patient.fullName?.[0]?.toUpperCase()}
+                            {inv.patient.fullName?.[0]?.toUpperCase() ?? "?"}
                           </div>
                           <div>
-                            <p className="text-[13px] font-medium text-dim-900">{inv.patient.fullName}</p>
+                            <p className="text-[13px] font-medium text-dim-900">{inv.patient.fullName ?? "Paciente removido"}</p>
                             {inv.appointment && (
                               <p className="text-[11px] text-dim-400">
                                 via {inv.appointment.service.name} · {format(new Date(inv.appointment.scheduledAt), "d MMM", { locale: pt })}
@@ -497,12 +509,12 @@ export function FaturasTab() {
                         )}
                       </td>
                       <td className="px-5 py-3.5 border-b border-dim-100">
-                        <Link
-                          href={`/billing/${inv.id}`}
-                          className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 opacity-0 group-hover:opacity-100 transition-opacity"
+                        <button
+                          onClick={() => setDetailsInvoiceId(inv.id)}
+                          className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                         >
                           Detalhes →
-                        </Link>
+                        </button>
                       </td>
                     </tr>
                   );
@@ -617,6 +629,7 @@ export function FaturasTab() {
     </Modal>
 
     <FaturaPreviewModal invoiceId={previewInvoiceId} onClose={() => setPreviewInvoiceId(null)} />
+    <InvoiceDetailModal invoiceId={detailsInvoiceId} onClose={() => setDetailsInvoiceId(null)} />
     </>
   );
 }

@@ -6,7 +6,8 @@ import { RequestContext } from "../../common/context/request-context";
 import {
   CreateExpenseDto, UpdateExpenseDto, ExpenseDecisionDto,
   CreateIncomeDto, UpdateIncomeDto,
-  FinanceiroListQuery, FinanceiroSummary,
+  FinanceiroListQuery, FinanceiroSummary, PaidInvoiceEntry,
+  PaginationQuery, OutstandingBalanceEntry, PatientOutstandingBalance,
 } from "@cap/types";
 
 interface UploadedReceipt {
@@ -149,6 +150,103 @@ export class FinanceiroService {
     const result = await this.repo.deleteIncome(id);
     RequestContext.setAuditDiff(existing, null);
     return result;
+  }
+
+  // ── Faturas Pagas (invoice payments, listed as Entradas) ─
+  async listPaidInvoices(query: FinanceiroListQuery) {
+    const { from, to, page, limit } = query;
+    const where = from || to ? { paidAt: dateRange(from, to) } : {};
+    const skip = (page - 1) * limit;
+    const [rows, total] = await Promise.all([
+      this.repo.findPaidInvoicePayments(where, skip, limit),
+      this.repo.countPaidInvoicePayments(where),
+    ]);
+    const data: PaidInvoiceEntry[] = rows.map((p) => {
+      const patientName = p.invoice.patient.fullName ?? "Paciente";
+      const serviceNames = Array.from(
+        new Set(p.invoice.items.map((item) => item.service?.name ?? item.description))
+      );
+      const category = serviceNames.length > 1
+        ? `${serviceNames[0]} +${serviceNames.length - 1}`
+        : serviceNames[0] ?? "Fatura";
+      return {
+        id: p.id,
+        invoiceId: p.invoiceId,
+        invoiceNumber: p.invoice.invoiceNumber,
+        patientName,
+        description: `Fatura ${p.invoice.invoiceNumber} — ${patientName}`,
+        category,
+        amount: Number(p.amount),
+        date: p.paidAt.toISOString().slice(0, 10),
+        payerType: p.invoice.healthPlanId ? "planoSaude" : "privado",
+        method: p.method,
+      };
+    });
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  // ── Saldos em Aberto (outstanding balances) ─────────────
+  async listOutstandingBalances(query: PaginationQuery) {
+    const invoices = await this.repo.outstandingInvoicesDetailed();
+
+    const byPatient = new Map<string, OutstandingBalanceEntry>();
+    for (const inv of invoices) {
+      const amountDue = Number(inv.total) - Number(inv.amountPaid);
+      if (amountDue <= 0) continue; // guards against float/rounding noise, not an expected case
+
+      const entry = byPatient.get(inv.patientId) ?? {
+        patientId: inv.patientId,
+        patientName: inv.patient.fullName ?? "Paciente removido",
+        invoiceCount: 0,
+        overdueCount: 0,
+        totalDue: 0,
+        oldestDueDate: null,
+      };
+      entry.invoiceCount += 1;
+      entry.totalDue += amountDue;
+      if (inv.status === "overdue") entry.overdueCount += 1;
+      if (inv.dueDate) {
+        const iso = inv.dueDate.toISOString().slice(0, 10);
+        if (!entry.oldestDueDate || iso < entry.oldestDueDate) entry.oldestDueDate = iso;
+      }
+      byPatient.set(inv.patientId, entry);
+    }
+
+    const all = Array.from(byPatient.values()).sort((a, b) => b.totalDue - a.totalDue);
+    const { page, limit } = query;
+    const skip = (page - 1) * limit;
+    return {
+      data: all.slice(skip, skip + limit),
+      total: all.length,
+      page,
+      limit,
+      totalPages: Math.ceil(all.length / limit),
+    };
+  }
+
+  async getPatientOutstandingBalance(patientId: string): Promise<PatientOutstandingBalance> {
+    const invoices = await this.repo.outstandingInvoicesForPatient(patientId);
+    let totalDue = 0;
+    let overdueCount = 0;
+    const rows = invoices
+      .map((inv) => {
+        const amountDue = Number(inv.total) - Number(inv.amountPaid);
+        return {
+          id: inv.id,
+          invoiceNumber: inv.invoiceNumber,
+          status: inv.status,
+          amountDue,
+          dueDate: inv.dueDate ? inv.dueDate.toISOString().slice(0, 10) : null,
+        };
+      })
+      .filter((inv) => inv.amountDue > 0);
+
+    for (const inv of rows) {
+      totalDue += inv.amountDue;
+      if (inv.status === "overdue") overdueCount += 1;
+    }
+
+    return { patientId, totalDue, invoiceCount: rows.length, overdueCount, invoices: rows };
   }
 
   // ── Resumo (dashboard) ──────────────────────────────────

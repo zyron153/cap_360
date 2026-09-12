@@ -9,13 +9,21 @@
 
 Provides the clinic's first business intelligence layer. Replaces zero visibility on patient volumes, revenue, and operational performance with real-time dashboards and exportable reports.
 
-> **Implementation status: 🎭 UI mockup only — no backend at all.** No `/analytics/*` routes, no
-> materialised views, no dashboards, no exports. The one place in the running app with real
-> aggregate data is Financeiro's `GET /financeiro/summary` (date-ranged expenses/income, plus
+> **Implementation status (updated 2026-09-12): real backend for the appointment/patient-side
+> metrics below, still no exports or materialised views.** `GET /analytics/summary?from=&to=`
+> (`apps/api/src/modules/analytics/`) covers part of §2.2 (monthly appointment volume, peak
+> hours-of-day, top services) and part of §2.4 (active-patient count, i.e. "new vs returning" in
+> spirit though not by that exact definition) and §2.5 (active plans by product, though not broken
+> out as "Family / Corporate" the way §2.5 originally imagined) — see `API-SPEC.md` §12 for the
+> exact response shape. Financeiro's `GET /financeiro/summary` (date-ranged expenses/income, plus
 > receivables, revenue by payer type, revenue by service, and no-show financial impact — see
-> `M6-billing-invoicing.md` §2.6/§3) — which still covers none of the KPIs described below (nothing
-> here reports on appointments, staff, or patient-CRM metrics). Nothing in this document is
-> implemented.
+> `M6-billing-invoicing.md` §2.6/§3) remains the source for everything under §2.3 Revenue
+> Analytics. Still nothing implemented: §2.1 Executive Dashboard's live/today's-data cards, §2.2's
+> cancellation-reasons breakdown, all of §2.4 beyond active-patient count (age band, neighbourhood,
+> booking-source attribution), §2.5's renewal/churn rate, §2.6 Staff Productivity entirely, and
+> all of §3 (materialised views — current queries are plain live-table aggregation) and §4
+> (exports). §7 Access Control's `corporate_hr` scoped view also isn't built — same "no
+> company-scoped data isolation" gap noted elsewhere in this codebase.
 
 ---
 
@@ -136,4 +144,4 @@ See `API-SPEC.md` → Section 11 (Analytics)
 
 ---
 
-*Module M10 · v1.1 · updated 2026-08-30 against the current implementation*
+*Module M10 · v1.2 · updated 2026-09-12 against the current implementation*

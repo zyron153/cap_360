@@ -28,6 +28,8 @@ const inputCls =
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
 
+const TODAY = new Date().toISOString().slice(0, 10);
+
 export default function NewPatientPage() {
   const router = useRouter();
   const { addMessage } = useMessage();
@@ -83,7 +85,7 @@ export default function NewPatientPage() {
           </div>
 
           <Field label="Data de Nascimento" required error={errors.dateOfBirth?.message}>
-            <input type="date" {...register("dateOfBirth")} className={inputCls} />
+            <input type="date" max={TODAY} {...register("dateOfBirth")} className={inputCls} />
           </Field>
 
           <Field label="Género" required>
@@ -94,16 +96,17 @@ export default function NewPatientPage() {
             </select>
           </Field>
 
-          <Field label="Telefone" required error={errors.phone?.message}>
+          <Field label="Telefone" required hint="+238 + 7 dígitos" error={errors.phone?.message}>
             <input
               {...register("phone")}
+              inputMode="tel"
               placeholder="+2389912345"
               className={inputCls}
             />
           </Field>
 
-          <Field label="NIF">
-            <input {...register("nif")} placeholder="123456789" className={inputCls} />
+          <Field label="NIF" hint="9 dígitos" error={errors.nif?.message}>
+            <input {...register("nif")} inputMode="numeric" maxLength={9} placeholder="123456789" className={inputCls} />
           </Field>
 
           <div className="col-span-2">

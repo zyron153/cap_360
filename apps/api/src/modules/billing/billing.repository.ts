@@ -12,17 +12,23 @@ export class BillingRepository {
 
   async nextInvoiceNumber(): Promise<string> {
     const year = new Date().getFullYear();
-    // Session-level advisory lock keyed on year prevents duplicate numbers under concurrent load.
-    // Lock is released automatically at transaction end or session close.
-    await this.prisma.$executeRaw`SELECT pg_advisory_lock(${year}::bigint)`;
-    const result = await this.prisma.$queryRaw<[{ next_seq: bigint }]>`
-      SELECT (SELECT COUNT(*) FROM invoices
-              WHERE "createdAt" >= ${new Date(`${year}-01-01`)}
-                AND "createdAt" <  ${new Date(`${year + 1}-01-01`)}) + 1 AS next_seq
-    `;
-    const seq = String(Number(result[0].next_seq)).padStart(4, "0");
-    await this.prisma.$executeRaw`SELECT pg_advisory_unlock(${year}::bigint)`;
-    return `INV-${year}-${seq}`;
+    // pg_advisory_xact_lock (transaction-scoped, auto-released at commit/rollback — no manual
+    // unlock to forget) inside $transaction, which pins one physical connection for the whole
+    // callback. Plain pg_advisory_lock/unlock as two separate top-level calls was a real bug:
+    // Prisma's pool doesn't guarantee they land on the same connection, so the unlock could
+    // silently no-op on a different session while the lock-holding connection went back to the
+    // pool still holding it — a permanent deadlock for every future call, reproduced live in this
+    // dev DB (idle connection holding the lock, three others blocked on it indefinitely).
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${year}::bigint)`;
+      const result = await tx.$queryRaw<[{ next_seq: bigint }]>`
+        SELECT (SELECT COUNT(*) FROM invoices
+                WHERE "createdAt" >= ${new Date(`${year}-01-01`)}
+                  AND "createdAt" <  ${new Date(`${year + 1}-01-01`)}) + 1 AS next_seq
+      `;
+      const seq = String(Number(result[0].next_seq)).padStart(4, "0");
+      return `INV-${year}-${seq}`;
+    });
   }
 
   create(data: Prisma.InvoiceCreateInput) {
@@ -37,8 +43,11 @@ export class BillingRepository {
       where: { id },
       include: {
         items: { include: { service: { select: { name: true } } } },
-        payments: true,
+        payments: { include: { recordedBy: { select: { id: true, fullName: true } } } },
         patient: { select: { id: true, fullName: true, phone: true, nif: true } },
+        appointment: {
+          select: { id: true, serviceId: true, durationMinutes: true, service: { select: { durationMinutes: true } } },
+        },
       },
     });
     if (!invoice) return invoice;
@@ -93,18 +102,19 @@ export class BillingRepository {
    */
   recordPaymentAtomic(
     invoiceId: string,
-    payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string },
+    payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string; recordedById?: string },
     invoiceTotal: number,
   ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
         data: {
-          invoice: { connect: { id: invoiceId } },
+          invoiceId,
           amount: payment.amount,
           method: payment.method,
           reference: payment.reference,
           paidAt: payment.paidAt,
           idempotencyKey: payment.idempotencyKey,
+          recordedById: payment.recordedById,
         },
       });
 
@@ -135,5 +145,55 @@ export class BillingRepository {
 
   findServiceById(serviceId: string) {
     return this.prisma.service.findUnique({ where: { id: serviceId } });
+  }
+
+  findItemForUpdate(invoiceId: string, itemId: string) {
+    return this.prisma.invoiceItem.findFirst({
+      where: { id: itemId, invoiceId },
+      include: { invoice: { select: { status: true, appointmentId: true } } },
+    });
+  }
+
+  findAppointmentWithService(appointmentId: string) {
+    return this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: {
+        id: true,
+        serviceId: true,
+        service: { select: { price: true, durationMinutes: true } },
+      },
+    });
+  }
+
+  /**
+   * Updates one line item, optionally the appointment's actual duration alongside it, then
+   * re-sums every item on the invoice into its subtotal/total — all inside one transaction so a
+   * concurrent payment or item edit can't read a stale total in between.
+   */
+  updateItemAtomic(
+    invoiceId: string,
+    itemId: string,
+    itemData: { quantity: number; unitPrice: number; total: number },
+    appointmentUpdate?: { appointmentId: string; durationMinutes: number },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.invoiceItem.update({ where: { id: itemId }, data: itemData });
+
+      if (appointmentUpdate) {
+        await tx.appointment.update({
+          where: { id: appointmentUpdate.appointmentId },
+          data: { durationMinutes: appointmentUpdate.durationMinutes },
+        });
+      }
+
+      const items = await tx.invoiceItem.findMany({ where: { invoiceId }, select: { total: true } });
+      const total = items.reduce((sum, i) => sum + Number(i.total), 0);
+
+      return tx.invoice.update({
+        where: { id: invoiceId },
+        data: { subtotal: total, total },
+        include: { items: true, payments: true },
+      });
+    });
   }
 }

@@ -23,6 +23,7 @@ import {
   CreateIncomeSchema, CreateIncomeDto,
   UpdateIncomeSchema, UpdateIncomeDto,
   FinanceiroListQuerySchema, FinanceiroListQuery,
+  PaginationQuerySchema, PaginationQuery,
 } from "@cap/types";
 
 interface UploadedReceipt {
@@ -108,6 +109,22 @@ export class FinanceiroController {
   @Roles("admin")
   deleteIncome(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.deleteIncome(id);
+  }
+
+  @Get("entradas/faturas")
+  listPaidInvoices(@Query(new ZodValidationPipe(FinanceiroListQuerySchema)) query: FinanceiroListQuery) {
+    return this.service.listPaidInvoices(query);
+  }
+
+  // ── Saldos em Aberto ─────────────────────────────────────
+  @Get("saldos")
+  listOutstandingBalances(@Query(new ZodValidationPipe(PaginationQuerySchema)) query: PaginationQuery) {
+    return this.service.listOutstandingBalances(query);
+  }
+
+  @Get("saldos/:patientId")
+  getPatientOutstandingBalance(@Param("patientId", ParseUUIDPipe) patientId: string) {
+    return this.service.getPatientOutstandingBalance(patientId);
   }
 
   // ── Resumo ───────────────────────────────────────────────

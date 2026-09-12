@@ -5,6 +5,7 @@ import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { RequestContext } from "../../common/context/request-context";
 
@@ -21,6 +22,9 @@ const repo = {
   recordPaymentAtomic: jest.fn(),
   findPaymentReplay: jest.fn(),
   findServiceById: jest.fn(),
+  findItemForUpdate: jest.fn(),
+  findAppointmentWithService: jest.fn(),
+  updateItemAtomic: jest.fn(),
 };
 const r2 = { isConfigured: jest.fn(), upload: jest.fn(), signedUrl: jest.fn() };
 const prisma = {
@@ -32,6 +36,7 @@ const prisma = {
   setting: { findUnique: jest.fn() },
 };
 const efaturaQueue = { add: jest.fn() };
+const healthPlansService = { getActiveCoverage: jest.fn() };
 const generateReceiptPdfMock = generateReceiptPdf as jest.Mock;
 
 const INVOICE = {
@@ -51,12 +56,17 @@ describe("BillingService", () => {
         { provide: BillingRepository, useValue: repo },
         { provide: R2Service, useValue: r2 },
         { provide: PrismaService, useValue: prisma },
+        { provide: HealthPlansService, useValue: healthPlansService },
         { provide: getQueueToken("efatura"), useValue: efaturaQueue },
       ],
     }).compile();
     service = mod.get(BillingService);
     jest.clearAllMocks();
     r2.isConfigured.mockReturnValue(false);
+    // No active health plan by default — individual tests below override this to exercise the
+    // discount path. Without this default, every pre-existing create()/createDraft() test would
+    // need its own mock just to avoid a hanging jest.fn() promise.
+    healthPlansService.getActiveCoverage.mockResolvedValue(null);
   });
 
   // The actual status-machine math (paid / partially_paid) now lives inside
@@ -74,6 +84,15 @@ describe("BillingService", () => {
       expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
         "inv-1",
         expect.objectContaining({ amount: 800, method: "bank_transfer" }),
+        2000
+      );
+    });
+
+    it("passes the recording staff member's id through to the atomic repository call", async () => {
+      await service.recordPayment("inv-1", { amount: 800, method: "cash" }, "staff-1");
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ recordedById: "staff-1" }),
         2000
       );
     });
@@ -271,6 +290,79 @@ describe("BillingService", () => {
     });
   });
 
+  describe("create — health-plan discount", () => {
+    beforeEach(() => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0004");
+      repo.create.mockResolvedValue({});
+    });
+
+    it("adds no discount line when the patient has no active health plan", async () => {
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 1000 }],
+      } as never, ["receptionist"]);
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.items.create).toHaveLength(1);
+      expect(call.subtotal).toBe(1000);
+      expect(call.total).toBe(1000);
+    });
+
+    it("appends a negative discount line and reduces the total when the patient has an active plan", async () => {
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 1000 }],
+      } as never, ["receptionist"]);
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.items.create).toHaveLength(2);
+      expect(call.items.create[1]).toEqual(
+        expect.objectContaining({ serviceId: null, unitPrice: -800, total: -800 })
+      );
+      expect(call.items.create[1].description).toContain("80%");
+      expect(call.subtotal).toBe(200);
+      expect(call.total).toBe(200);
+      expect(call.healthPlan).toEqual({ connect: { id: "plan-1" } });
+    });
+
+    it("prefers the caller-supplied healthPlanId over the patient's own active plan for the invoice link", async () => {
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+
+      await service.create({
+        patientId: "patient-1",
+        healthPlanId: "explicit-plan",
+        items: [{ description: "Item avulso", quantity: 1, unitPrice: 1000 }],
+      } as never, ["receptionist"]);
+
+      expect(repo.create.mock.calls[0][0].healthPlan).toEqual({ connect: { id: "explicit-plan" } });
+    });
+
+    it("does not add a discount line for a zero-value invoice", async () => {
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 80,
+        productName: "Plano Familiar",
+      });
+
+      await service.create({
+        patientId: "patient-1",
+        items: [{ description: "Item gratuito", quantity: 1, unitPrice: 0 }],
+      } as never, ["receptionist"]);
+
+      expect(repo.create.mock.calls[0][0].items.create).toHaveLength(1);
+    });
+  });
+
   describe("createDraft", () => {
     it("creates a draft invoice with status=draft and correct totals", async () => {
       repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0002");
@@ -291,6 +383,138 @@ describe("BillingService", () => {
           total: 1500,
           status: "draft",
         })
+      );
+    });
+
+    it("adds a health-plan discount line to the auto-generated draft too", async () => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0005");
+      repo.create.mockResolvedValue({});
+      healthPlansService.getActiveCoverage.mockResolvedValue({
+        healthPlanId: "plan-1",
+        coveragePercent: 50,
+        productName: "Plano Individual",
+      });
+
+      await service.createDraft({
+        patientId: "patient-1",
+        appointmentId: "appt-1",
+        serviceId: "service-1",
+        serviceName: "Consulta Geral",
+        unitPrice: 1500,
+      });
+
+      const call = repo.create.mock.calls[0][0];
+      expect(call.items.create).toHaveLength(2);
+      expect(call.items.create[1]).toEqual(
+        expect.objectContaining({ serviceId: null, unitPrice: -750, total: -750 })
+      );
+      expect(call.subtotal).toBe(750);
+      expect(call.total).toBe(750);
+      expect(call.healthPlan).toEqual({ connect: { id: "plan-1" } });
+    });
+  });
+
+  describe("updateItem", () => {
+    beforeEach(() => {
+      repo.updateItemAtomic.mockResolvedValue({});
+    });
+
+    it("rejects editing an item on a non-draft invoice", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "issued", appointmentId: "appt-1" },
+      });
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { quantity: 2 } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updateItemAtomic).not.toHaveBeenCalled();
+    });
+
+    it("throws NotFoundException when the item doesn't belong to the invoice", async () => {
+      repo.findItemForUpdate.mockResolvedValue(null);
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { quantity: 2 } as never)
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it("recomputes unitPrice proportionally to the service's standard duration", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: "appt-1" },
+      });
+      repo.findAppointmentWithService.mockResolvedValue({
+        id: "appt-1", serviceId: "service-1",
+        service: { price: "1500", durationMinutes: 30 },
+      });
+
+      await service.updateItem("inv-1", "item-1", { durationMinutes: 45 } as never);
+
+      // 45 / 30 standard minutes * 1500 = 2250
+      expect(repo.updateItemAtomic).toHaveBeenCalledWith(
+        "inv-1", "item-1",
+        { quantity: 1, unitPrice: 2250, total: 2250 },
+        { appointmentId: "appt-1", durationMinutes: 45 }
+      );
+    });
+
+    it("rejects a durationMinutes edit on an item with no appointment behind it", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "250", serviceId: null,
+        invoice: { status: "draft", appointmentId: null },
+      });
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { durationMinutes: 45 } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updateItemAtomic).not.toHaveBeenCalled();
+    });
+
+    it("lets a manual quantity edit through without touching price authorization", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: null },
+      });
+
+      await service.updateItem("inv-1", "item-1", { quantity: 3 } as never, ["receptionist"]);
+
+      expect(repo.updateItemAtomic).toHaveBeenCalledWith(
+        "inv-1", "item-1",
+        { quantity: 3, unitPrice: 1500, total: 4500 },
+        undefined
+      );
+      expect(repo.findServiceById).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-admin manually pricing a catalogued item away from the catalogue price", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: null },
+      });
+      repo.findServiceById.mockResolvedValue({ id: "service-1", price: "1500" });
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { unitPrice: 500 } as never, ["receptionist"])
+      ).rejects.toThrow(ForbiddenException);
+      expect(repo.updateItemAtomic).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin manually reprice a catalogued item with a reason when underpricing", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: null },
+      });
+      repo.findServiceById.mockResolvedValue({ id: "service-1", price: "1500" });
+
+      await service.updateItem(
+        "inv-1", "item-1",
+        { unitPrice: 500, priceOverrideReason: "Desconto autorizado" } as never,
+        ["admin"]
+      );
+
+      expect(repo.updateItemAtomic).toHaveBeenCalledWith(
+        "inv-1", "item-1", { quantity: 1, unitPrice: 500, total: 500 }, undefined
       );
     });
   });
@@ -351,32 +575,50 @@ describe("BillingService", () => {
   describe("cancel", () => {
     it("throws NotFoundException for an unknown invoice", async () => {
       repo.findByIdLite.mockResolvedValue(null);
-      await expect(service.cancel("inv-x")).rejects.toThrow(NotFoundException);
+      await expect(service.cancel("inv-x", "Duplicado")).rejects.toThrow(NotFoundException);
     });
 
     it("throws BadRequestException when the invoice is already fully paid", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "paid" });
-      await expect(service.cancel("inv-1")).rejects.toThrow(BadRequestException);
+      await expect(service.cancel("inv-1", "Duplicado")).rejects.toThrow(BadRequestException);
       expect(repo.update).not.toHaveBeenCalled();
     });
 
     it("is idempotent — returns the invoice as-is when already cancelled, without re-cancelling", async () => {
       const cancelled = { ...INVOICE, status: "cancelled" };
       repo.findByIdLite.mockResolvedValue(cancelled);
-      expect(await service.cancel("inv-1")).toEqual(cancelled);
+      expect(await service.cancel("inv-1", "Duplicado")).toEqual(cancelled);
       expect(repo.update).not.toHaveBeenCalled();
       expect(efaturaQueue.add).not.toHaveBeenCalled();
     });
 
-    it("sets status to cancelled for an issued invoice with no E-Factura submission", async () => {
+    it("sets status to cancelled with the reason and a timestamp for an issued invoice with no E-Factura submission", async () => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
       prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
       repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
 
-      await service.cancel("inv-1");
+      await service.cancel("inv-1", "Paciente desistiu");
 
-      expect(repo.update).toHaveBeenCalledWith("inv-1", { status: "cancelled" });
+      expect(repo.update).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu", cancelledAt: expect.any(Date) })
+      );
       expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+
+    it("records the before/after status and reason in the audit diff", async () => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
+      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
+      const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
+
+      await service.cancel("inv-1", "Paciente desistiu");
+
+      expect(diffSpy).toHaveBeenCalledWith(
+        { status: "issued" },
+        expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu" })
+      );
+      diffSpy.mockRestore();
     });
 
     it("also enqueues an E-Factura cancel job when the invoice was already accepted there", async () => {
@@ -388,7 +630,7 @@ describe("BillingService", () => {
       });
       repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
 
-      await service.cancel("inv-1");
+      await service.cancel("inv-1", "Duplicado");
 
       expect(efaturaQueue.add).toHaveBeenCalledWith(
         "cancel",
@@ -406,7 +648,7 @@ describe("BillingService", () => {
       });
       repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
 
-      await service.cancel("inv-1");
+      await service.cancel("inv-1", "Duplicado");
 
       expect(efaturaQueue.add).not.toHaveBeenCalled();
     });
@@ -456,6 +698,26 @@ describe("BillingService", () => {
       repo.findById.mockResolvedValue({ ...FULL_INVOICE, pdfR2Key: "receipts/existing.pdf" });
       await service.getReceiptUrl("inv-1");
       expect(generateReceiptPdfMock).not.toHaveBeenCalled();
+    });
+
+    it("passes the patient's NIF through to the receipt (already decrypted by the repository)", async () => {
+      repo.findById.mockResolvedValue({
+        ...FULL_INVOICE,
+        patient: { ...FULL_INVOICE.patient, nif: "289959195" },
+      });
+      prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
+      await service.getReceiptUrl("inv-1");
+      expect(generateReceiptPdfMock).toHaveBeenCalledWith(
+        expect.objectContaining({ patient: expect.objectContaining({ nif: "289959195" }) })
+      );
+    });
+
+    it("passes null NIF when the patient has none, instead of dropping the field", async () => {
+      prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
+      await service.getReceiptUrl("inv-1");
+      expect(generateReceiptPdfMock).toHaveBeenCalledWith(
+        expect.objectContaining({ patient: expect.objectContaining({ nif: null }) })
+      );
     });
   });
 });

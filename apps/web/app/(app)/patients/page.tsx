@@ -44,6 +44,8 @@ async function createPatient(data: CreatePatientDto) {
 const inputCls =
   "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300";
 
+const TODAY = new Date().toISOString().slice(0, 10);
+
 // ── New Patient Modal ──────────────────────────────────────────
 
 function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -81,7 +83,7 @@ function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void
           </div>
 
           <Field label="Data de Nascimento" required error={errors.dateOfBirth?.message}>
-            <input type="date" {...register("dateOfBirth")} className={inputCls} />
+            <input type="date" max={TODAY} {...register("dateOfBirth")} className={inputCls} />
           </Field>
 
           <Field label="Género" required>
@@ -92,12 +94,12 @@ function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void
             </select>
           </Field>
 
-          <Field label="Telefone" required error={errors.phone?.message}>
-            <input {...register("phone")} placeholder="+2389912345" className={inputCls} />
+          <Field label="Telefone" required hint="+238 + 7 dígitos" error={errors.phone?.message}>
+            <input {...register("phone")} inputMode="tel" placeholder="+2389912345" className={inputCls} />
           </Field>
 
-          <Field label="NIF">
-            <input {...register("nif")} placeholder="123456789" className={inputCls} />
+          <Field label="NIF" hint="9 dígitos" error={errors.nif?.message}>
+            <input {...register("nif")} inputMode="numeric" maxLength={9} placeholder="123456789" className={inputCls} />
           </Field>
 
           <div className="col-span-2">

@@ -21,6 +21,17 @@ type FormState = {
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)]";
 const INPUT = "w-full text-[13px] border border-dim-200 rounded-[8px] px-3 py-2 bg-white text-dim-900 focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400";
+const TODAY = new Date().toISOString().slice(0, 10);
+
+/** The API's ZodValidationPipe returns `message` as an array of `{ path, message }`. */
+function errText(message: unknown): string {
+  if (Array.isArray(message)) {
+    return message
+      .map((m) => (m && typeof m === "object" && "message" in m ? String((m as { message: unknown }).message) : String(m)))
+      .join(" · ");
+  }
+  return typeof message === "string" ? message : "Erro ao guardar";
+}
 
 
 export default function PatientEditPage({ params }: { params: Promise<{ id: string }> }) {
@@ -77,7 +88,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.message ?? "Erro ao guardar");
+        throw new Error(errText(err.message));
       }
       addMessage("Success", "Dados guardados com sucesso!");
       router.push(`/patients/${id}`);
@@ -117,7 +128,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
           </Field>
 
           <Field label="Data de nascimento">
-            <input type="date" value={form.dateOfBirth} onChange={set("dateOfBirth")} className={INPUT} />
+            <input type="date" max={TODAY} value={form.dateOfBirth} onChange={set("dateOfBirth")} className={INPUT} />
           </Field>
 
           <Field label="Género">
@@ -128,12 +139,12 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
             </select>
           </Field>
 
-          <Field label="Telefone">
-            <input value={form.phone} onChange={set("phone")} placeholder="+238..." className={INPUT} />
+          <Field label="Telefone" hint="+238 + 7 dígitos">
+            <input value={form.phone} onChange={set("phone")} inputMode="tel" placeholder="+2389912345" className={INPUT} />
           </Field>
 
-          <Field label="NIF">
-            <input value={form.nif} onChange={set("nif")} className={INPUT} />
+          <Field label="NIF" hint="9 dígitos">
+            <input value={form.nif} onChange={set("nif")} inputMode="numeric" maxLength={9} placeholder="123456789" className={INPUT} />
           </Field>
 
           <Field label="Email">

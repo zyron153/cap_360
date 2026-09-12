@@ -49,6 +49,9 @@ export const UpdateAppointmentStatusSchema = z.object({
     "no_show",
   ]),
   cancellationReason: z.string().max(300).optional(),
+  // Actual time spent, captured when marking a Consulta as "completed" — feeds the price of the
+  // auto-generated draft invoice, proportional to the service's standard duration.
+  durationMinutes: z.number().int().positive().max(600).optional(),
 });
 export type UpdateAppointmentStatusDto = z.infer<
   typeof UpdateAppointmentStatusSchema

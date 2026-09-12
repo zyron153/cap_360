@@ -9,11 +9,16 @@
 
 Eliminates revenue leakage from manual and untracked billing. Auto-generates invoices at check-in, supports multiple payment methods including health plan claims, and delivers receipts to patients via WhatsApp.
 
-> **Implementation status:** invoice creation (auto-draft at check-in + manual), payments
+> **Implementation status:** invoice creation (auto-draft on Consulta completion + manual), payments
 > (idempotent, transactional, overpayment-guarded), cancellation, PDF receipts, and E-Fatura tax
-> submission are built and tested. ❌ Nothing computes health-plan co-pay/discounts or tracks plan
-> utilisation — `health_plan` is only a `PaymentMethod` enum value (though `Invoice.healthPlanId`
-> itself is real and now actually read, by the payer-type breakdown in §2.6/§3). ❌ No automatic
+> submission are built and tested. ✅ **Health-plan co-pay is now computed** — a patient with an
+> active plan gets an automatic negative "Desconto Plano de Saúde" line on invoice creation (manual
+> and auto-draft alike), sized from the plan product's `coverageRules.coverage` %
+> (`HealthPlansService.getActiveCoverage`); plan **utilisation** (`HealthPlan.usageCount`) is
+> separately incremented on appointment completion regardless of how the resulting invoice gets
+> paid (`AppointmentsService`, unrelated to this discount). `health_plan` as a `PaymentMethod` value
+> is still just a label with no discount logic of its own — the discount is applied once, up front,
+> at invoice creation. ❌ No automatic
 > WhatsApp/email receipt delivery — a receipt is only ever generated on request via
 > `GET /invoices/:id/receipt`. ✅ Receivables (outstanding/overdue invoices) and a handful of
 > revenue breakdowns exist now (§2.5/§3) — real numbers, not a mockup, but scoped to what's
@@ -29,8 +34,9 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 
 - ✅ Admin-managed list of billable services with base price (CVE) — plain per-service price, no
   bulk-update endpoint
-- ❌ Health-plan-specific pricing/co-pay tiers — no such field or logic exists anywhere in the
-  codebase; a health plan is a simple FK on the patient, not a pricing table
+- ✅ **Fixed.** Health-plan co-pay — a flat coverage % per product (`coverageRules.coverage`), not
+  per-service tiers; applied as one discount line covering the whole invoice, not per catalogue
+  item (see the module-level implementation status note above)
 - ✅ **Price-override guard (not in the original design):** billing a catalogued service at a price
   different from `Service.price` requires the `admin` role and is logged (`Logger.warn`) with the
   patient/service/override amount; custom off-catalogue line items (no `serviceId`) aren't
@@ -39,9 +45,23 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 ### 2.2 Invoice Generation
 
 Invoices are created:
-- ✅ **Automatically** as a `draft` at appointment check-in (best-effort — a billing failure is
-  logged but does not block the check-in itself)
+- ✅ **Automatically** as a `draft` when a Consulta's status is set to **Concluído** (`completed`),
+  not at check-in as originally described here — `updateStatus` calls `BillingService.createDraft()`
+  best-effort (a billing failure is logged but does not block the completion itself)
 - ✅ **Manually** by receptionist/admin (`POST /invoices`) for walk-ins or additional services
+
+✅ **Duration-proportional pricing (not in the original design):** completing a Consulta prompts
+for the actual duration (defaulting to the appointment's scheduled duration); when the service has
+a known standard duration, the draft's price is `(actualDuration / service.durationMinutes) *
+service.price` instead of always the flat catalogue price — a 45-minute session on a 30-minute/1500
+CVE service drafts at 2250 CVE, not 1500. The confirmed duration is written back onto
+`Appointment.durationMinutes`; there's no separate duration field on the invoice/line-item itself.
+✅ **Draft line items stay editable afterward, too:** while an invoice is still `draft`,
+`PATCH /invoices/:id/items/:itemId` lets quantity/price be adjusted on any item, and — on the item
+generated from the appointment specifically — lets duration be re-entered instead, recomputing the
+price the same way. A direct manual price edit on a catalogued item still goes through the same
+admin-only / reason-required override guard as `POST /invoices` (§2.1); the duration path doesn't,
+since it's following the catalogue price rather than diverging from it.
 
 Invoice includes:
 - ✅ Auto-incremented invoice number, but formatted `INV-2026-0001` (4-digit, not `MS-2026-00001`)
@@ -72,16 +92,18 @@ Supported methods (`PaymentMethod` enum — exactly these four, no more):
 atomic insert+re-sum+status-update transaction and a hard guard rejecting any payment that would
 push `totalPaid` over the invoice total. ✅ Payments accept a client-supplied `idempotencyKey` — a
 retried "record payment" request replays the original result instead of double-charging.
-❌ Payments are **not** attributed to the staff member who recorded them — the `Payment` model has
-no staff/user field.
+✅ **Fixed.** Payments are now attributed to the staff member who recorded them —
+`Payment.recordedById` (FK to `Staff`), set from the authenticated caller, shown on the invoice
+detail page's payment history.
 
 ### 2.4 Receipt Delivery
 
 - 🟡 PDF receipt generated server-side using **PDFKit** (not Puppeteer), on-demand via
   `GET /invoices/:id/receipt` — not automatically "on full payment". It renders whatever the
   invoice's status/amountPaid is at request time, uploads to R2, and **caches the R2 key on the
-  invoice** — a known gap: if a receipt is generated after a partial payment, a later payment on
-  the same invoice does **not** regenerate the PDF, so the cached receipt can go stale
+  invoice** — ✅ the staleness gap once described here is fixed: `recordPaymentAtomic` nulls
+  `pdfR2Key` on every payment (`billing.repository.ts`), so a receipt generated after a partial
+  payment gets regenerated the next time it's requested rather than staying stale
 - ❌ No automatic delivery — nothing sends the receipt via WhatsApp or email; a staff member must
   open the invoice and fetch the receipt URL themselves
 
@@ -132,8 +154,10 @@ reporting engine — everything below lives on the Financeiro Overview tab speci
   outside this specific breakdown
 - ✅ Revenue by service — billed (not necessarily collected) totals per `InvoiceItem.serviceId`,
   falling back to the line item's free-text description when it has none
-- ✅ No-show financial impact — count of `no_show` appointments in range, plus the hypothetical
-  revenue lost (their service's price, never actually billed)
+- ✅ No-show financial impact — count of "faltas" (`no_show` **and** `cancelled` appointments) in
+  range, plus the hypothetical revenue lost (their service's price, never actually billed). Widened
+  from `no_show`-only after the card showed 0/0 for periods with only cancellations
+  (`FinanceiroRepository.noShowAppointments`) — field name (`noShowImpact`) predates the widening.
 - ❌ No revenue-by-doctor breakdown, no daily (as opposed to monthly-chart/period-snapshot)
   granularity, no Excel/PDF export
 - ❌ **M10 Analytics still doesn't exist as its own module** (see
@@ -162,9 +186,9 @@ design.
 
 | Screen | Role | Description |
 |---|---|---|
-| Check-in & Invoice | Receptionist | ✅ Check in patient triggers an auto-created draft invoice |
+| Consulta Completion → Invoice | Receptionist / Doctor | ✅ Marking a Consulta "Concluída" prompts for actual duration, then triggers an auto-created draft invoice priced off it |
 | Invoice List | Receptionist / Admin | ✅ Filterable list of all invoices |
-| Invoice Detail | Receptionist / Admin | ✅ Line items, payment history, cancel action |
+| Invoice Detail | Receptionist / Admin | ✅ Line items (editable while `draft` — duration on the appointment-linked item, quantity/price on any), payment history, cancel action — available both as a full `/billing/:id` page and as a modal opened from the Faturas list's "Detalhes" button (same shared component, `InvoiceDetailBody.tsx`, so the two can't drift) |
 | Payment Modal | Receptionist | ✅ Record payment — method, amount, reference |
 | Outstanding Balances | Admin | ❌ No dedicated screen (see §2.5) |
 | Revenue Dashboard | Admin | ❌ Doesn't exist (see §3) |
@@ -174,19 +198,32 @@ design.
 
 ## 7. Business Rules
 
-- 🟡 Invoices cannot be deleted, only cancelled — true, but `POST /invoices/:id/cancel` takes
-  **no reason field**; cancelling a `paid` invoice is rejected, cancelling an already-cancelled one
-  is a no-op (idempotent), and an accepted E-Fatura submission gets a queued cancel job to the tax
-  authority too
-- 🟡 "Cancelled invoices retain full audit trail" — the invoice row itself is retained (never hard
-  deleted), but nothing writes a dedicated `audit_log` entry for invoice cancellation specifically
-- ❌ "Receipts issued for each payment" — one receipt is generated per **invoice**, on demand, and
-  can go stale after a later payment (see §2.4) — there's no per-payment receipt
-- ❌ Health-plan utilisation/co-pay check — not implemented (see §2.1/§2.3)
-- ❌ Payment-to-staff attribution — not implemented (see §2.3)
+- ✅ Invoices cannot be deleted, only cancelled — `POST /invoices/:id/cancel` now **requires a
+  reason** (`CancelInvoiceSchema`, min 3 chars, stored on `Invoice.cancelReason`/`cancelledAt`);
+  cancelling a `paid` invoice is rejected, cancelling an already-cancelled one is a no-op
+  (idempotent), and an accepted E-Fatura submission gets a queued cancel job to the tax authority
+  too. A cancel button + reason prompt now also exists on the invoice detail page — it didn't
+  before, despite the endpoint being real.
+- ✅ **Fixed.** "Cancelled invoices retain full audit trail" — the invoice row itself is retained
+  (never hard deleted), and cancellation now writes a semantic before/after diff (status +
+  `cancelReason`) onto its `audit_log` row via the same mechanism §1.4 introduced, not just the
+  generic "a POST happened" row the interceptor logs for every mutation.
+- 🟡 "Receipts issued for each payment" — one receipt is generated per **invoice**, on demand
+  (not automatically per payment) — there's no per-payment receipt. The staleness half of this gap
+  is closed: `recordPaymentAtomic` nulls `pdfR2Key` on every payment, so a cached receipt can no
+  longer be served after a later payment changes the balance.
+- ✅ **Fixed.** Health-plan co-pay — see §1/§2.1. Utilisation (`usageCount`) was already tracked
+  separately (`AppointmentsService`, on appointment completion) before this fix.
+- ✅ **Fixed.** Payment-to-staff attribution — `Payment.recordedById` (see §2.3).
 
 ---
 
-*Module M6 · v1.3 · updated 2026-09-06 — seeded real Financeiro demo data (which surfaced and fixed
-a receivables bug: `overdue` invoices were invisible to the Contas a Receber card), plus the Faturas
-list now shows an invoice's linked consultation*
+*Module M6 · v1.6 · updated 2026-09-12 — completing a Consulta now confirms actual duration and
+prices the auto-generated draft invoice proportionally to the service's standard duration instead
+of always the flat catalogue price; draft invoice line items are now editable in place
+(`PATCH /invoices/:id/items/:itemId`) instead of read-only; corrected this doc's long-standing
+"auto-draft at check-in" claim to what the code actually does (on completion); "Detalhes" on the
+Faturas list now opens the invoice detail experience as a modal instead of navigating away
+(extracted into shared `InvoiceDetailBody.tsx`, reused by the full `/billing/:id` page); "faltas"
+financial impact widened from `no_show`-only to `no_show` + `cancelled`; patient-name null-safety
+fix (right-to-erasure leaves `fullName: null`) applied across the dashboard and billing screens*

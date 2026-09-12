@@ -52,7 +52,7 @@ type AppointmentDetail = {
   createdAt: string;
   patient: { id: string; fullName: string; phone: string | null };
   staff: { id: string; fullName: string; role: string } | null;
-  service: { id: string; name: string; durationMinutes: number } | null;
+  service: { id: string; name: string; durationMinutes: number; price?: number } | null;
   room: { id: string; name: string } | null;
 };
 
@@ -104,6 +104,7 @@ const TRANSITIONS: Record<string, { status: string; label: string; primary: bool
   pending:    [{ status: "confirmed",  label: "Confirmar",      primary: true  },
                { status: "cancelled",  label: "Cancelar",       primary: false }],
   confirmed:  [{ status: "checked_in", label: "Check-in feito", primary: true  },
+               { status: "no_show",    label: "Faltou",         primary: false },
                { status: "cancelled",  label: "Cancelar",       primary: false }],
   checked_in: [{ status: "completed",  label: "Concluída",      primary: true  },
                { status: "no_show",    label: "Faltou",         primary: false }],
@@ -138,11 +139,11 @@ export default function AppointmentsPage() {
   }, [permLoading, can, router]);
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
+    mutationFn: ({ id, status, durationMinutes }: { id: string; status: string; durationMinutes?: number }) =>
       fetch(`/api/appointments/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, durationMinutes }),
       }).then(async (r) => {
         if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
         return r.json();
@@ -150,10 +151,16 @@ export default function AppointmentsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["appointment", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      setCompletingOpen(false);
       addMessage("Success", "Estado atualizado com sucesso!");
     },
     onError: (err: Error) => addMessage("Error", err.message),
   });
+
+  // "Concluída" opens this instead of firing immediately — the doctor confirms the actual
+  // duration before the auto-generated draft invoice is priced off it.
+  const [completingOpen, setCompletingOpen] = useState(false);
+  const [completeDuration, setCompleteDuration] = useState("");
 
   const waitlistQ = useQuery({
     queryKey: ["waitlist"],
@@ -847,7 +854,7 @@ export default function AppointmentsPage() {
 
     <Modal
       open={!!selectedId}
-      onClose={() => setSelectedId(null)}
+      onClose={() => { setSelectedId(null); setCompletingOpen(false); }}
       title={detail?.patient.fullName ?? "Marcação"}
       description={detail ? `${detail.service?.name ?? "Consulta"} · ${format(new Date(detail.scheduledAt), "dd/MM/yyyy 'às' HH:mm")}` : undefined}
       size="md"
@@ -880,13 +887,20 @@ export default function AppointmentsPage() {
             <div className="text-[11px] text-dim-400">
               Estado: <span className={`font-semibold px-2 py-0.5 rounded-full ml-1 ${STATUS_PILL[detail.status] ?? "bg-dim-100 text-dim-600"}`}>{STATUS_LEGEND.find((s) => s.key === detail.status)?.label ?? detail.status}</span>
             </div>
-            {TRANSITIONS[detail.status] && (
+            {TRANSITIONS[detail.status] && !completingOpen && (
               <div className="flex gap-2">
                 {TRANSITIONS[detail.status].map(({ status, label, primary }) => (
                   <button
                     key={status}
                     disabled={statusMutation.isPending}
-                    onClick={() => statusMutation.mutate({ id: detail.id, status })}
+                    onClick={() => {
+                      if (status === "completed") {
+                        setCompleteDuration(String(detail.durationMinutes));
+                        setCompletingOpen(true);
+                      } else {
+                        statusMutation.mutate({ id: detail.id, status });
+                      }
+                    }}
                     className={`text-[12px] font-semibold px-3 py-1.5 rounded-[8px] disabled:opacity-50 transition-colors ${
                       primary
                         ? "bg-brand-700 hover:bg-brand-800 text-white"
@@ -899,6 +913,64 @@ export default function AppointmentsPage() {
               </div>
             )}
           </div>
+
+          {completingOpen && (
+            <div className="mt-3 p-4 bg-emerald-50 border border-emerald-200 rounded-[14px] flex flex-col gap-3">
+              <p className="text-[12px] font-semibold text-emerald-800">
+                Confirmar duração da consulta
+              </p>
+              <p className="text-[11px] text-dim-500 -mt-1.5">
+                Isto gera automaticamente um rascunho de fatura com o valor calculado a partir da duração confirmada.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={480}
+                  value={completeDuration}
+                  onChange={(e) => setCompleteDuration(e.target.value)}
+                  className={`${inputCls} max-w-[110px]`}
+                />
+                <span className="text-[12px] text-dim-500">minutos</span>
+              </div>
+              {detail.service?.price !== undefined && detail.service.durationMinutes > 0 && (
+                <p className="text-[12px] text-dim-600">
+                  Valor da fatura:{" "}
+                  <span className="font-mono font-semibold text-dim-900">
+                    {(
+                      Math.round(
+                        ((Number(completeDuration) || 0) / detail.service.durationMinutes) *
+                          Number(detail.service.price) *
+                          100
+                      ) / 100
+                    ).toLocaleString("pt-CV")}{" "}
+                    CVE
+                  </span>
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  disabled={statusMutation.isPending || !completeDuration || Number(completeDuration) <= 0}
+                  onClick={() =>
+                    statusMutation.mutate({
+                      id: detail.id,
+                      status: "completed",
+                      durationMinutes: Number(completeDuration),
+                    })
+                  }
+                  className="flex-1 text-[12px] font-semibold py-2 rounded-[8px] bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+                >
+                  {statusMutation.isPending ? "A concluir…" : "Confirmar Conclusão"}
+                </button>
+                <button
+                  onClick={() => setCompletingOpen(false)}
+                  className="flex-1 text-[12px] font-semibold py-2 rounded-[8px] border border-dim-200 text-dim-700 hover:bg-dim-50 transition-colors"
+                >
+                  Voltar
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </Modal>

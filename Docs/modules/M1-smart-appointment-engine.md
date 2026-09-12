@@ -118,6 +118,10 @@ Key routes:
   built restriction), with a configurable daily/weekly/monthly interval ending on a fixed count or
   a date. See `POST /appointments/series` in `API-SPEC.md`.
 - ✅ Walk-ins can be added directly (`source: "walk_in"` on `POST /appointments`)
+- ✅ **Completion confirms actual duration (not in the original design):** marking a Consulta
+  "Concluída" prompts for the actual time spent (defaulting to the scheduled duration); this is
+  written onto `Appointment.durationMinutes` and drives the price of the draft invoice
+  auto-generated on completion — see `Docs/modules/M6-billing-invoicing.md` §2.2
 
 ---
 
@@ -129,7 +133,7 @@ Key routes:
 | Calendar — Day View | Receptionist | Today's appointments with check-in buttons |
 | Calendar — Week View | Admin/Receptionist | Clinic-wide weekly overview |
 | My Schedule | Doctor | Own upcoming appointments only |
-| Appointment Detail | All | Patient info, service, notes, status actions |
+| Appointment Detail | All | Patient info, service, notes, status actions — completing prompts for actual duration before generating the draft invoice |
 | Waitlist Manager | Receptionist/Admin | Active waitlist entries with notify button |
 
 ---
@@ -149,4 +153,5 @@ Key routes:
 
 ---
 
-*Module M1 · v1.1 · updated 2026-08-30 against the current implementation*
+*Module M1 · v1.2 · updated 2026-09-12 — completing a Consulta now confirms actual duration, which
+drives the auto-generated draft invoice's price (see M6 §2.2)*

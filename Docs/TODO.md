@@ -80,7 +80,8 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 **Backend**
 - [x] Full CRUD, search (name/phone/NIF), pagination, soft delete, timeline, notes
 - [x] `nif` and `dateOfBirth` encrypted at rest (AES-256-GCM); `nif` has a blind-index hash for exact-match search
-- [x] Phone normalization validates the +238 country code (previously just stripped characters)
+- [x] Phone normalization validates the +238 country code (previously just stripped characters); the rule now lives in a shared `normalizeCaboVerdePhone` helper (`@cap/types`) that both the service and the forms' Zod schema use
+- [x] Form validation (REVIEW.md §5.1) — shared `dateOfBirthSchema` (no future dates, year ≥ 1900), `nifSchema` (exactly 9 digits), `caboVerdePhoneSchema` in `@cap/types`; used by `Create/UpdatePatientSchema` + `PublicBookingSchema`; `max={today}` + format hints on the 3 patient forms
 - [x] NIF/phone uniqueness races (create and update) surface as `409 Conflict`, not a raw `500`
 - [x] `findOrCreateByPhone` (public booking path) no longer hardcodes `consentGiven: true` — requires the real value from the caller
 - [x] Right to erasure: soft-delete nulls every direct-PII field, not just `deletedAt`
@@ -110,14 +111,30 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
 - [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables
-- [ ] Server-side price floor (a hard minimum below catalogue price, independent of the admin-override gate)
+- [x] ~~Server-side price floor (a hard minimum below catalogue price, independent of the admin-override gate)~~ — corrected, this line was stale: `create()` requires `priceOverrideReason` whenever an admin bills below catalogue (`billing.service.ts`); REVIEW.md §1.3 already documents this as fully fixed
 - [x] ~~Invoice-to-health-plan linkage (`health_plan_id` on invoices was never implemented)~~ — corrected: `Invoice.healthPlanId` exists and is now actually read (the new payer-type breakdown above), this line was stale
+- [x] Payment-to-staff attribution — `Payment.recordedById` (FK to `Staff`), set from the authenticated caller in `POST /invoices/:id/payments`; previously no field existed at all
+- [x] Invoice cancellation now requires a `reason` (`CancelInvoiceSchema`, min 3 chars) and writes a semantic before/after audit diff (status + reason), not just the generic "POST" row the interceptor already logged
+- [x] Faturas Pagas listed as Entrada — `GET /financeiro/entradas/faturas` projects paid-invoice
+  `Payment` rows into an Entrada-shaped row (description, billed-service category, amount, date,
+  payer type), derived on read rather than duplicated into the `Income` table. `getSummary()`'s
+  totals/monthly-chart already counted these payments before this addition — only the Entradas
+  *list* was missing them.
+- [x] Outstanding balances by patient — `GET /financeiro/saldos` (all patients with a balance,
+  sorted by amount owed) and `GET /financeiro/saldos/:patientId` (one patient's balance + the
+  invoices behind it), grouping the same issued/partially_paid/overdue invoices `receivables`
+  above already summed clinic-wide, just per patient instead.
 
 **Frontend**
 - [x] Invoice list with status filters + KPI cards, invoice detail with payment recording
-- [x] Financeiro tabs (Overview / Entradas / Despesas / Faturas)
+- [x] Financeiro tabs (Overview / Entradas / Despesas / Faturas) — Entradas now has a "Faturas
+  Pagas" sub-tab (read-only, paginated) alongside the pre-existing manual-entries table
 - [x] Financeiro Overview date-range selector (this month / last 3 months / this year / custom) — previously hardcoded to Jan 1 of the current year with no way to change it
-- [ ] New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form
+- [x] ~~New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form~~ — corrected, this line was stale: `billing/new/page.tsx` is a real form posting to `POST /invoices`
+- [x] Cancel-invoice UI — the backend endpoint existed but nothing in the frontend called it; added a "Cancelar Fatura" button on the invoice detail page with the app's standard two-step inline confirmation + required reason textarea, plus a cancelled-invoice banner showing the reason/timestamp
+- [x] Payment history now shows who recorded each payment ("registado por …") when `recordedBy` is present
+- [x] "Saldos em Aberto" tab (per-patient outstanding balance, sorted by amount owed) + a matching
+  panel on the patient profile page (that patient's own balance, linking to each unpaid invoice)
 
 ---
 
@@ -126,7 +143,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `@cap/types` — `Staff`, `Service`, `Room`/appointment types and Zod schemas all exist
 - [x] API rate limiting (`@nestjs/throttler`) — global default 300 req/min, public routes overridden to 60 req/min
 - [x] Request/performance logging (`PerformanceInterceptor`)
-- [x] Unit test suite (Jest) — 355 tests across guards, interceptors, services, repositories
+- [x] Unit test suite (Jest) — 427 tests across guards, interceptors, services, repositories (27 spec files)
 - [x] **Self-hosted auth (2026-08-31, replaces Keycloak)**: argon2id password hashing, Redis-backed
   sessions (httpOnly/Secure/SameSite=Lax cookie), per-IP + per-account login rate-limiting/lockout,
   forgot/reset/change-password flows — `AUTH_BYPASS=true` dev bypass preserved, fails safe (requires
@@ -153,6 +170,11 @@ piece of groundwork already laid — ready to be pointed at a real send service.
 - [x] Plan products, company linkage, patient subscription — all implemented (`health-plans.controller.ts`)
 - [x] ~~Utilisation counter — `usageCount` column exists, nothing increments it~~ — corrected: `AppointmentsService.updateStatus()`'s completed branch calls `healthPlansService.incrementUsage()`, unit-tested; this line was stale
 - [x] ~~Expiry notification job (30/15/7 days)~~ — corrected: `NotificationsProcessor.handleHealthPlanExpiring()` exists, scheduled daily at 08:00 (`notifications.service.ts`), 4 tests; this line was stale
+- [x] Co-pay/coverage discount — `HealthPlansService.getActiveCoverage()` (active plan+product,
+  unexpired, `coverageRules.coverage` > 0) + `BillingService.applyHealthPlanDiscount()` apply the
+  patient's coverage % as a negative line item on invoice creation and on the appointment-completion
+  auto-draft alike; invoice gets linked to that `healthPlanId` when the caller didn't already supply
+  one. 14 new unit tests (`billing.service.spec.ts`, `health-plans.service.spec.ts`).
 - [ ] Auto-renew logic
 - [ ] `POST /health-plans/:id/members` / member roster — a `HealthPlan` links to one holder patient directly today, not a membership join table
 
@@ -170,6 +192,13 @@ concurrent "add plan" submissions can collide on the unique constraint and surfa
 **Fixed** — `planNumber` is now generated server-side (`HealthPlansRepository.nextPlanNumber`), race-safe
 via a Postgres advisory lock keyed by product code + year, same pattern as `billing.repository.ts`'s
 invoice numbering. Caller-supplied `planNumber` is still honored as-is when provided (now optional).
+~~The lock itself was briefly broken (2026-09-12): `pg_advisory_lock`/`unlock` as two separate
+top-level Prisma calls don't reliably land on the same pooled connection, so the unlock could
+silently no-op while the lock leaked forever on an idle connection — reproduced live, a genuine
+deadlock, not a theoretical one. Fixed same day: lock/query/unlock now run inside one
+`prisma.$transaction` using `pg_advisory_xact_lock` (transaction-scoped, self-releasing on
+commit/rollback), which pins a single physical connection for the whole critical section. Same fix
+applied to `billing.repository.ts`'s invoice numbering, which had the identical bug.~~
 
 ### M5 — Exam Results Portal — 🟡 stub only
 `ExamRequest` exists as a schema stub (self-labelled "Phase 1 stub"), no controller/service at
@@ -229,12 +258,27 @@ tracking, no assignment logic.
 
 ## Phase 4 — Growth
 
-### M10 — Analytics & Reporting — 🎭 not started
-UI mockup only (`analytics/page.tsx`, 8 hardcoded const arrays). No `apps/api/src/modules/analytics`
-directory, no materialised views. The Financeiro Overview tab is the one piece of real, live-data
-analytics anywhere in the app — now covering receivables, revenue by payer type, revenue by
-service, and no-show impact on top of the original expenses/income summary — worth treating as
-the template for what this module should actually look like, more so than when this was written.
+### M10 — Analytics & Reporting — 🟢 real backend for the appointment/patient side, exports still not built
+- [x] `apps/api/src/modules/analytics` (new, 2026-09-12): `GET /analytics/summary?from=&to=` —
+  appointments-by-month, total appointments, attendance rate (`completed / (completed + no_show)`,
+  pending/confirmed/cancelled excluded from both sides), top services, peak hours-of-day, all
+  scoped to the query range; plus two current-snapshot fields independent of that range — active
+  patients (>=1 appointment in the trailing 12 months) and their plan-product distribution
+  (`"Particular"` bucket for no active coverage). See `API-SPEC.md` §12.
+- [x] `analytics/page.tsx` rewritten to consume it — every KPI/chart that was a hardcoded const
+  array (`MONTHLY_APPTS`, `SERVICES`, `PEAK_HOURS`, `PLAN_DIST`, the "834 pacientes activos" and
+  "87% taxa de presença" numbers) is gone. Added the same date-range selector
+  (mês/trimestre/ano/personalizado) `billing/ResumoTab.tsx` already has, replacing the static
+  "Jan – Jun 2026" badge — Receita YTD/Mensal now respect the selected range too, not hardcoded to
+  calendar-year-to-date.
+- [ ] Materialised views (`mv_daily_appointments`, `mv_monthly_revenue`) — current queries are
+  plain live-table aggregation, fine at this data volume, revisit if it stops being fine
+- [ ] PDF/Excel/CSV export (`GET /analytics/export`)
+- [ ] Per-doctor/staff productivity breakdown, patient demographics (age band, neighbourhood),
+  booking-source attribution, health-plan renewal/churn rate — everything in
+  `M10-analytics-reporting.md` §§2.4–2.6 beyond what's listed done above
+- [ ] Corporate HR's own scoped view (§7 of that doc) — blocked on the same "no company-scoped
+  data isolation" gap as the rest of the corporate_hr role (see TODO.md's Self-Service Portals note)
 
 ### Self-Service Portals — not started
 No patient-facing login path exists at all — the auth system built 2026-08-31 (replacing
@@ -270,9 +314,9 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: patients, appointments, billing, staff, notifications, financeiro, encryption, auth (password/session/service), session-auth guard, audit interceptor, request context — 355 tests total (23 suites)
+- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 427 tests total (27 suites)
 - [x] ~~Integration tests against a real test DB~~ — this contradicted this file's own line 137 ([x], 4 specs / 9 tests); duplicate line removed
-- [~] E2E tests (Playwright) — 3 specs / 10 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login), up from 1 spec; still not full coverage (nothing for Financeiro or health-plans end-to-end). Fixed along the way: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
+- [~] E2E tests (Playwright) — 7 specs / 15 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login, `manual-invoice-payment`, `expense-approval`, `invoice-cancellation`, `health-plan-payment`), up from 3 specs / 9 tests. Financeiro now has real e2e coverage (manual invoice creation, partial→full payment, receipt, expense approval, invoice cancellation, health-plan payment method); still nothing for health-plans end-to-end, or a real e-Fatura submission (only the config-less "pending" state is asserted). Fixed along the way: `/billing/new` (Nova Fatura form) sent `unitPrice` as a string to `POST /invoices`, which always 400'd — writing the new spec caught a manual-invoice-creation feature that was fully broken. Older note: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)
 
 ### Code Quality (REVIEW.md §4)
@@ -280,7 +324,13 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [x] §4.2 — `apps/web/lib/use-debounced-value.ts`; patient search debounced (300ms), page-1 reset moved to fire on the settled term
 - [x] §4.3 — no-op global `ZodValidationPipe` removed from `main.ts`; the pipe's `schema` arg is now required (per-route usage unchanged)
 - [x] §4.4 — every `apps/api/src` `console.*` moved to NestJS `Logger`
-- [ ] §4.5 — service-level spec suites for the 4 still-untested modules (`companies`, `parametrizacao`, `public`, `services`)
+- [x] §4.5 — service-level spec suites for `services`, `companies`, `parametrizacao`, `public` (33 tests). Every API module now has a service spec.
+- [x] §5.1 — patient form validation gaps (DOB future dates, NIF/phone format) — see M2 backend above
+
+### UX (REVIEW.md §5)
+- [x] §5.1 — done (see Code Quality/M2)
+- §5.2 / §5.3 / §5.5 — verified fine at review time (color+label badges, loading/error/empty states, design consistency)
+- [x] §5.4 — sidebar "Beta" badges on mock modules (done earlier)
 
 ### DevOps
 - [ ] Staging/production environments — not live
@@ -292,9 +342,10 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 ## Immediate Next Steps
 
-REVIEW.md tracks the authoritative, prioritized list of what's actually next. Sections 1–3 and
-§4.1–4.4 are done; still open there: §4.5 (spec suites for 4 modules), Section 5 (UX/UI findings),
-Section 6 (redesign suggestions).
+REVIEW.md's entire fix list (Sections 1–5, incl. all of §4) is now closed. Section 6 is a
+redesign exercise, not an implementation task. What remains in this file below is all
+new-feature / infra work (M3, M5, M9, M10, Phase 4, k8s, backups, k6, ZAP, SMS infra) — each
+needs its own scoping conversation per the notes on those sections.
 
 > 🟡 The 5-item "highlights" list this section used to carry here predates this file's Phase 1–3
 > roadmap work — items 2–5 (leave-requests, document upload, price floor, health-plan utilisation)

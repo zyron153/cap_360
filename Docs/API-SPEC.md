@@ -137,9 +137,15 @@ Response 201: Waitlist entry
 
 ### PATCH `/appointments/:id/status`
 ```
-Body: { "status": "confirmed | checked_in | completed | cancelled | no_show", "cancellationReason": "string (optional)" }
+Body: { "status": "confirmed | checked_in | completed | cancelled | no_show",
+  "cancellationReason": "string (optional)", "durationMinutes": "1-600 (optional)" }
 Response 200: Updated appointment. Marking "completed" auto-creates a draft invoice for the service.
 ```
+`durationMinutes` is the actual time spent, confirmed when marking "completed" — it's written onto
+the appointment and, when the service has a known standard duration, scales the auto-created draft
+invoice's price: `unitPrice = (durationMinutes / service.durationMinutes) * service.price`. Omit it
+(or when the service has no standard duration) and the draft is priced at the flat catalogue price,
+as before this field existed.
 
 ### PATCH `/appointments/:id/reschedule`
 ```
@@ -191,8 +197,10 @@ Response 200: TimelineEvent[] merging appointments + communications + invoices, 
 ```
 Body:
 {
-  "fullName": "string (2-150)", "dateOfBirth": "YYYY-MM-DD", "gender": "male | female | other",
-  "nif": "string (6-20, optional)", "phone": "E.164-ish, required",
+  "fullName": "string (2-150)", "dateOfBirth": "YYYY-MM-DD — real date, not future, year ≥ 1900",
+  "gender": "male | female | other",
+  "nif": "string (exactly 9 digits, optional)",
+  "phone": "Cabo Verde number — 7 local digits, with or without +238, required",
   "email": "string (optional)", "address": "string (optional, max 300)",
   "emergencyContactName": "string (optional)", "emergencyContactPhone": "string (optional)",
   "consentGiven": "boolean, required", "healthPlanId": "uuid (optional)"
@@ -271,6 +279,23 @@ Response 400: invoice is already paid/cancelled, or this payment would push amou
 Insert + re-sum + status update run in one DB transaction — a concurrent payment on the same
 invoice can't read a stale running total between the steps.
 
+#### PATCH `/invoices/:id/items/:itemId`
+```
+Body: { "quantity": "positive int (optional)", "unitPrice": "positive number (optional)",
+  "durationMinutes": "1-600 (optional)", "priceOverrideReason": "string, 3-300 chars (optional)" }
+Response 200: Updated invoice, with items[]/subtotal/total recomputed
+Response 400: invoice is not a draft; or durationMinutes given on an item with no appointment behind it
+Response 403: non-admin manually setting unitPrice on a catalogued item away from the catalogue price
+```
+Only line items on a **draft** invoice can be edited. `durationMinutes` only applies to the line
+item generated from this invoice's appointment (`Invoice.appointmentId`) — it recomputes `unitPrice`
+proportionally (same formula as the status-update endpoint above) and writes the new duration back
+onto `Appointment.durationMinutes`; it is **not** treated as a price override, since it follows the
+catalogue price rather than diverging from it. A direct manual `unitPrice` on a catalogued item is
+still subject to the same admin-only / `priceOverrideReason`-when-underpricing rule as `POST
+/invoices` — otherwise this endpoint would be a back door around that guard. `quantity`-only edits
+and edits to a custom (no `serviceId`) line item are unrestricted.
+
 #### POST `/invoices/:id/cancel`
 ```
 Response 200: Invoice with status "cancelled"
@@ -311,11 +336,26 @@ GET    /financeiro/entradas                    query: from,to,page,limit
 POST   /financeiro/entradas                    body: description,category,amount,date,notes?
 PATCH  /financeiro/entradas/:id
 DELETE /financeiro/entradas/:id
+GET    /financeiro/entradas/faturas            query: from,to,page,limit — paid invoices (Payment
+                                                rows) projected as Entrada rows: description,
+                                                category (billed service), amount, date, payerType.
+                                                Read-only, derived — no Income rows are created.
 
 GET    /financeiro/summary?from&to              → { totalEntradas, totalDespesas, balance, monthly[], byCategory[],
                                                      receivables, byPayerType, byService[], noShowImpact }
                                                  // receivables is a current snapshot (unpaid invoices right now),
                                                  // not scoped to from/to — the rest of the shape is period-scoped
+
+GET    /financeiro/saldos                       query: page,limit — patients with an outstanding
+                                                 balance (issued/partially_paid/overdue invoices),
+                                                 grouped per patient and sorted by amount owed
+                                                 descending: patientId, patientName, invoiceCount,
+                                                 overdueCount, totalDue, oldestDueDate. A current
+                                                 snapshot, same reasoning as `receivables` above.
+GET    /financeiro/saldos/:patientId            → one patient's outstanding balance + the actual
+                                                 invoices behind it: { patientId, totalDue,
+                                                 invoiceCount, overdueCount, invoices: [{ id,
+                                                 invoiceNumber, status, amountDue, dueDate }] }
 ```
 
 ---
@@ -442,7 +482,9 @@ POST /public/invitations/:token/activate       body: { fullName, password } — 
 ```
 PublicBookingSchema:
 {
-  "fullName": "string (2-120)", "phone": "string (7-20)", "dateOfBirth": "YYYY-MM-DD",
+  "fullName": "string (2-120)",
+  "phone": "Cabo Verde number — 7 local digits, with or without +238",
+  "dateOfBirth": "YYYY-MM-DD — real date, not future",
   "email": "string (optional)", "gender": "male | female | other (default other)",
   "serviceId": "uuid", "staffId": "uuid", "scheduledAt": "ISO8601 with offset",
   "notes": "string (optional)",
@@ -489,7 +531,39 @@ There is **no upload endpoint** — nothing in the running app can currently cre
 
 ---
 
-## 12. Not implemented
+## 12. Analytics (M10)
+
+Added 2026-09-12. Covers the appointment/patient-side metrics Financeiro's own summary (§3)
+doesn't — that endpoint remains the place for revenue/expense reporting; this one is appointment
+volume, attendance, and plan-mix. No materialised views, no exports (PDF/Excel/CSV) — those parts
+of `modules/M10-analytics-reporting.md`'s original design remain unimplemented.
+
+### GET `/analytics/summary`
+**Roles:** admin, doctor, nurse
+```
+Query: ?from=YYYY-MM-DD&to=YYYY-MM-DD   (both optional — default from = Jan 1 of the current
+                                          year, to = now, same convention as /financeiro/summary)
+Response 200: {
+  "appointmentsByMonth": [{ "month": "2026-09", "count": 32 }],
+  "totalAppointments": 32,
+  "attendanceRate": { "completed": 8, "noShow": 0, "rate": 100 },  // rate is null with no
+                                                                     // completed/no_show at all
+  "topServices": [{ "service": "Consulta Dentária", "count": 24 }],  // top 8
+  "peakHours": [{ "hour": 9, "count": 20 }],   // only hours with >=1 appointment; hour is 0-23
+  "activePatients": 7,           // snapshot: patients with >=1 appointment in the trailing 12
+                                  // months from now — NOT scoped to from/to, same reasoning as
+                                  // FinanceiroSummary.receivables
+  "planDistribution": [{ "label": "Particular", "count": 7, "pct": 100 }]  // same active-patient
+                                                                             // snapshot, grouped
+                                                                             // by health-plan
+                                                                             // product name or
+                                                                             // "Particular"
+}
+```
+
+---
+
+## 13. Not implemented
 
 The following modules from the original design have **no backend at all** — no controller, no
 service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail):
@@ -498,13 +572,11 @@ service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail):
 |---|---|
 | M3 — WhatsApp Integration | 🎭 UI mockup only. No `/whatsapp/*` routes, no webhook handler, no bot |
 | M5 — Exam Results | Only `exam_requests` exists as a schema stub, no controller/service at all; no result field, no `/exam-requests/:id/results`, no token-based download |
-| M7 — Clinical Records | 🎭 UI mockup only. No `/appointments/:id/clinical-note`, no prescriptions/referrals |
 | M9 — Home Visits | 🎭 UI mockup only. No `/home-visits/*` routes |
-| M10 — Analytics | 🎭 UI mockup only. No `/analytics/*` routes — the Financeiro summary (§3) is the one place with real aggregate data today |
 
 ---
 
-## 13. Common HTTP Status Codes
+## 14. Common HTTP Status Codes
 
 | Code | Meaning | When Used |
 |---|---|---|
@@ -539,4 +611,4 @@ above) — this replaced the original design's assumption that Keycloak/NGINX wo
 
 ---
 
-*CAP 360 · API Specification · regenerated from the actual controllers — 2026-08-31 (Keycloak removal)*
+*CAP 360 · API Specification · regenerated from the actual controllers — 2026-09-12 (appointment-completion duration → proportional draft-invoice pricing, editable draft line items)*

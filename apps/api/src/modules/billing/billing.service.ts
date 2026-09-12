@@ -10,6 +10,7 @@ import { Queue } from "bull";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cap/database";
 import { RequestContext } from "../../common/context/request-context";
@@ -17,6 +18,7 @@ import {
   CreateInvoiceDto,
   RecordPaymentDto,
   InvoiceListQuery,
+  UpdateInvoiceItemDto,
 } from "@cap/types";
 
 @Injectable()
@@ -27,12 +29,47 @@ export class BillingService {
     private readonly repo: BillingRepository,
     private readonly r2: R2Service,
     private readonly prisma: PrismaService,
+    private readonly healthPlansService: HealthPlansService,
     @InjectQueue("efatura") private readonly efaturaQueue: Queue,
   ) {}
 
+  /** Appends a negative "Desconto Plano de Saúde" line to `itemsData` when the patient has an
+   * active health plan with a coverage % configured, keeping catalogue-price items untouched for
+   * auditability. Returns the (possibly reduced) subtotal and a healthPlanId to connect the
+   * invoice to, if one wasn't already supplied. Applied identically at manual creation and at the
+   * appointment-completion auto-draft — a patient's coverage shouldn't depend on which path built
+   * the invoice. */
+  private async applyHealthPlanDiscount(
+    patientId: string,
+    subtotal: number,
+    itemsData: { serviceId?: string | null; description: string; quantity: number; unitPrice: number; total: number }[],
+    explicitHealthPlanId?: string
+  ): Promise<{ subtotal: number; healthPlanId?: string }> {
+    if (subtotal <= 0) return { subtotal, healthPlanId: explicitHealthPlanId };
+
+    const coverage = await this.healthPlansService.getActiveCoverage(patientId);
+    if (!coverage) return { subtotal, healthPlanId: explicitHealthPlanId };
+
+    const discountAmount = Math.round(subtotal * (coverage.coveragePercent / 100) * 100) / 100;
+    if (discountAmount <= 0) return { subtotal, healthPlanId: explicitHealthPlanId };
+
+    itemsData.push({
+      serviceId: null,
+      description: `Desconto Plano de Saúde (${coverage.coveragePercent}%) — ${coverage.productName}`,
+      quantity: 1,
+      unitPrice: -discountAmount,
+      total: -discountAmount,
+    });
+
+    return {
+      subtotal: subtotal - discountAmount,
+      healthPlanId: explicitHealthPlanId ?? coverage.healthPlanId,
+    };
+  }
+
   async create(dto: CreateInvoiceDto, callerRoles: string[] = []) {
     let subtotal = 0;
-    const itemsData = [];
+    const itemsData: { serviceId?: string | null; description: string; quantity: number; unitPrice: number; total: number }[] = [];
     const overrides: { serviceId: string; cataloguePrice: number; billedPrice: number }[] = [];
 
     for (const item of dto.items) {
@@ -85,6 +122,9 @@ export class BillingService {
       RequestContext.setAuditDiff(null, { priceOverrides: overrides, reason: dto.priceOverrideReason ?? null });
     }
 
+    const discounted = await this.applyHealthPlanDiscount(dto.patientId, subtotal, itemsData, dto.healthPlanId);
+    subtotal = discounted.subtotal;
+
     const invoiceNumber = await this.repo.nextInvoiceNumber();
 
     const invoice = await this.repo.create({
@@ -93,8 +133,8 @@ export class BillingService {
       ...(dto.appointmentId
         ? { appointment: { connect: { id: dto.appointmentId } } }
         : {}),
-      ...(dto.healthPlanId
-        ? { healthPlan: { connect: { id: dto.healthPlanId } } }
+      ...(discounted.healthPlanId
+        ? { healthPlan: { connect: { id: discounted.healthPlanId } } }
         : {}),
       subtotal,
       total: subtotal,
@@ -186,7 +226,7 @@ export class BillingService {
     return { queued: true };
   }
 
-  async cancel(invoiceId: string) {
+  async cancel(invoiceId: string, reason: string) {
     const invoice = await this.repo.findByIdLite(invoiceId);
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
 
@@ -206,10 +246,19 @@ export class BillingService {
       );
     }
 
-    return this.repo.update(invoiceId, { status: "cancelled" });
+    // The generic AuditInterceptor already logs "POST invoices/:id/cancel" — this diff adds the
+    // semantic before/after (status + reason) to that same row, same mechanism as create()'s
+    // price-override diff above.
+    RequestContext.setAuditDiff({ status: invoice.status }, { status: "cancelled", cancelReason: reason });
+
+    return this.repo.update(invoiceId, {
+      status: "cancelled",
+      cancelReason: reason,
+      cancelledAt: new Date(),
+    });
   }
 
-  async recordPayment(invoiceId: string, dto: RecordPaymentDto) {
+  async recordPayment(invoiceId: string, dto: RecordPaymentDto, recordedById?: string) {
     // Checked first, before the invoice even loads: a retried request (double-click, client
     // timeout retry) must replay the original outcome, not re-validate against state that the
     // original request may have already changed (e.g. this payment is what made it "paid").
@@ -237,6 +286,7 @@ export class BillingService {
         reference: dto.reference,
         paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
         idempotencyKey: dto.idempotencyKey,
+        recordedById,
       },
       Number(invoice.total)
     );
@@ -249,24 +299,92 @@ export class BillingService {
     serviceName: string;
     unitPrice: number;
   }) {
+    const itemsData: { serviceId?: string | null; description: string; quantity: number; unitPrice: number; total: number }[] = [{
+      serviceId: data.serviceId,
+      description: data.serviceName,
+      quantity: 1,
+      unitPrice: data.unitPrice,
+      total: data.unitPrice,
+    }];
+    const discounted = await this.applyHealthPlanDiscount(data.patientId, data.unitPrice, itemsData);
+
     const invoiceNumber = await this.repo.nextInvoiceNumber();
     return this.repo.create({
       invoiceNumber,
       patient: { connect: { id: data.patientId } },
       appointment: { connect: { id: data.appointmentId } },
-      subtotal: data.unitPrice,
-      total: data.unitPrice,
+      ...(discounted.healthPlanId
+        ? { healthPlan: { connect: { id: discounted.healthPlanId } } }
+        : {}),
+      subtotal: discounted.subtotal,
+      total: discounted.subtotal,
       status: "draft",
       items: {
-        create: [{
-          serviceId: data.serviceId,
-          description: data.serviceName,
-          quantity: 1,
-          unitPrice: data.unitPrice,
-          total: data.unitPrice,
-        }],
+        create: itemsData,
       },
     });
+  }
+
+  /**
+   * Edits one draft-invoice line item. Duration-driven edits (from the appointment-completion
+   * flow or the invoice UI) recompute the price proportionally to the service's standard
+   * duration and are never treated as an override — they follow the same pricing rule the
+   * catalogue price itself represents, just scaled by actual time spent. A direct manual
+   * unitPrice edit on a catalogued item, however, is subject to the same admin-only /
+   * reason-required rule as create() — otherwise this endpoint would be a back door around it.
+   */
+  async updateItem(
+    invoiceId: string,
+    itemId: string,
+    dto: UpdateInvoiceItemDto,
+    callerRoles: string[] = []
+  ) {
+    const item = await this.repo.findItemForUpdate(invoiceId, itemId);
+    if (!item) throw new NotFoundException(`Invoice item ${itemId} not found`);
+    if (item.invoice.status !== "draft") {
+      throw new BadRequestException("Only draft invoices can have their line items edited");
+    }
+
+    let unitPrice = dto.unitPrice ?? Number(item.unitPrice);
+    const quantity = dto.quantity ?? item.quantity;
+    let appointmentUpdate: { appointmentId: string; durationMinutes: number } | undefined;
+
+    if (dto.durationMinutes !== undefined) {
+      if (!item.invoice.appointmentId || !item.serviceId) {
+        throw new BadRequestException(
+          "Duration can only be edited on a line item generated from an appointment"
+        );
+      }
+      const appointment = await this.repo.findAppointmentWithService(item.invoice.appointmentId);
+      if (!appointment?.service || appointment.serviceId !== item.serviceId) {
+        throw new BadRequestException("Could not resolve the service used to price this appointment");
+      }
+      const standardDuration = appointment.service.durationMinutes || dto.durationMinutes;
+      unitPrice =
+        Math.round((dto.durationMinutes / standardDuration) * Number(appointment.service.price) * 100) / 100;
+      appointmentUpdate = { appointmentId: item.invoice.appointmentId, durationMinutes: dto.durationMinutes };
+    } else if (dto.unitPrice !== undefined && item.serviceId) {
+      const catalogueService = await this.repo.findServiceById(item.serviceId);
+      if (catalogueService && Number(catalogueService.price) !== dto.unitPrice) {
+        if (!callerRoles.includes("admin")) {
+          throw new ForbiddenException(
+            `Only an admin can bill service ${item.serviceId} at a price other than the catalogue price`
+          );
+        }
+        if (dto.unitPrice < Number(catalogueService.price) && !dto.priceOverrideReason) {
+          throw new BadRequestException(
+            "priceOverrideReason is required when billing a service below its catalogue price"
+          );
+        }
+        RequestContext.setAuditDiff(
+          { unitPrice: Number(item.unitPrice) },
+          { unitPrice: dto.unitPrice, reason: dto.priceOverrideReason ?? null }
+        );
+      }
+    }
+
+    const total = Math.round(unitPrice * quantity * 100) / 100;
+    return this.repo.updateItemAtomic(invoiceId, itemId, { quantity, unitPrice, total }, appointmentUpdate);
   }
 
   // Configurações → Clínica is the single source of truth for the clinic's identity.
@@ -306,6 +424,7 @@ export class BillingService {
       patient: {
         fullName: invoice.patient.fullName ?? "Paciente removido",
         phone: invoice.patient.phone ?? "—",
+        nif: invoice.patient.nif ?? null,
       },
       items: invoice.items.map((item) => ({
         description: item.description,

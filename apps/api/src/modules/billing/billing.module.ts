@@ -6,11 +6,13 @@ import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 import { EFaturaModule } from "../efatura/efatura.module";
+import { HealthPlansModule } from "../health-plans/health-plans.module";
 
 @Module({
   imports: [
     BullModule.registerQueue({ name: "efatura" }),
     EFaturaModule,
+    HealthPlansModule,
   ],
   controllers: [BillingController],
   // PrismaService comes from the global PrismaModule — no explicit import needed

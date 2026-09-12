@@ -13,6 +13,7 @@ import {
   CreatePatientNoteDto,
   PatientSearchQuery,
   TimelineEvent,
+  normalizeCaboVerdePhone,
 } from "@cap/types";
 
 @Injectable()
@@ -227,22 +228,16 @@ export class PatientsService {
     });
   }
 
-  // Cabo Verde numbers are +238 followed by exactly 7 local digits. Previously this just
-  // stripped non-digits and prepended "+" with no country-code check at all — a number typed
-  // without +238 silently became a broken one that would never receive a WhatsApp reminder.
+  // Cabo Verde numbers are +238 followed by exactly 7 local digits. The rule itself lives in
+  // `normalizeCaboVerdePhone` (@cap/types) so the create/edit forms validate against the exact
+  // same check before submit; this is the enforcing authority behind it.
   private normalizePhone(phone: string): string {
-    const digits = phone.replace(/\D/g, "");
-    const local =
-      digits.startsWith("238") && digits.length === 10
-        ? digits.slice(3)
-        : digits.length === 7
-        ? digits
-        : null;
-    if (!local) {
+    const normalized = normalizeCaboVerdePhone(phone);
+    if (!normalized) {
       throw new BadRequestException(
         "Número de telefone inválido — use um número de Cabo Verde com 7 dígitos (com ou sem +238)"
       );
     }
-    return `+238${local}`;
+    return normalized;
   }
 }

@@ -76,6 +76,21 @@ export interface IncomeEntry {
   updatedAt: string;
 }
 
+/** A paid invoice payment, shaped to read like an Entrada row — Faturas Pagas are real Payment
+ * rows (not Income), so this is a projection built in FinanceiroService, never persisted as-is. */
+export interface PaidInvoiceEntry {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  patientName: string;
+  description: string;
+  category: string;
+  amount: number;
+  date: string;
+  payerType: "privado" | "planoSaude";
+  method: PaymentMethod;
+}
+
 export const FinanceiroListQuerySchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -98,6 +113,36 @@ export interface FinanceiroSummary {
    * privately — manual Income entries have no payer, so they're outside this breakdown entirely. */
   byPayerType: { privado: number; planoSaude: number };
   byService: { service: string; total: number }[];
-  /** Hypothetical revenue lost to no-show appointments (their service's price, never billed). */
+  /** Hypothetical revenue lost to faltas — no-show AND cancelled appointments alike (their
+   * service's price, never billed). Field name predates the cancelled-appointment inclusion. */
   noShowImpact: { count: number; lostRevenue: number };
+}
+
+/** One patient's outstanding balance, summed across every non-cancelled, non-fully-paid invoice
+ * (issued/partially_paid/overdue) — a current snapshot, same "not date-range scoped" reasoning as
+ * FinanceiroSummary.receivables above, just broken out per patient instead of clinic-wide. */
+export interface OutstandingBalanceEntry {
+  patientId: string;
+  patientName: string;
+  invoiceCount: number;
+  overdueCount: number;
+  totalDue: number;
+  /** Due date of this patient's oldest outstanding invoice, or null if none has one set. */
+  oldestDueDate: string | null;
+}
+
+/** Same aggregation, scoped to one patient, plus the actual invoices behind the total — for the
+ * patient-profile panel, where "which invoice" matters and "who else owes money" doesn't. */
+export interface PatientOutstandingBalance {
+  patientId: string;
+  totalDue: number;
+  invoiceCount: number;
+  overdueCount: number;
+  invoices: {
+    id: string;
+    invoiceNumber: string;
+    status: string;
+    amountDue: number;
+    dueDate: string | null;
+  }[];
 }

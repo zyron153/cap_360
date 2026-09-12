@@ -415,7 +415,7 @@ a result, there is nowhere in the current schema for that file reference to live
 ```sql
 CREATE TABLE invoices (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, session-advisory-lock-guarded sequence
+  "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, xact-advisory-lock-guarded sequence
   "patientId"     UUID NOT NULL REFERENCES patients(id),
   "appointmentId" UUID REFERENCES appointments(id),
   status          VARCHAR(20) NOT NULL DEFAULT 'draft',

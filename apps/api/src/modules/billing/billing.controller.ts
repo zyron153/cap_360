@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -16,10 +17,14 @@ import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decor
 import {
   CreateInvoiceSchema,
   RecordPaymentSchema,
+  CancelInvoiceSchema,
   InvoiceListQuerySchema,
+  UpdateInvoiceItemSchema,
   CreateInvoiceDto,
   RecordPaymentDto,
+  CancelInvoiceDto,
   InvoiceListQuery,
+  UpdateInvoiceItemDto,
 } from "@cap/types";
 
 @Controller("invoices")
@@ -55,14 +60,28 @@ export class BillingController {
   @Post(":id/payments")
   recordPayment(
     @Param("id", ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(RecordPaymentSchema)) dto: RecordPaymentDto
+    @Body(new ZodValidationPipe(RecordPaymentSchema)) dto: RecordPaymentDto,
+    @CurrentUser() user: JwtUser
   ) {
-    return this.service.recordPayment(id, dto);
+    return this.service.recordPayment(id, dto, user.sub);
+  }
+
+  @Patch(":id/items/:itemId")
+  updateItem(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("itemId", ParseUUIDPipe) itemId: string,
+    @Body(new ZodValidationPipe(UpdateInvoiceItemSchema)) dto: UpdateInvoiceItemDto,
+    @CurrentUser() user: JwtUser
+  ) {
+    return this.service.updateItem(id, itemId, dto, user.roles);
   }
 
   @Post(":id/cancel")
-  cancel(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.cancel(id);
+  cancel(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(CancelInvoiceSchema)) dto: CancelInvoiceDto
+  ) {
+    return this.service.cancel(id, dto.reason);
   }
 
   @Get(":id/efatura")
