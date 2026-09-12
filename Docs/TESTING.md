@@ -1,11 +1,11 @@
 # CAP 360 — Testing Strategy
 
-> **Version:** 1.5 · **Date:** updated 2026-09-12 against the current implementation
+> **Version:** 1.6 · **Date:** updated 2026-09-12 against the current implementation
 > Tools: Jest (unit + a real integration tier), Playwright (7 real E2E specs, wired to `test:e2e`)
 
 > **Implementation status:** this document was written before implementation and describes a
 > testing program most of which now genuinely exists. What's real: **27 Jest unit spec files,
-> 421 tests**, colocated with source (`apps/api/src/**/*.spec.ts`); a separate **integration tier**
+> 427 tests**, colocated with source (`apps/api/src/**/*.spec.ts`); a separate **integration tier**
 > (`apps/api/test/integration/*.integration-spec.ts`, 4 files / 9 tests, supertest against the real
 > dev Postgres + Redis, run via `pnpm --filter @cap/api test:integration`); **7** real Playwright
 > specs (`apps/web/e2e/*.spec.ts`, 15 tests total), wired to `pnpm --filter @cap/web test:e2e`. No
@@ -36,7 +36,7 @@ Closer to shape now, though still unit-heavy — no k6/ZAP layer on top:
       ╱   9    ╲       4 integration spec files — supertest + real
      ╱  tests    ╲     dev Postgres/Redis, no testcontainers yet
     ╱──────────────╲
-   ╱      421        ╲  27 Jest unit spec files, colocated with source,
+   ╱      427        ╲  27 Jest unit spec files, colocated with source,
   ╱      tests         ╲ repository layer mocked
  ╱──────────────────────╲
 ```
@@ -102,6 +102,11 @@ describe('FinanceiroService', () => {
   it('projects a payment as an Entrada-shaped row, private payer by default', async () => { ... })     // ✅ real
   it('marks the payer as planoSaude when the invoice was billed against a health plan', async () => { ... }) // ✅ real
   it('collapses multiple billed services into "first +N" for the category', async () => { ... })       // ✅ real
+  // Saldos em Aberto (GET /financeiro/saldos, /saldos/:patientId) — patient-level view on top of
+  // the same issued/partially_paid/overdue status filter FinanceiroSummary.receivables already used
+  it('groups outstanding invoices by patient, summing the remaining balance', async () => { ... })     // ✅ real
+  it('sorts patients by descending total owed, largest debtor first', async () => { ... })             // ✅ real
+  it('sums one patient\'s outstanding invoices and lists them individually', async () => { ... })      // ✅ real
   // … plus the pre-existing Despesas/Entradas/Resumo suite (getSummary, audit diffs, etc.)
 })
 ```

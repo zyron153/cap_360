@@ -29,6 +29,8 @@ const repo = {
   findPaidInvoicePayments: jest.fn(),
   countPaidInvoicePayments: jest.fn(),
   outstandingInvoices: jest.fn(),
+  outstandingInvoicesDetailed: jest.fn(),
+  outstandingInvoicesForPatient: jest.fn(),
   sumPaymentsByPlan: jest.fn(),
   sumPaymentsPrivate: jest.fn(),
   invoiceItemsInRange: jest.fn(),
@@ -255,6 +257,91 @@ describe("FinanceiroService", () => {
       const result = await service.listPaidInvoices({ page: 1, limit: 20 });
 
       expect(result.data[0].category).toBe("Consulta Individual +1");
+    });
+  });
+
+  describe("listOutstandingBalances", () => {
+    it("groups outstanding invoices by patient, summing the remaining balance", async () => {
+      repo.outstandingInvoicesDetailed.mockResolvedValue([
+        { id: "inv-1", patientId: "pat-1", total: "2000", amountPaid: "0", status: "issued", dueDate: null, patient: { fullName: "Maria Silva" } },
+        { id: "inv-2", patientId: "pat-1", total: "1000", amountPaid: "500", status: "partially_paid", dueDate: null, patient: { fullName: "Maria Silva" } },
+        { id: "inv-3", patientId: "pat-2", total: "3000", amountPaid: "0", status: "overdue", dueDate: new Date("2026-01-01"), patient: { fullName: "João Duarte" } },
+      ]);
+
+      const result = await service.listOutstandingBalances({ page: 1, limit: 20 });
+
+      expect(result.total).toBe(2);
+      const maria = result.data.find((r) => r.patientId === "pat-1")!;
+      expect(maria.invoiceCount).toBe(2);
+      expect(maria.totalDue).toBe(2500);
+      expect(maria.overdueCount).toBe(0);
+      const joao = result.data.find((r) => r.patientId === "pat-2")!;
+      expect(joao.totalDue).toBe(3000);
+      expect(joao.overdueCount).toBe(1);
+      expect(joao.oldestDueDate).toBe("2026-01-01");
+    });
+
+    it("sorts patients by descending total owed, largest debtor first", async () => {
+      repo.outstandingInvoicesDetailed.mockResolvedValue([
+        { id: "inv-1", patientId: "pat-1", total: "500", amountPaid: "0", status: "issued", dueDate: null, patient: { fullName: "Pequeno Devedor" } },
+        { id: "inv-2", patientId: "pat-2", total: "5000", amountPaid: "0", status: "issued", dueDate: null, patient: { fullName: "Grande Devedor" } },
+      ]);
+
+      const result = await service.listOutstandingBalances({ page: 1, limit: 20 });
+
+      expect(result.data.map((r) => r.patientName)).toEqual(["Grande Devedor", "Pequeno Devedor"]);
+    });
+
+    it("paginates the grouped results", async () => {
+      repo.outstandingInvoicesDetailed.mockResolvedValue(
+        Array.from({ length: 5 }, (_, i) => ({
+          id: `inv-${i}`, patientId: `pat-${i}`, total: String(1000 + i), amountPaid: "0",
+          status: "issued", dueDate: null, patient: { fullName: `Paciente ${i}` },
+        }))
+      );
+
+      const result = await service.listOutstandingBalances({ page: 2, limit: 2 });
+
+      expect(result.total).toBe(5);
+      expect(result.totalPages).toBe(3);
+      expect(result.data).toHaveLength(2);
+    });
+
+    it("falls back to a removed patient's placeholder name", async () => {
+      repo.outstandingInvoicesDetailed.mockResolvedValue([
+        { id: "inv-1", patientId: "pat-1", total: "1000", amountPaid: "0", status: "issued", dueDate: null, patient: { fullName: null } },
+      ]);
+
+      const result = await service.listOutstandingBalances({ page: 1, limit: 20 });
+
+      expect(result.data[0].patientName).toBe("Paciente removido");
+    });
+  });
+
+  describe("getPatientOutstandingBalance", () => {
+    it("sums the patient's outstanding invoices and lists them individually", async () => {
+      repo.outstandingInvoicesForPatient.mockResolvedValue([
+        { id: "inv-1", invoiceNumber: "INV-2026-0001", total: "2000", amountPaid: "500", status: "partially_paid", dueDate: new Date("2026-03-01") },
+        { id: "inv-2", invoiceNumber: "INV-2026-0002", total: "1000", amountPaid: "0", status: "overdue", dueDate: new Date("2026-01-01") },
+      ]);
+
+      const result = await service.getPatientOutstandingBalance("pat-1");
+
+      expect(result.totalDue).toBe(2500);
+      expect(result.invoiceCount).toBe(2);
+      expect(result.overdueCount).toBe(1);
+      expect(result.invoices).toEqual([
+        { id: "inv-1", invoiceNumber: "INV-2026-0001", status: "partially_paid", amountDue: 1500, dueDate: "2026-03-01" },
+        { id: "inv-2", invoiceNumber: "INV-2026-0002", status: "overdue", amountDue: 1000, dueDate: "2026-01-01" },
+      ]);
+    });
+
+    it("returns a zeroed result for a patient with no outstanding invoices", async () => {
+      repo.outstandingInvoicesForPatient.mockResolvedValue([]);
+
+      const result = await service.getPatientOutstandingBalance("pat-1");
+
+      expect(result).toEqual({ patientId: "pat-1", totalDue: 0, invoiceCount: 0, overdueCount: 0, invoices: [] });
     });
   });
 

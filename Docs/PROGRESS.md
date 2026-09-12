@@ -5,6 +5,19 @@
 
 ## Done
 
+- Ecrã de "Saldos em Aberto" (a última opção pendente na lista do M6): dois endpoints novos —
+  `GET /financeiro/saldos` (todos os pacientes com saldo em aberto, agregado por paciente a partir
+  das mesmas faturas `issued`/`partially_paid`/`overdue` que `receivables` do Resumo já usava,
+  ordenado por valor devido) e `GET /financeiro/saldos/:patientId` (o mesmo, para um único
+  paciente, com a lista de faturas por trás do total). Dois pontos de UI, como decidido: separador
+  novo **Saldos em Aberto** no Financeiro (`SaldosTab.tsx`) e um painel **Saldo em Aberto** no
+  perfil do paciente (`PatientBalancePanel.tsx`, com link direto para cada fatura em dívida).
+  Descoberta ao explorar: a tab Faturas já mostrava "Em Dívida" por fatura com filtros de estado —
+  a lacuna real era só a vista agregada por paciente, não uma vista por fatura (essa já existia).
+  6 testes novos em `financeiro.service.spec.ts` (35 no total do módulo, 427 no total da API).
+  Verificado ao vivo no browser (Playwright, dados reais do dev DB) antes de reportar concluído.
+  `Docs/API-SPEC.md` e `Docs/TESTING.md` (v1.6) atualizados.
+
 - Health-plan co-pay: `BillingService` agora aplica automaticamente o desconto do plano de saúde
   ativo do paciente ao criar uma fatura (manual ou o rascunho automático gerado na conclusão da
   consulta). `HealthPlansService.getActiveCoverage(patientId)` (novo) valida plano+produto ativos,
@@ -108,10 +121,12 @@
 - Opções levantadas na análise do M6 (sessões anteriores), ainda por escolher/agendar:
   - ~~Health-plan co-pay/utilização~~ — feita nesta sessão (ver Done acima): desconto de cobertura
     aplicado automaticamente; `usageCount` já era incrementado antes.
-  - Ecrã de "outstanding balances" por paciente/fatura.
+  - ~~Ecrã de "outstanding balances" por paciente/fatura~~ — feita nesta sessão (ver Done acima):
+    "por fatura" já existia (tab Faturas); "por paciente" era a lacuna real, agora coberta.
   - ~~Cobertura e2e do Financeiro~~ — feita nesta sessão (ver Done acima), incluindo o
     cancelamento de fatura e o pagamento via health-plan. E-Factura só coberta no estado
     "Pendente" (sem config sandbox neste ambiente, não dá para testar submissão/aceitação real).
+  - **Todas as opções desta lista do M6 estão agora fechadas.**
 - REVIEW.md Secção 6 (sugestões de redesign) — exercício de design, **não** é tarefa de
   implementação.
 - Trabalho de feature/infra em `TODO.md`: M3 WhatsApp, M5 Exames, M9 Visitas, M10 Analytics,

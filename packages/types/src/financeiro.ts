@@ -117,3 +117,32 @@ export interface FinanceiroSummary {
    * service's price, never billed). Field name predates the cancelled-appointment inclusion. */
   noShowImpact: { count: number; lostRevenue: number };
 }
+
+/** One patient's outstanding balance, summed across every non-cancelled, non-fully-paid invoice
+ * (issued/partially_paid/overdue) — a current snapshot, same "not date-range scoped" reasoning as
+ * FinanceiroSummary.receivables above, just broken out per patient instead of clinic-wide. */
+export interface OutstandingBalanceEntry {
+  patientId: string;
+  patientName: string;
+  invoiceCount: number;
+  overdueCount: number;
+  totalDue: number;
+  /** Due date of this patient's oldest outstanding invoice, or null if none has one set. */
+  oldestDueDate: string | null;
+}
+
+/** Same aggregation, scoped to one patient, plus the actual invoices behind the total — for the
+ * patient-profile panel, where "which invoice" matters and "who else owes money" doesn't. */
+export interface PatientOutstandingBalance {
+  patientId: string;
+  totalDue: number;
+  invoiceCount: number;
+  overdueCount: number;
+  invoices: {
+    id: string;
+    invoiceNumber: string;
+    status: string;
+    amountDue: number;
+    dueDate: string | null;
+  }[];
+}

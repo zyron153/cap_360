@@ -114,6 +114,33 @@ export class FinanceiroRepository {
     });
   }
 
+  // Same status filter as outstandingInvoices() above, one row per invoice instead of a flat sum —
+  // grouped/sorted in the service layer (dataset is clinic-scale, not worth a raw-SQL groupBy).
+  outstandingInvoicesDetailed() {
+    return this.prisma.invoice.findMany({
+      where: { status: { in: ["issued", "partially_paid", "overdue"] } },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        patientId: true,
+        total: true,
+        amountPaid: true,
+        status: true,
+        dueDate: true,
+        patient: { select: { fullName: true } },
+      },
+      orderBy: { dueDate: "asc" },
+    });
+  }
+
+  outstandingInvoicesForPatient(patientId: string) {
+    return this.prisma.invoice.findMany({
+      where: { patientId, status: { in: ["issued", "partially_paid", "overdue"] } },
+      select: { id: true, invoiceNumber: true, total: true, amountPaid: true, status: true, dueDate: true },
+      orderBy: { dueDate: "asc" },
+    });
+  }
+
   // ── Revenue by payer type ────────────────────────────────
   sumPaymentsByPlan(from: Date, to: Date) {
     return this.prisma.payment.aggregate({

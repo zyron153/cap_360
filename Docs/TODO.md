@@ -120,6 +120,10 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
   payer type), derived on read rather than duplicated into the `Income` table. `getSummary()`'s
   totals/monthly-chart already counted these payments before this addition — only the Entradas
   *list* was missing them.
+- [x] Outstanding balances by patient — `GET /financeiro/saldos` (all patients with a balance,
+  sorted by amount owed) and `GET /financeiro/saldos/:patientId` (one patient's balance + the
+  invoices behind it), grouping the same issued/partially_paid/overdue invoices `receivables`
+  above already summed clinic-wide, just per patient instead.
 
 **Frontend**
 - [x] Invoice list with status filters + KPI cards, invoice detail with payment recording
@@ -129,6 +133,8 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] ~~New invoice form (`/billing/new`) — invoices are currently only created automatically (appointment completion), not manually from a form~~ — corrected, this line was stale: `billing/new/page.tsx` is a real form posting to `POST /invoices`
 - [x] Cancel-invoice UI — the backend endpoint existed but nothing in the frontend called it; added a "Cancelar Fatura" button on the invoice detail page with the app's standard two-step inline confirmation + required reason textarea, plus a cancelled-invoice banner showing the reason/timestamp
 - [x] Payment history now shows who recorded each payment ("registado por …") when `recordedBy` is present
+- [x] "Saldos em Aberto" tab (per-patient outstanding balance, sorted by amount owed) + a matching
+  panel on the patient profile page (that patient's own balance, linking to each unpaid invoice)
 
 ---
 
@@ -137,7 +143,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `@cap/types` — `Staff`, `Service`, `Room`/appointment types and Zod schemas all exist
 - [x] API rate limiting (`@nestjs/throttler`) — global default 300 req/min, public routes overridden to 60 req/min
 - [x] Request/performance logging (`PerformanceInterceptor`)
-- [x] Unit test suite (Jest) — 421 tests across guards, interceptors, services, repositories (27 spec files)
+- [x] Unit test suite (Jest) — 427 tests across guards, interceptors, services, repositories (27 spec files)
 - [x] **Self-hosted auth (2026-08-31, replaces Keycloak)**: argon2id password hashing, Redis-backed
   sessions (httpOnly/Secure/SameSite=Lax cookie), per-IP + per-account login rate-limiting/lockout,
   forgot/reset/change-password flows — `AUTH_BYPASS=true` dev bypass preserved, fails safe (requires
@@ -289,7 +295,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 421 tests total (27 suites)
+- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 427 tests total (27 suites)
 - [x] ~~Integration tests against a real test DB~~ — this contradicted this file's own line 137 ([x], 4 specs / 9 tests); duplicate line removed
 - [~] E2E tests (Playwright) — 7 specs / 15 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login, `manual-invoice-payment`, `expense-approval`, `invoice-cancellation`, `health-plan-payment`), up from 3 specs / 9 tests. Financeiro now has real e2e coverage (manual invoice creation, partial→full payment, receipt, expense approval, invoice cancellation, health-plan payment method); still nothing for health-plans end-to-end, or a real e-Fatura submission (only the config-less "pending" state is asserted). Fixed along the way: `/billing/new` (Nova Fatura form) sent `unitPrice` as a string to `POST /invoices`, which always 400'd — writing the new spec caught a manual-invoice-creation feature that was fully broken. Older note: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)

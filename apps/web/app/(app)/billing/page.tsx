@@ -2,18 +2,20 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, TrendingDown, TrendingUp, PieChart } from "lucide-react";
+import { Receipt, TrendingDown, TrendingUp, PieChart, Wallet } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { FaturasTab } from "./FaturasTab";
 import { DespesasTab } from "./DespesasTab";
 import { EntradasTab } from "./EntradasTab";
 import { ResumoTab } from "./ResumoTab";
+import { SaldosTab } from "./SaldosTab";
 
 const TABS = [
-  { key: "resumo",   label: "Overview", icon: PieChart     },
-  { key: "entradas", label: "Entradas", icon: TrendingUp   },
-  { key: "despesas", label: "Despesas", icon: TrendingDown },
-  { key: "faturas",  label: "Faturas",  icon: Receipt      },
+  { key: "resumo",   label: "Overview",         icon: PieChart     },
+  { key: "entradas", label: "Entradas",         icon: TrendingUp   },
+  { key: "despesas", label: "Despesas",         icon: TrendingDown },
+  { key: "faturas",  label: "Faturas",          icon: Receipt      },
+  { key: "saldos",   label: "Saldos em Aberto", icon: Wallet       },
 ] as const;
 
 type TabKey = typeof TABS[number]["key"];
@@ -60,6 +62,7 @@ export default function FinanceiroPage() {
           {activeTab === "despesas" && <DespesasTab />}
           {activeTab === "entradas" && <EntradasTab />}
           {activeTab === "resumo"   && <ResumoTab />}
+          {activeTab === "saldos"   && <SaldosTab />}
         </div>
       </div>
     </div>
