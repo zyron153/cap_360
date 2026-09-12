@@ -5,6 +5,43 @@
 
 ## Done
 
+- Cobertura e2e do Financeiro (uma das opções em aberto listadas na sessão anterior): 2 specs
+  Playwright novas, `apps/web/e2e/manual-invoice-payment.spec.ts` (criação manual de fatura via
+  `/billing/new` → pagamento em duas parcelas, parcial→`partially_paid`→total→`paid` → botão
+  "Recibo PDF") e `apps/web/e2e/expense-approval.spec.ts` (registo de despesa → aprovação admin no
+  separador Despesas). Nenhum dos dois fluxos tinha cobertura e2e antes.
+  - **Bug real encontrado e corrigido ao escrever o teste**: `/billing/new` enviava `unitPrice`
+    como string para `POST /invoices` — `GET /services` devolve `price` como string (Prisma
+    Decimal serializado em JSON), e o formulário nunca convertia para número antes de submeter.
+    Toda a criação manual de fatura falhava com `400` (`Expected number, received string`); o
+    formulário estava completamente quebrado antes desta sessão. Corrigido em
+    `apps/web/app/(app)/billing/new/page.tsx` (`pickService` agora faz `Number(svc.price)`).
+  - Mais 2 specs, ainda na mesma sessão, fechando as lacunas restantes: `invoice-cancellation.spec.ts`
+    (cancelar fatura `issued` → "Cancelada", motivo obrigatório min. 3 caracteres, botões
+    Cancelar/Registar Pagamento desaparecem; painel E-Factura numa fatura recém-emitida fica em
+    "Pendente" — não há `integration_efatura` configurado neste ambiente dev, único estado
+    determinístico de E-Factura testável sem endpoint sandbox real) e `health-plan-payment.spec.ts`
+    (pagamento com método "Plano de Saúde" — só o comportamento já existente do enum
+    `PaymentMethod`; **não** cobre cálculo de co-pay/desconto nem `HealthPlan.usageCount`, que
+    continuam por implementar).
+  - Suite Playwright sobe de 3 → 7 specs, 9 → 15 testes. `Docs/TESTING.md` (v1.4) atualizado com
+    os números e descrições novas; também corrigida uma nota antiga (§5.1) que dizia
+    `staff-invitation` só ter cobertura via integration spec — o spec e2e real já existe e usa o
+    `token` devolvido diretamente por `POST /staff/invite`.
+  - **Incidente operacional durante a sessão**: os novos specs falhavam de forma intermitente
+    (timeout de 30s no `beforeAll` a criar um paciente via Playwright, embora `curl` ao mesmo
+    endpoint respondesse instantaneamente). Causa: havia dois processos da API a correr em
+    simultâneo — o `nest start --watch` normal do `pnpm dev` e um `node apps/api/dist/main`
+    (modo produção) avulso de uma sessão anterior, a disputar a mesma porta. Terminei o processo
+    avulso com autorização do utilizador; acabou por ser esse que estava mesmo a servir pedidos, o
+    que derrubou a API por completo. O utilizador reiniciou o `pnpm dev` manualmente e a suite
+    voltou a passar de forma estável (15/15, exceto o `checkin-payment.spec.ts` pré-existente —
+    ver nota abaixo). Lição registada em `Docs/TESTING.md` §5.1: nunca correr `pnpm --filter
+    @cap/api start` (build) ao mesmo tempo que `pnpm dev`.
+  - Nota: `checkin-payment.spec.ts` (pré-existente) falha isoladamente neste ambiente ao clicar
+    "Concluída" no modal — confirmado como pré-existente (reproduz sem as alterações desta
+    sessão), não investigado a fundo; fica como possível item para a próxima sessão.
+
 - Agendamento → Faturação: ao marcar uma Consulta como **Concluída**, a receção/médico confirma
   agora a duração real (pré-preenchida com a duração agendada, com pré-visualização do valor) antes
   do rascunho de fatura ser gerado. O preço desse rascunho passa a ser proporcional à duração-padrão
@@ -44,7 +81,9 @@
   - Health-plan co-pay/utilização — `health_plan` continua a ser só um valor de enum em
     `PaymentMethod`; nada calcula desconto nem incrementa `HealthPlan.usageCount`.
   - Ecrã de "outstanding balances" por paciente/fatura.
-  - Cobertura e2e do Financeiro (fatura → pagamento → recibo, aprovação de despesa).
+  - ~~Cobertura e2e do Financeiro~~ — feita nesta sessão (ver Done acima), incluindo o
+    cancelamento de fatura e o pagamento via health-plan. E-Factura só coberta no estado
+    "Pendente" (sem config sandbox neste ambiente, não dá para testar submissão/aceitação real).
 - REVIEW.md Secção 6 (sugestões de redesign) — exercício de design, **não** é tarefa de
   implementação.
 - Trabalho de feature/infra em `TODO.md`: M3 WhatsApp, M5 Exames, M9 Visitas, M10 Analytics,
