@@ -137,9 +137,15 @@ Response 201: Waitlist entry
 
 ### PATCH `/appointments/:id/status`
 ```
-Body: { "status": "confirmed | checked_in | completed | cancelled | no_show", "cancellationReason": "string (optional)" }
+Body: { "status": "confirmed | checked_in | completed | cancelled | no_show",
+  "cancellationReason": "string (optional)", "durationMinutes": "1-600 (optional)" }
 Response 200: Updated appointment. Marking "completed" auto-creates a draft invoice for the service.
 ```
+`durationMinutes` is the actual time spent, confirmed when marking "completed" — it's written onto
+the appointment and, when the service has a known standard duration, scales the auto-created draft
+invoice's price: `unitPrice = (durationMinutes / service.durationMinutes) * service.price`. Omit it
+(or when the service has no standard duration) and the draft is priced at the flat catalogue price,
+as before this field existed.
 
 ### PATCH `/appointments/:id/reschedule`
 ```
@@ -272,6 +278,23 @@ Response 400: invoice is already paid/cancelled, or this payment would push amou
 ```
 Insert + re-sum + status update run in one DB transaction — a concurrent payment on the same
 invoice can't read a stale running total between the steps.
+
+#### PATCH `/invoices/:id/items/:itemId`
+```
+Body: { "quantity": "positive int (optional)", "unitPrice": "positive number (optional)",
+  "durationMinutes": "1-600 (optional)", "priceOverrideReason": "string, 3-300 chars (optional)" }
+Response 200: Updated invoice, with items[]/subtotal/total recomputed
+Response 400: invoice is not a draft; or durationMinutes given on an item with no appointment behind it
+Response 403: non-admin manually setting unitPrice on a catalogued item away from the catalogue price
+```
+Only line items on a **draft** invoice can be edited. `durationMinutes` only applies to the line
+item generated from this invoice's appointment (`Invoice.appointmentId`) — it recomputes `unitPrice`
+proportionally (same formula as the status-update endpoint above) and writes the new duration back
+onto `Appointment.durationMinutes`; it is **not** treated as a price override, since it follows the
+catalogue price rather than diverging from it. A direct manual `unitPrice` on a catalogued item is
+still subject to the same admin-only / `priceOverrideReason`-when-underpricing rule as `POST
+/invoices` — otherwise this endpoint would be a back door around that guard. `quantity`-only edits
+and edits to a custom (no `serviceId`) line item are unrestricted.
 
 #### POST `/invoices/:id/cancel`
 ```
@@ -543,4 +566,4 @@ above) — this replaced the original design's assumption that Keycloak/NGINX wo
 
 ---
 
-*CAP 360 · API Specification · regenerated from the actual controllers — 2026-08-31 (Keycloak removal)*
+*CAP 360 · API Specification · regenerated from the actual controllers — 2026-09-12 (appointment-completion duration → proportional draft-invoice pricing, editable draft line items)*

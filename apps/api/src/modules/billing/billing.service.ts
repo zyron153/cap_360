@@ -17,6 +17,7 @@ import {
   CreateInvoiceDto,
   RecordPaymentDto,
   InvoiceListQuery,
+  UpdateInvoiceItemDto,
 } from "@cap/types";
 
 @Injectable()
@@ -277,6 +278,68 @@ export class BillingService {
         }],
       },
     });
+  }
+
+  /**
+   * Edits one draft-invoice line item. Duration-driven edits (from the appointment-completion
+   * flow or the invoice UI) recompute the price proportionally to the service's standard
+   * duration and are never treated as an override — they follow the same pricing rule the
+   * catalogue price itself represents, just scaled by actual time spent. A direct manual
+   * unitPrice edit on a catalogued item, however, is subject to the same admin-only /
+   * reason-required rule as create() — otherwise this endpoint would be a back door around it.
+   */
+  async updateItem(
+    invoiceId: string,
+    itemId: string,
+    dto: UpdateInvoiceItemDto,
+    callerRoles: string[] = []
+  ) {
+    const item = await this.repo.findItemForUpdate(invoiceId, itemId);
+    if (!item) throw new NotFoundException(`Invoice item ${itemId} not found`);
+    if (item.invoice.status !== "draft") {
+      throw new BadRequestException("Only draft invoices can have their line items edited");
+    }
+
+    let unitPrice = dto.unitPrice ?? Number(item.unitPrice);
+    const quantity = dto.quantity ?? item.quantity;
+    let appointmentUpdate: { appointmentId: string; durationMinutes: number } | undefined;
+
+    if (dto.durationMinutes !== undefined) {
+      if (!item.invoice.appointmentId || !item.serviceId) {
+        throw new BadRequestException(
+          "Duration can only be edited on a line item generated from an appointment"
+        );
+      }
+      const appointment = await this.repo.findAppointmentWithService(item.invoice.appointmentId);
+      if (!appointment?.service || appointment.serviceId !== item.serviceId) {
+        throw new BadRequestException("Could not resolve the service used to price this appointment");
+      }
+      const standardDuration = appointment.service.durationMinutes || dto.durationMinutes;
+      unitPrice =
+        Math.round((dto.durationMinutes / standardDuration) * Number(appointment.service.price) * 100) / 100;
+      appointmentUpdate = { appointmentId: item.invoice.appointmentId, durationMinutes: dto.durationMinutes };
+    } else if (dto.unitPrice !== undefined && item.serviceId) {
+      const catalogueService = await this.repo.findServiceById(item.serviceId);
+      if (catalogueService && Number(catalogueService.price) !== dto.unitPrice) {
+        if (!callerRoles.includes("admin")) {
+          throw new ForbiddenException(
+            `Only an admin can bill service ${item.serviceId} at a price other than the catalogue price`
+          );
+        }
+        if (dto.unitPrice < Number(catalogueService.price) && !dto.priceOverrideReason) {
+          throw new BadRequestException(
+            "priceOverrideReason is required when billing a service below its catalogue price"
+          );
+        }
+        RequestContext.setAuditDiff(
+          { unitPrice: Number(item.unitPrice) },
+          { unitPrice: dto.unitPrice, reason: dto.priceOverrideReason ?? null }
+        );
+      }
+    }
+
+    const total = Math.round(unitPrice * quantity * 100) / 100;
+    return this.repo.updateItemAtomic(invoiceId, itemId, { quantity, unitPrice, total }, appointmentUpdate);
   }
 
   // Configurações → Clínica is the single source of truth for the clinic's identity.

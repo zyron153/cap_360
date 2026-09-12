@@ -9,7 +9,7 @@
 
 Eliminates revenue leakage from manual and untracked billing. Auto-generates invoices at check-in, supports multiple payment methods including health plan claims, and delivers receipts to patients via WhatsApp.
 
-> **Implementation status:** invoice creation (auto-draft at check-in + manual), payments
+> **Implementation status:** invoice creation (auto-draft on Consulta completion + manual), payments
 > (idempotent, transactional, overpayment-guarded), cancellation, PDF receipts, and E-Fatura tax
 > submission are built and tested. ❌ Nothing computes health-plan co-pay/discounts or tracks plan
 > utilisation — `health_plan` is only a `PaymentMethod` enum value (though `Invoice.healthPlanId`
@@ -39,9 +39,23 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 ### 2.2 Invoice Generation
 
 Invoices are created:
-- ✅ **Automatically** as a `draft` at appointment check-in (best-effort — a billing failure is
-  logged but does not block the check-in itself)
+- ✅ **Automatically** as a `draft` when a Consulta's status is set to **Concluído** (`completed`),
+  not at check-in as originally described here — `updateStatus` calls `BillingService.createDraft()`
+  best-effort (a billing failure is logged but does not block the completion itself)
 - ✅ **Manually** by receptionist/admin (`POST /invoices`) for walk-ins or additional services
+
+✅ **Duration-proportional pricing (not in the original design):** completing a Consulta prompts
+for the actual duration (defaulting to the appointment's scheduled duration); when the service has
+a known standard duration, the draft's price is `(actualDuration / service.durationMinutes) *
+service.price` instead of always the flat catalogue price — a 45-minute session on a 30-minute/1500
+CVE service drafts at 2250 CVE, not 1500. The confirmed duration is written back onto
+`Appointment.durationMinutes`; there's no separate duration field on the invoice/line-item itself.
+✅ **Draft line items stay editable afterward, too:** while an invoice is still `draft`,
+`PATCH /invoices/:id/items/:itemId` lets quantity/price be adjusted on any item, and — on the item
+generated from the appointment specifically — lets duration be re-entered instead, recomputing the
+price the same way. A direct manual price edit on a catalogued item still goes through the same
+admin-only / reason-required override guard as `POST /invoices` (§2.1); the duration path doesn't,
+since it's following the catalogue price rather than diverging from it.
 
 Invoice includes:
 - ✅ Auto-incremented invoice number, but formatted `INV-2026-0001` (4-digit, not `MS-2026-00001`)
@@ -166,9 +180,9 @@ design.
 
 | Screen | Role | Description |
 |---|---|---|
-| Check-in & Invoice | Receptionist | ✅ Check in patient triggers an auto-created draft invoice |
+| Consulta Completion → Invoice | Receptionist / Doctor | ✅ Marking a Consulta "Concluída" prompts for actual duration, then triggers an auto-created draft invoice priced off it |
 | Invoice List | Receptionist / Admin | ✅ Filterable list of all invoices |
-| Invoice Detail | Receptionist / Admin | ✅ Line items, payment history, cancel action — available both as a full `/billing/:id` page and as a modal opened from the Faturas list's "Detalhes" button (same shared component, `InvoiceDetailBody.tsx`, so the two can't drift) |
+| Invoice Detail | Receptionist / Admin | ✅ Line items (editable while `draft` — duration on the appointment-linked item, quantity/price on any), payment history, cancel action — available both as a full `/billing/:id` page and as a modal opened from the Faturas list's "Detalhes" button (same shared component, `InvoiceDetailBody.tsx`, so the two can't drift) |
 | Payment Modal | Receptionist | ✅ Record payment — method, amount, reference |
 | Outstanding Balances | Admin | ❌ No dedicated screen (see §2.5) |
 | Revenue Dashboard | Admin | ❌ Doesn't exist (see §3) |
@@ -197,8 +211,12 @@ design.
 
 ---
 
-*Module M6 · v1.5 · updated 2026-09-12 — "Detalhes" on the Faturas list now opens the invoice
-detail experience as a modal instead of navigating away (extracted into shared
-`InvoiceDetailBody.tsx`, reused by the full `/billing/:id` page); "faltas" financial impact widened
-from `no_show`-only to `no_show` + `cancelled`; patient-name null-safety fix (right-to-erasure
-leaves `fullName: null`) applied across the dashboard and billing screens*
+*Module M6 · v1.6 · updated 2026-09-12 — completing a Consulta now confirms actual duration and
+prices the auto-generated draft invoice proportionally to the service's standard duration instead
+of always the flat catalogue price; draft invoice line items are now editable in place
+(`PATCH /invoices/:id/items/:itemId`) instead of read-only; corrected this doc's long-standing
+"auto-draft at check-in" claim to what the code actually does (on completion); "Detalhes" on the
+Faturas list now opens the invoice detail experience as a modal instead of navigating away
+(extracted into shared `InvoiceDetailBody.tsx`, reused by the full `/billing/:id` page); "faltas"
+financial impact widened from `no_show`-only to `no_show` + `cancelled`; patient-name null-safety
+fix (right-to-erasure leaves `fullName: null`) applied across the dashboard and billing screens*

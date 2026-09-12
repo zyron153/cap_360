@@ -5,37 +5,29 @@
 
 ## Done
 
-- Financeiro — "Impacto Financeiro de Faltas" só contava agendamentos `no_show`, mostrando 0/0
-  para períodos só com cancelamentos. `FinanceiroRepository.noShowAppointments` alargado para
-  `status: { in: ["no_show", "cancelled"] }`; nome do campo (`noShowImpact`) mantido por ser uma
-  alteração pequena e não quebrar a API. 25/25 testes do módulo a passar.
-- Faturação — botão "Detalhes" na lista de faturas passou a abrir num modal em vez de navegar
-  para `/billing/:id`:
-  - Extraída a experiência de detalhe de fatura (linha de itens, pagamentos, cancelamento,
-    estado E-Factura, formulário de registo de pagamento) do `billing/[id]/page.tsx` para um
-    componente partilhado `InvoiceDetailBody.tsx`, usado tanto pela página completa como pelo novo
-    `InvoiceDetailModal` em `FaturasTab.tsx` — evita duas implementações a divergir.
-  - Verificado ao vivo com Playwright num dev server real: o URL nunca sai de `/billing`, o modal
-    mostra dados reais, o formulário de pagamento e o painel de cancelamento (motivo obrigatório)
-    funcionam dentro do modal.
-- Bug encontrado e corrigido durante a verificação acima: várias faturas na base de dev referenciam
-  pacientes apagados por direito ao esquecimento (`Patient.fullName = null`), e o cabeçalho/avatar
-  da fatura mostrava em branco em vez do fallback já usado no resto da app ("Paciente removido").
-  Corrigido em `InvoiceDetailBody.tsx` e `FaturasTab.tsx` (lista + preview).
-- Dashboard — o mesmo problema (`fullName` nulo por apagamento) fazia a função `initials()` rebentar
-  com `TypeError: Cannot read properties of null (reading 'trim')` ao renderizar consultas de hoje,
-  pacientes recentes ou faturas recentes que referenciam um paciente apagado. `initials()` agora é
-  null-safe e as 3 listas mostram "Paciente removido" em vez de rebentar.
-- REVIEW.md / M6 module doc atualizados para refletir tudo o que precede (ver
-  `Docs/modules/M6-billing-invoicing.md` v1.5).
-- Recibo em PDF não mostrava o NIF do paciente (só o da clínica no rodapé), ao contrário da
-  pré-visualização no ecrã (`FaturaPreviewModal`), que já mostrava ambos. Pedido do utilizador
-  para confirmar que o NIF da CAP vem de Configurações → Clínica e o NIF do cliente vem do registo
-  do paciente — a pré-visualização já estava correta; o gap real estava no PDF:
-  `BillingRepository.findById` já decripta `patient.nif`, mas `BillingService.getReceiptUrl` nunca
-  o passava para `generateReceiptPdf`, e `ReceiptData.patient` nem tinha o campo. Corrigido em
-  `receipt.pdf.ts` (tipo + render, com o mesmo fallback "Consumidor Final") e `billing.service.ts`;
-  2 testes novos em `billing.service.spec.ts`, 39/39 a passar.
+- Agendamento → Faturação: ao marcar uma Consulta como **Concluída**, a receção/médico confirma
+  agora a duração real (pré-preenchida com a duração agendada, com pré-visualização do valor) antes
+  do rascunho de fatura ser gerado. O preço desse rascunho passa a ser proporcional à duração-padrão
+  do serviço (`(duraçãoReal / service.durationMinutes) * service.price`) em vez de sempre o preço
+  fixo do catálogo — sem duração-padrão conhecida, mantém o comportamento antigo (preço fixo). A
+  duração confirmada é guardada em `Appointment.durationMinutes`; não existe campo de duração na
+  fatura/item em si.
+  - Novo endpoint `PATCH /invoices/:id/items/:itemId`: enquanto a fatura estiver em `draft`,
+    qualquer item passa a ter quantidade/preço editáveis; o item gerado a partir do agendamento
+    mostra em vez disso um campo de duração, que recalcula o preço da mesma forma. Uma edição manual
+    de preço num item de catálogo continua sujeita à mesma regra admin-only / motivo obrigatório
+    (undercut) que já existia em `POST /invoices` — não é um atalho para a contornar.
+  - Ficheiros principais: `appointments.service.ts` (`updateStatus`), `billing.service.ts`
+    (`updateItem`), `billing.repository.ts` (`updateItemAtomic`), `billing.controller.ts`;
+    `appointments/page.tsx` (diálogo de confirmação de duração) e `InvoiceDetailBody.tsx` (linhas
+    de item editáveis). Sem migração de schema — a duração vive só em `Appointment`.
+  - Docs atualizados: `Docs/API-SPEC.md`, `Docs/modules/M1-smart-appointment-engine.md` (v1.2),
+    `Docs/modules/M6-billing-invoicing.md` (v1.6 — também corrige uma imprecisão antiga do
+    documento, que descrevia o rascunho automático como sendo gerado "no check-in" quando o código
+    sempre o gerou na conclusão da consulta).
+  - Testes: 5 novos em `appointments.service.spec.ts`/`billing.service.spec.ts`/
+    `billing.repository.spec.ts`; 102 + 13 testes a passar nos respetivos módulos; typecheck limpo
+    em `apps/api` e `apps/web`.
 
 ## Em curso
 

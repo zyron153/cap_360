@@ -56,6 +56,24 @@ export const CancelInvoiceSchema = z.object({
 });
 export type CancelInvoiceDto = z.infer<typeof CancelInvoiceSchema>;
 
+export const UpdateInvoiceItemSchema = z
+  .object({
+    quantity: z.number().int().positive().optional(),
+    unitPrice: z.number().positive().optional(),
+    // When set, unitPrice is recomputed server-side as (durationMinutes / service's standard
+    // duration) * catalogue price — only valid on the line item generated from this invoice's
+    // appointment, since that's the only item with a duration to scale against.
+    durationMinutes: z.number().int().positive().max(600).optional(),
+    // Same rule as CreateInvoiceSchema: required only when a manual unitPrice undercuts the
+    // catalogue price on a catalogued item.
+    priceOverrideReason: z.string().min(3).max(300).optional(),
+  })
+  .refine(
+    (d) => d.quantity !== undefined || d.unitPrice !== undefined || d.durationMinutes !== undefined,
+    { message: "At least one of quantity, unitPrice or durationMinutes must be provided" }
+  );
+export type UpdateInvoiceItemDto = z.infer<typeof UpdateInvoiceItemSchema>;
+
 export interface InvoiceItem {
   id: string;
   invoiceId: string;
@@ -64,6 +82,12 @@ export interface InvoiceItem {
   quantity: number;
   unitPrice: number;
   total: number;
+}
+
+export interface InvoiceAppointmentContext {
+  id: string;
+  durationMinutes: number;
+  service?: { durationMinutes: number } | null;
 }
 
 export interface Payment {
@@ -98,6 +122,7 @@ export interface Invoice {
   updatedAt: string;
   items?: InvoiceItem[];
   payments?: Payment[];
+  appointment?: InvoiceAppointmentContext | null;
 }
 
 export const EFaturaStatus = {

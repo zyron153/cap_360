@@ -39,6 +39,9 @@ export class BillingRepository {
         items: { include: { service: { select: { name: true } } } },
         payments: { include: { recordedBy: { select: { id: true, fullName: true } } } },
         patient: { select: { id: true, fullName: true, phone: true, nif: true } },
+        appointment: {
+          select: { id: true, durationMinutes: true, service: { select: { durationMinutes: true } } },
+        },
       },
     });
     if (!invoice) return invoice;
@@ -136,5 +139,55 @@ export class BillingRepository {
 
   findServiceById(serviceId: string) {
     return this.prisma.service.findUnique({ where: { id: serviceId } });
+  }
+
+  findItemForUpdate(invoiceId: string, itemId: string) {
+    return this.prisma.invoiceItem.findFirst({
+      where: { id: itemId, invoiceId },
+      include: { invoice: { select: { status: true, appointmentId: true } } },
+    });
+  }
+
+  findAppointmentWithService(appointmentId: string) {
+    return this.prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: {
+        id: true,
+        serviceId: true,
+        service: { select: { price: true, durationMinutes: true } },
+      },
+    });
+  }
+
+  /**
+   * Updates one line item, optionally the appointment's actual duration alongside it, then
+   * re-sums every item on the invoice into its subtotal/total — all inside one transaction so a
+   * concurrent payment or item edit can't read a stale total in between.
+   */
+  updateItemAtomic(
+    invoiceId: string,
+    itemId: string,
+    itemData: { quantity: number; unitPrice: number; total: number },
+    appointmentUpdate?: { appointmentId: string; durationMinutes: number },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.invoiceItem.update({ where: { id: itemId }, data: itemData });
+
+      if (appointmentUpdate) {
+        await tx.appointment.update({
+          where: { id: appointmentUpdate.appointmentId },
+          data: { durationMinutes: appointmentUpdate.durationMinutes },
+        });
+      }
+
+      const items = await tx.invoiceItem.findMany({ where: { invoiceId }, select: { total: true } });
+      const total = items.reduce((sum, i) => sum + Number(i.total), 0);
+
+      return tx.invoice.update({
+        where: { id: invoiceId },
+        data: { subtotal: total, total },
+        include: { items: true, payments: true },
+      });
+    });
   }
 }

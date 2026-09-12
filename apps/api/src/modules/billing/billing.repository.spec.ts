@@ -9,6 +9,8 @@ process.env.FIELD_ENCRYPTION_KEY = "d".repeat(64);
 const tx = {
   payment: { create: jest.fn(), aggregate: jest.fn() },
   invoice: { update: jest.fn() },
+  invoiceItem: { update: jest.fn(), findMany: jest.fn() },
+  appointment: { update: jest.fn() },
 };
 
 const prisma = {
@@ -101,6 +103,48 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
       expect(tx.payment.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ recordedById: "staff-1" }) })
       );
+    });
+  });
+
+  describe("updateItemAtomic — item edit + optional appointment duration in one transaction", () => {
+    beforeEach(() => {
+      tx.invoiceItem.update.mockResolvedValue({});
+      tx.appointment.update.mockResolvedValue({});
+      tx.invoice.update.mockResolvedValue({ id: "inv-1", subtotal: "2250", total: "2250" });
+    });
+
+    it("re-sums every item's total into the invoice's subtotal/total, inside one transaction", async () => {
+      tx.invoiceItem.findMany.mockResolvedValue([{ total: "2250" }]);
+      await repo.updateItemAtomic("inv-1", "item-1", { quantity: 1, unitPrice: 2250, total: 2250 });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.invoiceItem.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "item-1" }, data: { quantity: 1, unitPrice: 2250, total: 2250 } })
+      );
+      expect(tx.invoice.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { subtotal: 2250, total: 2250 } })
+      );
+      expect(tx.appointment.update).not.toHaveBeenCalled();
+    });
+
+    it("sums across multiple line items on the same invoice", async () => {
+      tx.invoiceItem.findMany.mockResolvedValue([{ total: "2250" }, { total: "500" }]);
+      await repo.updateItemAtomic("inv-1", "item-1", { quantity: 1, unitPrice: 2250, total: 2250 });
+      expect(tx.invoice.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { subtotal: 2750, total: 2750 } })
+      );
+    });
+
+    it("also updates the appointment's duration when a duration-driven edit is passed", async () => {
+      tx.invoiceItem.findMany.mockResolvedValue([{ total: "2250" }]);
+      await repo.updateItemAtomic(
+        "inv-1", "item-1",
+        { quantity: 1, unitPrice: 2250, total: 2250 },
+        { appointmentId: "appt-1", durationMinutes: 45 }
+      );
+      expect(tx.appointment.update).toHaveBeenCalledWith({
+        where: { id: "appt-1" },
+        data: { durationMinutes: 45 },
+      });
     });
   });
 

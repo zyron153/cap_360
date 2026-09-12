@@ -706,6 +706,35 @@ describe("AppointmentsService", () => {
       );
     });
 
+    it("scales the draft's price when a confirmed duration and standard duration are both known", async () => {
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
+        patient: { id: "p1", healthPlanId: null },
+        service: { id: "s1", name: "Consulta Geral", price: "1500", durationMinutes: 30 },
+      });
+      await service.updateStatus("appt-1", { status: "completed", durationMinutes: 45 });
+      // 45 / 30 standard minutes * 1500 = 2250
+      expect(billingMock.createDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ unitPrice: 2250 })
+      );
+      expect(repo.update).toHaveBeenCalledWith(
+        "appt-1",
+        expect.objectContaining({ durationMinutes: 45 })
+      );
+    });
+
+    it("falls back to the flat catalogue price when the service has no standard duration", async () => {
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
+        patient: { id: "p1", healthPlanId: null },
+        service: { id: "s1", name: "Consulta Geral", price: "1500" },
+      });
+      await service.updateStatus("appt-1", { status: "completed", durationMinutes: 45 });
+      expect(billingMock.createDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ unitPrice: 1500 })
+      );
+    });
+
     it("skips the billing draft for a zero-price service", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",

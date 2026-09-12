@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield, XCircle } from "lucide-react";
-import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type EFaturaSubmission } from "@cap/types";
+import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type InvoiceItem, type EFaturaSubmission, type UpdateInvoiceItemDto } from "@cap/types";
 
 async function cancelInvoice(id: string, reason: string) {
   const res = await fetch(`/api/invoices/${id}/cancel`, {
@@ -57,6 +57,19 @@ async function retryEFatura(id: string) {
   const res = await fetch(`/api/invoices/${id}/efatura/retry`, { method: "POST" });
   if (!res.ok) throw new Error("Erro ao retentar submissão");
   return res.json();
+}
+
+async function updateInvoiceItem(invoiceId: string, itemId: string, data: UpdateInvoiceItemDto) {
+  const res = await fetch(`/api/invoices/${invoiceId}/items/${itemId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message ?? "Erro ao atualizar item da fatura");
+  }
+  return res.json() as Promise<Invoice>;
 }
 
 const EFATURA_META: Record<string, { label: string; cls: string; dot: string }> = {
@@ -165,6 +178,110 @@ const STATUS_META: Record<string, { label: string; cls: string; icon: typeof Che
 const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300 font-sans";
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
+
+const smallInputCls = "w-24 border border-dim-200 rounded-[8px] px-2 py-1 text-[12px] text-dim-900 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_2px_rgba(19,163,163,.12)] transition-all font-mono";
+
+/** One line item on a draft invoice. Quantity/price are always editable while the invoice is a
+ * draft; the duration field only appears on the sole item generated from this invoice's
+ * appointment, where it drives the price instead of the price being typed directly. */
+function InvoiceItemRow({
+  invoiceId,
+  item,
+  editable,
+  isAppointmentItem,
+  appointmentDuration,
+  onSaved,
+}: {
+  invoiceId: string;
+  item: InvoiceItem;
+  editable: boolean;
+  isAppointmentItem: boolean;
+  appointmentDuration?: number;
+  onSaved: () => void;
+}) {
+  const [quantity, setQuantity] = useState(String(item.quantity));
+  const [unitPrice, setUnitPrice] = useState(String(item.unitPrice));
+  const [duration, setDuration] = useState(String(appointmentDuration ?? ""));
+
+  useEffect(() => setQuantity(String(item.quantity)), [item.quantity]);
+  useEffect(() => setUnitPrice(String(item.unitPrice)), [item.unitPrice]);
+  useEffect(() => setDuration(String(appointmentDuration ?? "")), [appointmentDuration]);
+
+  const mutation = useMutation({
+    mutationFn: (data: UpdateInvoiceItemDto) => updateInvoiceItem(invoiceId, item.id, data),
+    onSuccess: onSaved,
+  });
+
+  if (!editable) {
+    return (
+      <tr className="border-b border-dim-50">
+        <td className="py-3 text-[13px] text-dim-900">{item.description}</td>
+        <td className="py-3 text-right font-mono text-[12px] text-dim-600 tabular-nums">{item.quantity}</td>
+        <td className="py-3 text-right font-mono text-[12px] text-dim-600 tabular-nums">{Number(item.unitPrice).toLocaleString("pt-CV")} CVE</td>
+        <td className="py-3 text-right font-mono text-[13px] font-semibold text-dim-900 tabular-nums">{Number(item.total).toLocaleString("pt-CV")} CVE</td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="border-b border-dim-50 align-top">
+      <td className="py-2.5 text-[13px] text-dim-900">
+        {item.description}
+        {isAppointmentItem && (
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <input
+              type="number"
+              min={1}
+              max={480}
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              onBlur={() => {
+                const d = Number(duration);
+                if (d > 0 && d !== appointmentDuration) mutation.mutate({ durationMinutes: d });
+              }}
+              className={smallInputCls}
+            />
+            <span className="text-[11px] text-dim-400">min</span>
+          </div>
+        )}
+        {mutation.isError && (
+          <p className="text-[11px] text-red-600 mt-1">{(mutation.error as Error).message}</p>
+        )}
+      </td>
+      <td className="py-2.5 text-right">
+        <input
+          type="number"
+          min={1}
+          value={quantity}
+          disabled={isAppointmentItem}
+          onChange={(e) => setQuantity(e.target.value)}
+          onBlur={() => {
+            const q = Number(quantity);
+            if (q > 0 && q !== item.quantity) mutation.mutate({ quantity: q });
+          }}
+          className={`${smallInputCls} text-right ${isAppointmentItem ? "opacity-50" : ""}`}
+        />
+      </td>
+      <td className="py-2.5 text-right">
+        <input
+          type="number"
+          step="0.01"
+          value={unitPrice}
+          disabled={isAppointmentItem}
+          onChange={(e) => setUnitPrice(e.target.value)}
+          onBlur={() => {
+            const p = Number(unitPrice);
+            if (p > 0 && p !== Number(item.unitPrice)) mutation.mutate({ unitPrice: p });
+          }}
+          className={`${smallInputCls} text-right ${isAppointmentItem ? "opacity-50" : ""}`}
+        />
+      </td>
+      <td className="py-2.5 text-right font-mono text-[13px] font-semibold text-dim-900 tabular-nums">
+        {Number(item.total).toLocaleString("pt-CV")} CVE
+      </td>
+    </tr>
+  );
+}
 
 /** The invoice detail experience — line items, payments, cancel action, E-Factura status,
  * record-payment form. Shared between the full `/billing/:id` page and the "Detalhes" modal
@@ -379,12 +496,19 @@ export function InvoiceDetailBody({ id }: { id: string }) {
             </thead>
             <tbody>
               {invoice.items?.map((item) => (
-                <tr key={item.id} className="border-b border-dim-50">
-                  <td className="py-3 text-[13px] text-dim-900">{item.description}</td>
-                  <td className="py-3 text-right font-mono text-[12px] text-dim-600 tabular-nums">{item.quantity}</td>
-                  <td className="py-3 text-right font-mono text-[12px] text-dim-600 tabular-nums">{Number(item.unitPrice).toLocaleString("pt-CV")} CVE</td>
-                  <td className="py-3 text-right font-mono text-[13px] font-semibold text-dim-900 tabular-nums">{Number(item.total).toLocaleString("pt-CV")} CVE</td>
-                </tr>
+                <InvoiceItemRow
+                  key={item.id}
+                  invoiceId={id}
+                  item={item}
+                  editable={invoice.status === "draft"}
+                  isAppointmentItem={!!invoice.appointment && invoice.items?.length === 1}
+                  appointmentDuration={invoice.appointment?.durationMinutes}
+                  onSaved={() => {
+                    queryClient.invalidateQueries({ queryKey: ["invoice", id] });
+                    queryClient.invalidateQueries({ queryKey: ["invoices"] });
+                    queryClient.invalidateQueries({ queryKey: ["billing-summary"] });
+                  }}
+                />
               ))}
             </tbody>
             <tfoot>

@@ -21,6 +21,9 @@ const repo = {
   recordPaymentAtomic: jest.fn(),
   findPaymentReplay: jest.fn(),
   findServiceById: jest.fn(),
+  findItemForUpdate: jest.fn(),
+  findAppointmentWithService: jest.fn(),
+  updateItemAtomic: jest.fn(),
 };
 const r2 = { isConfigured: jest.fn(), upload: jest.fn(), signedUrl: jest.fn() };
 const prisma = {
@@ -300,6 +303,111 @@ describe("BillingService", () => {
           total: 1500,
           status: "draft",
         })
+      );
+    });
+  });
+
+  describe("updateItem", () => {
+    beforeEach(() => {
+      repo.updateItemAtomic.mockResolvedValue({});
+    });
+
+    it("rejects editing an item on a non-draft invoice", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "issued", appointmentId: "appt-1" },
+      });
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { quantity: 2 } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updateItemAtomic).not.toHaveBeenCalled();
+    });
+
+    it("throws NotFoundException when the item doesn't belong to the invoice", async () => {
+      repo.findItemForUpdate.mockResolvedValue(null);
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { quantity: 2 } as never)
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it("recomputes unitPrice proportionally to the service's standard duration", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: "appt-1" },
+      });
+      repo.findAppointmentWithService.mockResolvedValue({
+        id: "appt-1", serviceId: "service-1",
+        service: { price: "1500", durationMinutes: 30 },
+      });
+
+      await service.updateItem("inv-1", "item-1", { durationMinutes: 45 } as never);
+
+      // 45 / 30 standard minutes * 1500 = 2250
+      expect(repo.updateItemAtomic).toHaveBeenCalledWith(
+        "inv-1", "item-1",
+        { quantity: 1, unitPrice: 2250, total: 2250 },
+        { appointmentId: "appt-1", durationMinutes: 45 }
+      );
+    });
+
+    it("rejects a durationMinutes edit on an item with no appointment behind it", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "250", serviceId: null,
+        invoice: { status: "draft", appointmentId: null },
+      });
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { durationMinutes: 45 } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updateItemAtomic).not.toHaveBeenCalled();
+    });
+
+    it("lets a manual quantity edit through without touching price authorization", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: null },
+      });
+
+      await service.updateItem("inv-1", "item-1", { quantity: 3 } as never, ["receptionist"]);
+
+      expect(repo.updateItemAtomic).toHaveBeenCalledWith(
+        "inv-1", "item-1",
+        { quantity: 3, unitPrice: 1500, total: 4500 },
+        undefined
+      );
+      expect(repo.findServiceById).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-admin manually pricing a catalogued item away from the catalogue price", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: null },
+      });
+      repo.findServiceById.mockResolvedValue({ id: "service-1", price: "1500" });
+
+      await expect(
+        service.updateItem("inv-1", "item-1", { unitPrice: 500 } as never, ["receptionist"])
+      ).rejects.toThrow(ForbiddenException);
+      expect(repo.updateItemAtomic).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin manually reprice a catalogued item with a reason when underpricing", async () => {
+      repo.findItemForUpdate.mockResolvedValue({
+        id: "item-1", quantity: 1, unitPrice: "1500", serviceId: "service-1",
+        invoice: { status: "draft", appointmentId: null },
+      });
+      repo.findServiceById.mockResolvedValue({ id: "service-1", price: "1500" });
+
+      await service.updateItem(
+        "inv-1", "item-1",
+        { unitPrice: 500, priceOverrideReason: "Desconto autorizado" } as never,
+        ["admin"]
+      );
+
+      expect(repo.updateItemAtomic).toHaveBeenCalledWith(
+        "inv-1", "item-1", { quantity: 1, unitPrice: 500, total: 500 }, undefined
       );
     });
   });

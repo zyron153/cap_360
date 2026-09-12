@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -18,10 +19,12 @@ import {
   RecordPaymentSchema,
   CancelInvoiceSchema,
   InvoiceListQuerySchema,
+  UpdateInvoiceItemSchema,
   CreateInvoiceDto,
   RecordPaymentDto,
   CancelInvoiceDto,
   InvoiceListQuery,
+  UpdateInvoiceItemDto,
 } from "@cap/types";
 
 @Controller("invoices")
@@ -61,6 +64,16 @@ export class BillingController {
     @CurrentUser() user: JwtUser
   ) {
     return this.service.recordPayment(id, dto, user.sub);
+  }
+
+  @Patch(":id/items/:itemId")
+  updateItem(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("itemId", ParseUUIDPipe) itemId: string,
+    @Body(new ZodValidationPipe(UpdateInvoiceItemSchema)) dto: UpdateInvoiceItemDto,
+    @CurrentUser() user: JwtUser
+  ) {
+    return this.service.updateItem(id, itemId, dto, user.roles);
   }
 
   @Post(":id/cancel")
