@@ -316,6 +316,7 @@ export class BillingService {
       patient: {
         fullName: invoice.patient.fullName ?? "Paciente removido",
         phone: invoice.patient.phone ?? "—",
+        nif: invoice.patient.nif ?? null,
       },
       items: invoice.items.map((item) => ({
         description: item.description,

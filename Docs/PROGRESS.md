@@ -1,22 +1,41 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-11.
+> Snapshot overwritten each session. Última atualização: 2026-09-12.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
 
-- Agendamentos — botão "Faltou" nos detalhes da marcação:
-  - Pedido pontual do utilizador (fora do backlog do REVIEW.md), não uma correção de finding.
-  - `TRANSITIONS["confirmed"]` (`apps/web/app/(app)/appointments/page.tsx`) passou a incluir a
-    transição para `no_show`, ao lado de "Check-in feito" e "Cancelar" — reaproveita o mecanismo
-    de config já existente que decide quais botões de ação aparecem no modal de detalhe, por
-    estado atual da marcação (chave = `detail.status`), em vez de um `if` ad-hoc no JSX.
-  - Efeito: o botão só é visível quando o estado é exatamente `confirmed` ("Confirmado"); clique
-    chama `statusMutation` diretamente (mesmo padrão dos outros botões, sem diálogo de confirmação
-    extra) e faz `PATCH /appointments/:id/status`.
-  - Verificado que a API (`appointments.service.ts`) não tem máquina de estados a restringir
-    transições — qualquer valor do enum é aceite — pelo que não foi necessária alteração de backend.
-  - `no_show` a partir de `checked_in` (fluxo pré-existente) mantém-se inalterado.
+- Financeiro — "Impacto Financeiro de Faltas" só contava agendamentos `no_show`, mostrando 0/0
+  para períodos só com cancelamentos. `FinanceiroRepository.noShowAppointments` alargado para
+  `status: { in: ["no_show", "cancelled"] }`; nome do campo (`noShowImpact`) mantido por ser uma
+  alteração pequena e não quebrar a API. 25/25 testes do módulo a passar.
+- Faturação — botão "Detalhes" na lista de faturas passou a abrir num modal em vez de navegar
+  para `/billing/:id`:
+  - Extraída a experiência de detalhe de fatura (linha de itens, pagamentos, cancelamento,
+    estado E-Factura, formulário de registo de pagamento) do `billing/[id]/page.tsx` para um
+    componente partilhado `InvoiceDetailBody.tsx`, usado tanto pela página completa como pelo novo
+    `InvoiceDetailModal` em `FaturasTab.tsx` — evita duas implementações a divergir.
+  - Verificado ao vivo com Playwright num dev server real: o URL nunca sai de `/billing`, o modal
+    mostra dados reais, o formulário de pagamento e o painel de cancelamento (motivo obrigatório)
+    funcionam dentro do modal.
+- Bug encontrado e corrigido durante a verificação acima: várias faturas na base de dev referenciam
+  pacientes apagados por direito ao esquecimento (`Patient.fullName = null`), e o cabeçalho/avatar
+  da fatura mostrava em branco em vez do fallback já usado no resto da app ("Paciente removido").
+  Corrigido em `InvoiceDetailBody.tsx` e `FaturasTab.tsx` (lista + preview).
+- Dashboard — o mesmo problema (`fullName` nulo por apagamento) fazia a função `initials()` rebentar
+  com `TypeError: Cannot read properties of null (reading 'trim')` ao renderizar consultas de hoje,
+  pacientes recentes ou faturas recentes que referenciam um paciente apagado. `initials()` agora é
+  null-safe e as 3 listas mostram "Paciente removido" em vez de rebentar.
+- REVIEW.md / M6 module doc atualizados para refletir tudo o que precede (ver
+  `Docs/modules/M6-billing-invoicing.md` v1.5).
+- Recibo em PDF não mostrava o NIF do paciente (só o da clínica no rodapé), ao contrário da
+  pré-visualização no ecrã (`FaturaPreviewModal`), que já mostrava ambos. Pedido do utilizador
+  para confirmar que o NIF da CAP vem de Configurações → Clínica e o NIF do cliente vem do registo
+  do paciente — a pré-visualização já estava correta; o gap real estava no PDF:
+  `BillingRepository.findById` já decripta `patient.nif`, mas `BillingService.getReceiptUrl` nunca
+  o passava para `generateReceiptPdf`, e `ReceiptData.patient` nem tinha o campo. Corrigido em
+  `receipt.pdf.ts` (tipo + render, com o mesmo fallback "Consumidor Final") e `billing.service.ts`;
+  2 testes novos em `billing.service.spec.ts`, 39/39 a passar.
 
 ## Em curso
 
@@ -29,7 +48,7 @@
 
 ## Próximo
 
-- Opções levantadas na análise do M6 (sessão anterior), ainda por escolher/agendar:
+- Opções levantadas na análise do M6 (sessões anteriores), ainda por escolher/agendar:
   - Health-plan co-pay/utilização — `health_plan` continua a ser só um valor de enum em
     `PaymentMethod`; nada calcula desconto nem incrementa `HealthPlan.usageCount`.
   - Ecrã de "outstanding balances" por paciente/fatura.

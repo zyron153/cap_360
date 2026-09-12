@@ -484,5 +484,25 @@ describe("BillingService", () => {
       await service.getReceiptUrl("inv-1");
       expect(generateReceiptPdfMock).not.toHaveBeenCalled();
     });
+
+    it("passes the patient's NIF through to the receipt (already decrypted by the repository)", async () => {
+      repo.findById.mockResolvedValue({
+        ...FULL_INVOICE,
+        patient: { ...FULL_INVOICE.patient, nif: "289959195" },
+      });
+      prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
+      await service.getReceiptUrl("inv-1");
+      expect(generateReceiptPdfMock).toHaveBeenCalledWith(
+        expect.objectContaining({ patient: expect.objectContaining({ nif: "289959195" }) })
+      );
+    });
+
+    it("passes null NIF when the patient has none, instead of dropping the field", async () => {
+      prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
+      await service.getReceiptUrl("inv-1");
+      expect(generateReceiptPdfMock).toHaveBeenCalledWith(
+        expect.objectContaining({ patient: expect.objectContaining({ nif: null }) })
+      );
+    });
   });
 });

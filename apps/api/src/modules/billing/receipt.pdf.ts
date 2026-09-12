@@ -4,7 +4,7 @@ interface ReceiptData {
   clinic: { name: string; nif: string; address: string; phone: string; email: string };
   invoiceNumber: string;
   issuedAt: Date | null;
-  patient: { fullName: string; phone: string };
+  patient: { fullName: string; phone: string; nif: string | null };
   items: { description: string; quantity: number; unitPrice: number; total: number }[];
   subtotal: number;
   total: number;
@@ -61,7 +61,9 @@ export function generateReceiptPdf(data: ReceiptData): Promise<Buffer> {
     // ── Patient & status ─────────────────────────────────────────────────────
     doc.fontSize(8).fillColor(DIM).font("Helvetica-Bold").text("PACIENTE", 50, 135);
     doc.fontSize(12).fillColor(DARK).font("Helvetica-Bold").text(data.patient.fullName, 50, 148);
-    doc.fontSize(9).fillColor(DIM).font("Helvetica").text(data.patient.phone, 50, 163);
+    doc.fontSize(9).fillColor(DIM).font("Helvetica")
+      .text(`NIF: ${data.patient.nif || "Consumidor Final"}`, 50, 163)
+      .text(data.patient.phone, 50, 175);
 
     const statusColor = data.status === "paid" ? GREEN : data.status === "cancelled" ? RED : BRAND;
     doc.fontSize(9).fillColor(statusColor).font("Helvetica-Bold")
