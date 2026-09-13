@@ -44,7 +44,8 @@ Guard section below).
 | `/billing` | `(app)/billing/page.tsx` | admin, receptionist |
 | `/billing/new` | `(app)/billing/new/page.tsx` | admin, receptionist |
 | `/billing/[id]` | `(app)/billing/[id]/page.tsx` | admin, receptionist |
-| `/health-plans` | `(app)/health-plans/page.tsx` | admin, receptionist, corporate_hr — one page handles products + subscriptions, not a `/products` sub-tree |
+| `/health-plans` | `(app)/health-plans/page.tsx` | admin, receptionist, corporate_hr — tabbed: Produtos (catalogue/KPIs) + Planos (every plan instance, filterable, with a quick renew action) |
+| `/health-plans/[id]` | `(app)/health-plans/[id]/page.tsx` | admin, receptionist, corporate_hr — one plan's detail + renew action, thin wrapper around `HealthPlanDetailBody` (shared with the list tab's future use, same pattern as `billing/[id]`/`InvoiceDetailBody`) |
 | `/staff` | `(app)/staff/page.tsx` | admin — not under `/admin/*` |
 | `/settings` | `(app)/settings/page.tsx` | admin |
 | `/parametrizacoes` | `(app)/parametrizacoes/page.tsx` | admin — service pricing, business hours, clinic info; not in the original doc |

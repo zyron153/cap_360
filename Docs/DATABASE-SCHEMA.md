@@ -347,6 +347,7 @@ CREATE TABLE health_plan_products (
   "monthlyFee"    NUMERIC(10,2) NOT NULL,
   "maxMembers"    INT,
   "coverageRules" JSONB,
+  "durationMonths" INT NOT NULL DEFAULT 1,          -- renewal cycle length (1=monthly, 12=annual, etc.)
   active          BOOLEAN NOT NULL DEFAULT true,
   "createdAt"     TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedAt"     TIMESTAMPTZ NOT NULL
@@ -363,11 +364,11 @@ CREATE TABLE health_plans (
   "productId"       UUID NOT NULL REFERENCES health_plan_products(id),
   "holderPatientId" UUID,
   "companyId"       UUID REFERENCES companies(id),
-  "planNumber"      VARCHAR(50) NOT NULL UNIQUE,   -- client-computed (count+1), not a DB sequence — see M4 module doc
+  "planNumber"      VARCHAR(50) NOT NULL UNIQUE,   -- server-generated, advisory-lock race-safe — see M4 module doc
   "startDate"       DATE NOT NULL,
   "endDate"         DATE,
   active            BOOLEAN NOT NULL DEFAULT true,
-  "usageCount"      INT NOT NULL DEFAULT 0,        -- exists, nothing increments it
+  "usageCount"      INT NOT NULL DEFAULT 0,        -- incremented on appointment completion, see M4 module doc
   "createdAt"       TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedAt"       TIMESTAMPTZ NOT NULL
 );

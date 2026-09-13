@@ -367,18 +367,25 @@ GET    /financeiro/saldos/:patientId            → one patient's outstanding ba
 ```
 GET    /health-plans/products                                    roles: +doctor
 GET    /health-plans/products/:id                                roles: +doctor
-POST   /health-plans/products         roles: admin      body: name,code,description?,monthlyFee,maxMembers?,coverageRules?
+POST   /health-plans/products         roles: admin      body: name,code,description?,monthlyFee,maxMembers?,coverageRules?,durationMonths?
 PATCH  /health-plans/products/:id     roles: admin
 DELETE /health-plans/products/:id     roles: admin
 
-GET    /health-plans                                              query: (see service) — list subscriptions
+GET    /health-plans                                              query: companyId? — list subscriptions,
+                                                                   each with holderPatientName when it has a holder
 GET    /health-plans/:id
-POST   /health-plans                  roles: admin, receptionist   body: productId, holderPatientId? XOR companyId, planNumber, startDate, endDate?
+POST   /health-plans                  roles: admin, receptionist   body: productId, holderPatientId? XOR companyId, planNumber?, startDate, endDate?
+POST   /health-plans/:id/renew        roles: admin, receptionist   staff-triggered renewal — extends endDate by the
+                                                                   product's durationMonths (from whichever is later,
+                                                                   the current endDate or today) and reactivates a
+                                                                   lapsed plan; 400 if the product has been
+                                                                   deactivated. No scheduled auto-renew job — see
+                                                                   TODO.md's M4 scope-decision note.
 ```
 
-`planNumber` is client-computed (count of existing plans for this product+year, +1), not a DB
-sequence — a race between two concurrent "add plan" submissions for the same product can collide
-on the `planNumber` unique constraint and surface as a raw `500`, not a friendly `409`. There is no
+`planNumber` is generated server-side, race-safe via a Postgres advisory lock keyed by product code
++ year (`HealthPlansRepository.nextPlanNumber`) — a caller-supplied value is still honored as-is
+when provided, so the `planNumber` body field above is optional, not required. There is no
 `POST /health-plans/:id/members` / `DELETE .../members/:patient_id` — a `HealthPlan` links to at
 most one holder patient directly (`patients.healthPlanId`), not a membership join table.
 

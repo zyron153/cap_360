@@ -9,11 +9,13 @@
 
 Manages the clinic's two plan types — **Plano Familiar** (Family) and **Plano Empresarial** (Corporate) — with full lifecycle support: creation, member management, utilisation tracking, renewals, and a self-service portal for corporate HR.
 
-> **Implementation status:** the plan **product catalogue** and **companies** registry are real
-> CRUD, and a patient/company can be **subscribed** to a plan. Nothing past that point is built:
-> no suspend/cancel, no membership model (a plan links to exactly one holder patient via a plain
-> FK), no utilisation decrementing, no renewal reminders, no upsell alerts, no self-service
-> portals.
+> **Implementation status (updated 2026-09-12):** the plan **product catalogue** and **companies**
+> registry are real CRUD, a patient/company can be **subscribed** to a plan, coverage is applied as
+> a billing discount, expiry is notified 30/15/7 days out, and a plan can now be **manually
+> renewed** by staff (`POST /health-plans/:id/renew`) with a dedicated list/detail frontend. Still
+> not built: no scheduled/automatic renewal (a deliberate scope decision, not an oversight — see
+> §3.4), no suspend/cancel, no membership model (a plan links to exactly one holder patient via a
+> plain FK), no utilisation decrementing, no upsell alerts, no self-service portals.
 
 ---
 
@@ -25,8 +27,8 @@ Manages the clinic's two plan types — **Plano Familiar** (Family) and **Plano 
 - ✅ **Fixed.** Coverage % in the `coverageRules` JSON blob is now read — `BillingService` applies
   it as an automatic invoice-level discount for a patient with an active plan (see
   `M6-billing-invoicing.md` §1/§2.1). Still a flat % per product, not per-consultation/exam tiers.
-- ❌ Auto-renewal and the 30/15/7-day WhatsApp expiry notifications: not implemented — no job
-  queries expiring plans at all
+- ✅ **Fixed.** 30/15/7-day expiry notifications: `NotificationsProcessor.handleHealthPlanExpiring()`
+  runs daily. 🟡 Renewal itself is manual, not automatic — see §3.4.
 
 ### 2.2 Plano Empresarial
 - ✅ Linked to a `companies` record (real CRUD: `/companies`)
@@ -45,13 +47,15 @@ Manages the clinic's two plan types — **Plano Familiar** (Family) and **Plano 
   description, monthly fee, max members, JSON coverage rules
 - ✅ Subscribe a patient or company to a plan: `POST /health-plans` (admin, receptionist) — sets
   `productId`, one of `holderPatientId`/`companyId`, `planNumber`, start/end dates
-- ❌ No auto-renew flag, no suspend/cancel — there is no `PATCH` or `DELETE` on `/health-plans/:id`
-  at all; once created, a subscription can only ever be read back, never modified or ended through
-  the app
-- 🟡 `planNumber` is **client-computed** (count of existing plans for the product +1), not a DB
-  sequence — two concurrent "add plan" submissions for the same product can collide on its unique
-  constraint and surface as a raw `500`, not a friendly `409` (unlike the idempotency-guarded
-  resources elsewhere in the app)
+- ✅ **Fixed.** Renewal: `POST /health-plans/:id/renew` (admin, receptionist) — extends `endDate` by
+  the product's own `durationMonths` (1/3/6/12, new field, `@default(1)`) from whichever is later,
+  the plan's current `endDate` or today, and reactivates a lapsed plan. `400` if the product has
+  since been deactivated. Still ❌ no suspend/cancel — there is no `PATCH`/`DELETE` on
+  `/health-plans/:id` for ending a subscription early, only this one new action.
+- ✅ **Fixed.** `planNumber` is generated **server-side**, race-safe via a Postgres advisory lock
+  keyed by product code + year (`HealthPlansRepository.nextPlanNumber`, `pg_advisory_xact_lock`
+  inside one `$transaction`) — the old client-computed count+1 race is gone. A caller-supplied
+  value is still honored as-is when provided.
 
 ### 3.2 Member Management
 
@@ -68,10 +72,17 @@ member, soft-delete removal, and CSV export all have nothing to attach to.
 `consultations_used/included` or `exams_used/included` pair, no "Incluído no seu plano"
 booking-time check, and no limit-reached alert — `usageCount` is tallied but nothing reads it back.
 
-### 3.4 Renewal Reminders
+### 3.4 Renewal Reminders and Renewal
 
-❌ Not implemented — no job queries expiring plans, no `health_plan_expiring` WhatsApp template is
-ever sent, no HR-email reminder path exists.
+✅ **Fixed** (reminders) — `NotificationsProcessor.handleHealthPlanExpiring()` runs daily,
+WhatsApp to the holder patient or email to the company, at exactly 30/15/7 days before `endDate`.
+
+🟡 Renewal itself is **manual**, by design — `POST /health-plans/:id/renew` (§3.1) lets staff renew
+a plan the reminder above flagged, but nothing renews a plan automatically. This was a deliberate
+scope decision (2026-09-12), not a gap: a renewal is implicitly a fresh billing period, so it stays
+a staff-confirmed action rather than something that silently happens overnight via a scheduled job.
+A future scheduled auto-renew job (mirroring the reminder job's own cron pattern) remains open if
+the business wants opt-in automatic renewal for specific plans/products later.
 
 ### 3.5 Upsell Alerts
 
@@ -99,7 +110,7 @@ ever sent, no HR-email reminder path exists.
 ## 6. Data Model
 
 See `DATABASE-SCHEMA.md` → Section 4:
-- `health_plan_products`
+- `health_plan_products` — now includes `durationMonths` (renewal cycle length, `@default(1)`)
 - `health_plans` (subscriptions — no separate members table, see §3.2)
 - `companies`
 - ❌ `corporate_plan_members` — was never built
@@ -126,4 +137,4 @@ See `API-SPEC.md` → Section 4 (Health Plans) and Section 5 (Companies)
 
 ---
 
-*Module M4 · v1.1 · updated 2026-08-30 against the current implementation*
+*Module M4 · v1.2 · updated 2026-09-12 against the current implementation*

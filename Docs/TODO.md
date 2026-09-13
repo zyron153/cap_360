@@ -175,15 +175,52 @@ piece of groundwork already laid — ready to be pointed at a real send service.
   patient's coverage % as a negative line item on invoice creation and on the appointment-completion
   auto-draft alike; invoice gets linked to that `healthPlanId` when the caller didn't already supply
   one. 14 new unit tests (`billing.service.spec.ts`, `health-plans.service.spec.ts`).
-- [ ] Auto-renew logic
-- [ ] `POST /health-plans/:id/members` / member roster — a `HealthPlan` links to one holder patient directly today, not a membership join table
+- [x] Renewal — `POST /health-plans/:id/renew` (admin, receptionist), manually staff-triggered (no
+  scheduled auto-renew job — see decision note below). Extends `endDate` by the product's own new
+  `durationMonths` field (1/3/6/12 months, `@default(1)` for every pre-existing product), from
+  whichever is later, the plan's current `endDate` or today, and reactivates a lapsed (`active:
+  false`) plan. Rejects (`400`) renewing a plan whose product has been deactivated. Writes a
+  before/after audit diff, same mechanism as `BillingService.cancel`. 5 new unit tests
+  (`health-plans.service.spec.ts`) + a dedicated integration spec
+  (`health-plan-renewal.integration-spec.ts`, 3 tests) against the real dev DB.
+  > **Scope decision:** a scheduled daily auto-renew job (mirroring the expiry-notification cron)
+  > was considered and explicitly rejected in favor of a manual endpoint — renewal has billing
+  > consequences (a fresh plan-period, implicitly a fresh charge), so staff confirm it rather than
+  > it happening silently overnight. "Auto-renew logic" in this file's title now means "the logic
+  > that computes a renewal," not "an automatic scheduler."
+- [x] `HealthPlan`/`HealthPlan` list responses now include `holderPatientName` (batched lookup,
+  `HealthPlansRepository.findPatientNamesByIds`) when a plan has a `holderPatientId` — needed once
+  a dedicated list page (below) had to show *who* holds a plan without an N+1 query per row; only
+  added to `findAllPlans`/`findPlanById`, so it never appears on a plan with no holder.
+- [ ] `POST /health-plans/:id/members` / member roster — a `HealthPlan` links to one holder patient directly today, not a membership join table (explicitly out of scope for this pass — see scope decision above)
+
+~~Bug found while building the renewal endpoint above (2026-09-12): `HealthPlansRepository
+.nextPlanNumber`'s two-argument advisory lock — `pg_advisory_xact_lock(${NAMESPACE}, ${year})` with
+no explicit cast — 42883s against real Postgres ("function pg_advisory_xact_lock(bigint, bigint)
+does not exist"), because Prisma's pg driver binds plain numeric placeholders as `bigint` and
+Postgres has no two-argument `bigint` overload, only the two-argument `int` one. Every unit test for
+this method passed (fully mocked, never touches real Postgres), so this shipped invisibly — the
+integration test suite (below) would have caught it immediately, but every integration spec was
+itself broken (see Testing section) until this same pass, so nothing ever actually exercised
+`createPlan()` without a caller-supplied `planNumber` against a real database.~~
+**Fixed** — explicit `::int` casts on both lock-key arguments
+(`pg_advisory_xact_lock(${NAMESPACE}::int, ${year}::int)`).
 
 **Frontend**
 - [x] Browse products, subscribe/change/remove plan from the patient profile
 - [x] Company management (create/edit/deactivate/reactivate) — **Gestão de Acesso → Organização**,
   the first frontend for the `Company` entity/`/companies` API, which existed backend-only until now.
   Not a corporate HR portal (see below) — this is admin-side company-record management only.
-- [ ] Dedicated health plans list/detail pages
+- [x] Dedicated health plans list/detail pages — `/health-plans` is now tabbed (**Produtos**, the
+  pre-existing product-catalogue/KPI page, unchanged; **Planos**, new — every plan instance, with
+  search + status filter pills [Ativo/A Expirar/Expirado/Inativo, computed client-side from
+  `active`+`endDate`] and an inline "Renovar" action) plus a new `/health-plans/[id]` detail page
+  (mirrors `billing/[id]`'s thin-wrapper-around-a-shared-body pattern) showing one plan's full
+  detail with its own "Renovar Plano" action. A "Renovar" action was also added to the pre-existing
+  patient-profile `PlanModal` (`patients/page.tsx`) for a lapsed/expiring plan, and the patient
+  profile's plan badge now links to `/health-plans/[id]`, so the new pages are reachable from every
+  existing plan-management surface, not just the sidebar. New "Ciclo de Renovação" field on the
+  product create form sets `durationMonths` (defaults to monthly if left alone).
 - [ ] Corporate HR self-service portal (Phase 4) — still nothing lets a `corporate_hr` account log in
   and self-serve; Organização doesn't change this, it's an admin tool
 
@@ -314,9 +351,29 @@ psychology clinic with no ultrasound/ECG imaging use case.
 See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### Testing
-- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 427 tests total (27 suites)
+- [x] Extensive unit test suite: every API module has a service spec (patients, appointments, billing, staff, notifications, financeiro, services, companies, parametrizacao, public, health-plans, clinical-records, bff, documents, efatura, settings, auth), plus encryption, session-auth guard, audit interceptor, request context — 442 tests total (27 suites), up from 427 (health-plans renewal + holder-name enrichment, §M4 above)
 - [x] ~~Integration tests against a real test DB~~ — this contradicted this file's own line 137 ([x], 4 specs / 9 tests); duplicate line removed
-- [~] E2E tests (Playwright) — 7 specs / 15 tests now (`booking-flow`, `checkin-payment`, `staff-invitation`→activation→login, `manual-invoice-payment`, `expense-approval`, `invoice-cancellation`, `health-plan-payment`), up from 3 specs / 9 tests. Financeiro now has real e2e coverage (manual invoice creation, partial→full payment, receipt, expense approval, invoice cancellation, health-plan payment method); still nothing for health-plans end-to-end, or a real e-Fatura submission (only the config-less "pending" state is asserted). Fixed along the way: `/billing/new` (Nova Fatura form) sent `unitPrice` as a string to `POST /invoices`, which always 400'd — writing the new spec caught a manual-invoice-creation feature that was fully broken. Older note: `playwright.config.ts`'s `baseURL` and both older specs' `API` constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm dev` port change — all e2e tests would have failed to even connect until this was caught
+- [x] 5 specs / 13 tests, up from 4/9 — new `health-plan-renewal.integration-spec.ts` (renew extends
+  endDate + reactivates, rejects a deactivated product, 404s a missing plan).
+  > ~~Every integration spec was silently broken (2026-09-12): `test/integration/setup.ts` still
+  > called `app.useGlobalPipes(new ZodValidationPipe())` with no schema — a leftover from before
+  > REVIEW.md §4.3 made the pipe's `schema` arg required for its (now per-route-only) usage, which
+  > `main.ts` itself was updated for at the time but this test-only bootstrap file was not. The
+  > constructor call itself started throwing, failing every spec file at compile/bootstrap before a
+  > single test could run — caught only because writing the new health-plan spec above required
+  > running the suite at all.~~ **Fixed** — dropped the dead global-pipe registration from
+  > `setup.ts`, matching `main.ts`.
+- [~] E2E tests (Playwright) — 8 specs / 17 tests now (adds `health-plan-renewal`: renewing an
+  expired plan from its detail page, and the Planos tab list/filter/renew), up from 7/15. Financeiro
+  and health-plan renewal now have real e2e coverage; still nothing for a real e-Fatura submission
+  (only the config-less "pending" state is asserted), and health-plan instances still have no delete
+  endpoint, so `health-plan-renewal.spec.ts`'s own fixtures are left in the dev DB (product
+  deactivated afterward, plan and company are not) — documented in that spec's header comment.
+  Fixed along the way: `/billing/new` (Nova Fatura form) sent `unitPrice` as a string to `POST
+  /invoices`, which always 400'd — writing the new spec caught a manual-invoice-creation feature
+  that was fully broken. Older note: `playwright.config.ts`'s `baseURL` and both older specs' `API`
+  constant were still pointing at the pre-reconfiguration ports (3000/4001) from before the `pnpm
+  dev` port change — all e2e tests would have failed to even connect until this was caught
 - [ ] Performance/load tests (k6)
 
 ### Code Quality (REVIEW.md §4)

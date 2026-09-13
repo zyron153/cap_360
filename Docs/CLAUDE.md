@@ -35,9 +35,11 @@ aspirational designs, several written for the pre-rebrand client.
 ## Per-module detail
 
 `modules/M1`…`M10` — one file per module, each with an "Implementation status" note at the top.
-Built: M1 Appointments, M2 Patient CRM, M6 Billing/Financeiro, M7 Clinical Records, M8 Staff.
-Partial backend: M10 Analytics (appointment/attendance/plan-mix metrics real, exports and
-materialised views not). UI mockup only, no backend: M3 WhatsApp, M5 Exams, M9 Home Visits.
+Built: M1 Appointments, M2 Patient CRM, M4 Health Plans (subscribe/renew/coverage/expiry — no
+membership roster or automatic renewal, both explicit scope decisions), M6 Billing/Financeiro, M7
+Clinical Records, M8 Staff. Partial backend: M10 Analytics (appointment/attendance/plan-mix metrics
+real, exports and materialised views not). UI mockup only, no backend: M3 WhatsApp, M5 Exams, M9
+Home Visits.
 
 ## Working notes
 
