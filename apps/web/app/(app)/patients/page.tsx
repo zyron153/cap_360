@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
+import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Field } from "../../../components/ui/field";
@@ -14,6 +14,7 @@ import { useDebouncedValue } from "../../../lib/use-debounced-value";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
 import type { Patient, PaginatedResponse } from "@cap/types";
+import { PLAN_STATUS_META, planStatus } from "../health-plans/status";
 
 // ── API ────────────────────────────────────────────────────────
 
@@ -238,6 +239,17 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
     onError: (e: Error) => { setErr(e.message); addMessage("Error", e.message); },
   });
 
+  const renewMutation = useMutation({
+    mutationFn: () => fetch(`/api/health-plans/${patient.healthPlanId}/renew`, { method: "POST" })
+      .then(async r => { if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao renovar plano"); } return r.json(); }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["health-plan", patient.healthPlanId] });
+      queryClient.invalidateQueries({ queryKey: ["health-plans"] });
+      addMessage("Success", "Plano renovado com sucesso!");
+    },
+    onError: (e: Error) => addMessage("Error", e.message),
+  });
+
   const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)]";
 
   return (
@@ -256,8 +268,8 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
               <div className="bg-brand-50 border border-brand-100 rounded-[12px] p-4 flex flex-col gap-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-[0.07em] text-brand-600">Plano Ativo</span>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${currentPlan.active ? "bg-emerald-100 text-emerald-700" : "bg-dim-100 text-dim-500"}`}>
-                    {currentPlan.active ? "Ativo" : "Inativo"}
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${PLAN_STATUS_META[planStatus(currentPlan)].cls}`}>
+                    {PLAN_STATUS_META[planStatus(currentPlan)].label}
                   </span>
                 </div>
                 <p className="text-[15px] font-bold text-dim-900">{currentPlan.product.name}</p>
@@ -299,6 +311,13 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
                 </div>
               ) : (
                 <div className="flex gap-2">
+                  {planStatus(currentPlan) !== "active" && (
+                    <button onClick={() => renewMutation.mutate()} disabled={renewMutation.isPending}
+                      className="flex items-center justify-center gap-1.5 flex-1 text-[12px] font-semibold py-2 rounded-[10px] border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-50">
+                      <RefreshCw className={`w-3.5 h-3.5 ${renewMutation.isPending ? "animate-spin" : ""}`} />
+                      {renewMutation.isPending ? "A renovar…" : "Renovar"}
+                    </button>
+                  )}
                   <button onClick={() => setMode("edit")}
                     className="flex-1 text-[12px] font-semibold py-2 rounded-[10px] bg-brand-700 hover:bg-brand-800 text-white transition-colors">
                     Alterar Plano
