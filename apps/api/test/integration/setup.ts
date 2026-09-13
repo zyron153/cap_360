@@ -3,7 +3,6 @@ import { INestApplication, Logger } from "@nestjs/common";
 import cookieParser from "cookie-parser";
 import { AppModule } from "../../src/app.module";
 import { HttpExceptionFilter } from "../../src/common/filters/http-exception.filter";
-import { ZodValidationPipe } from "../../src/common/pipes/zod-validation.pipe";
 
 /** Bootstraps the real, fully-wired app (same pipes/filters/prefix as main.ts) against the real
  * dev Postgres + Redis from apps/api/.env — these tests exercise actual HTTP + DB behavior, not
@@ -24,7 +23,9 @@ export async function createTestApp({ authBypass = true }: { authBypass?: boolea
   const app = moduleRef.createNestApplication({ logger: false as unknown as Logger });
   app.use(cookieParser());
   app.setGlobalPrefix("v1");
-  app.useGlobalPipes(new ZodValidationPipe());
+  // No global ZodValidationPipe — same as main.ts, validation is per-route (see that file's
+  // comment): a schema-less instance here is a no-op that only gave false confidence, and as of
+  // the pipe's schema arg becoming required, it doesn't even construct.
   app.useGlobalFilters(new HttpExceptionFilter());
   await app.init();
   return app;
