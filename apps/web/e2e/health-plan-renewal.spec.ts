@@ -76,8 +76,9 @@ test("the Planos tab lists the plan and lets it be filtered and renewed from the
   const row = page.locator("tr", { hasText: planNumber });
   await expect(row).toBeVisible({ timeout: 10_000 });
 
-  // The first spec already renewed this same plan, so it should show as active with no
-  // quick-renew action left in the row (only the "Ver" link to its detail page).
+  // The first spec already renewed this same plan, so it should show as active — but renewal is
+  // a manual, staff-triggered action available at any time, not gated on status, so the quick
+  // "Renovar" action stays in the row regardless.
   await expect(row.getByText("Ativo", { exact: true })).toBeVisible();
-  await expect(row.getByRole("button", { name: "Renovar" })).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Renovar" })).toBeVisible();
 });

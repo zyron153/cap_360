@@ -311,13 +311,11 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
                 </div>
               ) : (
                 <div className="flex gap-2">
-                  {planStatus(currentPlan) !== "active" && (
-                    <button onClick={() => renewMutation.mutate()} disabled={renewMutation.isPending}
-                      className="flex items-center justify-center gap-1.5 flex-1 text-[12px] font-semibold py-2 rounded-[10px] border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-50">
-                      <RefreshCw className={`w-3.5 h-3.5 ${renewMutation.isPending ? "animate-spin" : ""}`} />
-                      {renewMutation.isPending ? "A renovar…" : "Renovar"}
-                    </button>
-                  )}
+                  <button onClick={() => renewMutation.mutate()} disabled={renewMutation.isPending}
+                    className="flex items-center justify-center gap-1.5 flex-1 text-[12px] font-semibold py-2 rounded-[10px] border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-50">
+                    <RefreshCw className={`w-3.5 h-3.5 ${renewMutation.isPending ? "animate-spin" : ""}`} />
+                    {renewMutation.isPending ? "A renovar…" : "Renovar"}
+                  </button>
                   <button onClick={() => setMode("edit")}
                     className="flex-1 text-[12px] font-semibold py-2 rounded-[10px] bg-brand-700 hover:bg-brand-800 text-white transition-colors">
                     Alterar Plano

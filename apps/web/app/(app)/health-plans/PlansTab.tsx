@@ -172,7 +172,6 @@ export function PlansTab() {
               ) : filtered.map(plan => {
                 const status = planStatus(plan);
                 const meta = PLAN_STATUS_META[status];
-                const canRenew = status === "expiring" || status === "expired" || status === "inactive";
                 return (
                   <tr key={plan.id} className="hover:bg-dim-50 transition-colors group">
                     <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[12px] text-dim-700">
@@ -200,16 +199,14 @@ export function PlansTab() {
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100">
                       <div className="flex items-center gap-3 justify-end">
-                        {canRenew && (
-                          <button
-                            onClick={() => { setRenewingId(plan.id); renewMutation.mutate(plan.id); }}
-                            disabled={renewMutation.isPending && renewingId === plan.id}
-                            className="flex items-center gap-1 text-[11px] font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50 transition-colors"
-                          >
-                            <RefreshCw className={`w-3 h-3 ${renewMutation.isPending && renewingId === plan.id ? "animate-spin" : ""}`} />
-                            Renovar
-                          </button>
-                        )}
+                        <button
+                          onClick={() => { setRenewingId(plan.id); renewMutation.mutate(plan.id); }}
+                          disabled={renewMutation.isPending && renewingId === plan.id}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50 transition-colors"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${renewMutation.isPending && renewingId === plan.id ? "animate-spin" : ""}`} />
+                          Renovar
+                        </button>
                         <Link
                           href={`/health-plans/${plan.id}`}
                           className="flex items-center gap-0.5 text-[11px] font-semibold text-dim-500 hover:text-dim-800 opacity-0 group-hover:opacity-100 transition-opacity"

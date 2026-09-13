@@ -87,7 +87,9 @@ export function HealthPlanDetailBody({ id }: { id: string }) {
 
   const status = planStatus(plan);
   const meta = PLAN_STATUS_META[status];
-  const canRenew = status !== "active";
+  // Renewal is a manual, staff-triggered action — always offered, not gated on the computed
+  // status. A plan with no endDate (never "expiring") or one renewed well ahead of its expiry
+  // must still be renewable on demand; the backend itself has no such restriction either.
 
   return (
     <div className="flex flex-col gap-5">
@@ -101,7 +103,7 @@ export function HealthPlanDetailBody({ id }: { id: string }) {
             <p className="font-mono text-[12px] text-dim-500 mt-0.5">{plan.planNumber}</p>
           </div>
 
-          {canRenew && !renewConfirm && (
+          {!renewConfirm && (
             <button
               onClick={() => setRenewConfirm(true)}
               className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
