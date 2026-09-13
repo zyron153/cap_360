@@ -581,6 +581,10 @@ model HealthPlanProduct {
   monthlyFee      Decimal  @db.Decimal(10, 2)
   maxMembers      Int?
   coverageRules   Json?
+  /// Billing/renewal cycle length in months (1 = monthly, 12 = annual, etc.) — used to compute a
+  /// plan's new endDate on renewal. Defaults to 1 so every product predating this field renews
+  /// monthly, matching monthlyFee's existing cadence.
+  durationMonths  Int      @default(1)
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

@@ -1,13 +1,24 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { Prisma } from "@cap/database";
 import { HealthPlansRepository } from "./health-plans.repository";
 import { StaffRepository } from "../staff/staff.repository";
 import { JwtUser } from "../../common/decorators/current-user.decorator";
+import { RequestContext } from "../../common/context/request-context";
 import {
   CreateHealthPlanProductDto,
   UpdateHealthPlanProductDto,
   CreateHealthPlanDto,
 } from "@cap/types";
+
+/** UTC-midnight-safe month addition for an `@db.Date` column — mirrors the rationale behind
+ * appointments.service.ts's parseLocalDate and notifications.processor.ts's todayUtc: a bare
+ * calendar date must be moved in whole calendar months without drifting across a local-timezone
+ * boundary (Cabo Verde is UTC-1). */
+function addMonthsUtc(date: Date, months: number): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, date.getUTCDate()));
+}
+
+type PlanWithHolder<T> = T & { holderPatientId: string | null };
 
 @Injectable()
 export class HealthPlansService {
@@ -58,9 +69,9 @@ export class HealthPlansService {
     if (user.roles.includes("corporate_hr")) {
       const ownCompanyId = await this.resolveOwnCompanyId(user.sub);
       if (!ownCompanyId) return []; // no company assigned yet — nothing to show, not everything
-      return this.repo.findAllPlans(ownCompanyId);
+      return this.attachHolderNames(await this.repo.findAllPlans(ownCompanyId));
     }
-    return this.repo.findAllPlans(companyId);
+    return this.attachHolderNames(await this.repo.findAllPlans(companyId));
   }
 
   async findPlanById(id: string, user: JwtUser) {
@@ -76,7 +87,26 @@ export class HealthPlansService {
       }
     }
 
-    return plan;
+    return this.attachHolderName(plan);
+  }
+
+  /** Only touches plans that actually have a holderPatientId, and issues at most one batched
+   * lookup — never adds a `holderPatientName` key to a plan that has none, so existing callers
+   * asserting the plain repo shape (e.g. company-only plans) see no shape change at all. */
+  private async attachHolderNames<T extends PlanWithHolder<unknown>>(plans: T[]): Promise<T[]> {
+    const ids = [...new Set(plans.map((p) => p.holderPatientId).filter((id): id is string => !!id))];
+    if (ids.length === 0) return plans;
+    const patients = await this.repo.findPatientNamesByIds(ids);
+    const nameById = new Map(patients.map((p) => [p.id, p.fullName]));
+    return plans.map((p) =>
+      p.holderPatientId ? { ...p, holderPatientName: nameById.get(p.holderPatientId) ?? null } : p
+    );
+  }
+
+  private async attachHolderName<T extends PlanWithHolder<unknown>>(plan: T): Promise<T> {
+    if (!plan.holderPatientId) return plan;
+    const [patient] = await this.repo.findPatientNamesByIds([plan.holderPatientId]);
+    return { ...plan, holderPatientName: patient?.fullName ?? null };
   }
 
   async createPlan(dto: CreateHealthPlanDto) {
@@ -99,6 +129,35 @@ export class HealthPlansService {
       startDate: new Date(dto.startDate),
       endDate: dto.endDate ? new Date(dto.endDate) : undefined,
     });
+  }
+
+  /** Manually staff-triggered renewal (no scheduled auto-renew job) — extends endDate by the
+   * product's own durationMonths, and reactivates a lapsed plan. Renewing from whichever is later,
+   * the plan's current endDate or today, so renewing early (before expiry) stacks onto the
+   * remaining term instead of shortening it, while renewing a plan that's already lapsed starts
+   * the new term from today rather than compounding onto a stale past date. */
+  async renew(id: string) {
+    const plan = await this.repo.findPlanById(id);
+    if (!plan) throw new NotFoundException(`Health plan ${id} not found`);
+    if (!plan.product.active) {
+      throw new BadRequestException(
+        `Cannot renew — product "${plan.product.name}" has been deactivated`
+      );
+    }
+
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    const base = plan.endDate && plan.endDate > todayUtc ? plan.endDate : todayUtc;
+    const newEndDate = addMonthsUtc(base, plan.product.durationMonths);
+
+    // The generic AuditInterceptor already logs "POST health-plans/:id/renew" — this diff adds
+    // the semantic before/after, same mechanism as BillingService.cancel's audit diff.
+    RequestContext.setAuditDiff(
+      { endDate: plan.endDate, active: plan.active },
+      { endDate: newEndDate, active: true }
+    );
+
+    return this.repo.updatePlan(id, { endDate: newEndDate, active: true });
   }
 
   private async resolveOwnCompanyId(staffId: string): Promise<string | undefined> {

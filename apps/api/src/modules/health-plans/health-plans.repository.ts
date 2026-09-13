@@ -40,7 +40,9 @@ export class HealthPlansRepository {
     createdAt: true,
     holderPatientId: true,
     companyId: true,
-    product: { select: { id: true, name: true, code: true, monthlyFee: true, active: true } },
+    product: {
+      select: { id: true, name: true, code: true, monthlyFee: true, active: true, durationMonths: true },
+    },
     company: { select: { id: true, name: true } },
   } as const;
 
@@ -63,6 +65,20 @@ export class HealthPlansRepository {
     return this.prisma.healthPlan.create({ data, include: { product: true, company: true } });
   }
 
+  updatePlan(id: string, data: Prisma.HealthPlanUpdateInput) {
+    return this.prisma.healthPlan.update({ where: { id }, data, select: this.planSelect });
+  }
+
+  /** holderPatientId (see note on findExpiringBetween below) has no Prisma @relation, so a plan's
+   * holder name can't come back via `include` — batched separately here instead of N+1-querying
+   * per plan. Only ever called with the non-empty, deduplicated id list a caller already filtered. */
+  findPatientNamesByIds(ids: string[]) {
+    return this.prisma.patient.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, fullName: true },
+    });
+  }
+
   /** Race-safe plan-number generation, mirroring BillingRepository.nextInvoiceNumber's advisory
    * -lock pattern exactly — a client-computed "count of existing plans + 1" (the previous approach)
    * can collide under concurrent submissions and surface as a raw 500 on the unique constraint.
@@ -75,7 +91,11 @@ export class HealthPlansRepository {
   async nextPlanNumber(productCode: string, year: number): Promise<string> {
     const NAMESPACE = 8781; // arbitrary fixed first key — just needs to differ from other lock users
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${NAMESPACE}, ${year})`;
+      // Explicit ::int casts matter: Prisma's pg driver binds plain numeric placeholders as
+      // bigint, and Postgres has no pg_advisory_xact_lock(bigint, bigint) overload — only the
+      // single-arg bigint form and this two-arg int form — so the uncast call 42883s in real
+      // Postgres despite type-checking fine and passing every (fully-mocked) unit test.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${NAMESPACE}::int, ${year}::int)`;
       const result = await tx.$queryRaw<[{ next_seq: bigint }]>`
         SELECT (SELECT COUNT(*) FROM health_plans hp
                 JOIN health_plan_products hpp ON hpp.id = hp."productId"

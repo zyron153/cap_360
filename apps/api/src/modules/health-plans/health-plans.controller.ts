@@ -91,4 +91,10 @@ export class HealthPlansController {
   ) {
     return this.service.createPlan(dto);
   }
+
+  @Post(":id/renew")
+  @Roles("admin", "receptionist")
+  renewPlan(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.renew(id);
+  }
 }

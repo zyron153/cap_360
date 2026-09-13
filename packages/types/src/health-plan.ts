@@ -9,6 +9,8 @@ export const CreateHealthPlanProductSchema = z.object({
   monthlyFee:     z.number().positive(),
   maxMembers:     z.number().int().positive().optional(),
   coverageRules:  z.record(z.unknown()).optional(),
+  // Renewal cycle length in months (1 = monthly, 12 = annual). Omitted = server default of 1.
+  durationMonths: z.number().int().positive().max(60).optional(),
 });
 
 export const UpdateHealthPlanProductSchema = CreateHealthPlanProductSchema.partial();
