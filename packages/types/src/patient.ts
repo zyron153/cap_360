@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { caboVerdePhoneSchema, dateOfBirthSchema, nifSchema } from "./common";
+import type { ActiveHealthPlanSummary } from "./health-plan";
 
 export const CreatePatientSchema = z.object({
   fullName: z.string().min(2).max(150),
@@ -12,7 +13,6 @@ export const CreatePatientSchema = z.object({
   emergencyContactName: z.string().max(150).optional(),
   emergencyContactPhone: z.string().max(30).optional(),
   consentGiven: z.boolean(),
-  healthPlanId: z.string().uuid().optional(),
 });
 export type CreatePatientDto = z.infer<typeof CreatePatientSchema>;
 
@@ -33,7 +33,9 @@ export interface Patient {
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
   consentGiven: boolean;
-  healthPlanId?: string | null;
+  // Replaces the old healthPlanId FK — a patient's plan comes from HealthPlanMember now, and can
+  // legitimately have no single "the" plan pointer (a plan is looked up, not stored on Patient).
+  activeHealthPlan?: ActiveHealthPlanSummary | null;
   deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;

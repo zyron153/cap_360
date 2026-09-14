@@ -212,9 +212,12 @@ export class NotificationsProcessor {
       select: {
         planNumber: true,
         endDate: true,
-        holderPatientId: true,
         product: { select: { name: true } },
         company: { select: { name: true, email: true } },
+        members: {
+          where: { removedAt: null },
+          select: { patient: { select: { fullName: true, phone: true, consentGiven: true } } },
+        },
       },
     });
     if (plans.length === 0) return;
@@ -225,20 +228,20 @@ export class NotificationsProcessor {
     for (const plan of plans) {
       const daysLeft = Math.round((plan.endDate!.getTime() - todayUtc.getTime()) / 86_400_000);
 
-      if (plan.holderPatientId) {
-        if (!wa?.phoneNumberId || !wa?.accessToken) continue;
-        const patient = await this.prisma.patient.findUnique({
-          where: { id: plan.holderPatientId },
-          select: { fullName: true, phone: true, consentGiven: true },
-        });
-        if (!patient?.phone || !patient.consentGiven) continue;
-        await this.sendWhatsApp(
-          wa,
-          patient.phone,
-          `Olá ${patient.fullName}, o seu plano de saúde ${plan.product.name} expira em ${daysLeft} dias. Contacte-nos para renovar.`,
-        );
-      } else if (plan.company?.email) {
-        if (!smtp?.host) continue;
+      // A corporate plan can have both a company AND member patients — both branches can fire
+      // for the same plan now, unlike the old holder-XOR-company single-pointer model.
+      if (wa?.phoneNumberId && wa?.accessToken) {
+        for (const { patient } of plan.members) {
+          if (!patient.phone || !patient.consentGiven) continue;
+          await this.sendWhatsApp(
+            wa,
+            patient.phone,
+            `Olá ${patient.fullName}, o seu plano de saúde ${plan.product.name} expira em ${daysLeft} dias. Contacte-nos para renovar.`,
+          );
+        }
+      }
+
+      if (plan.company?.email && smtp?.host) {
         await this.createTransport(smtp).sendMail({
           from: this.from(smtp),
           to: plan.company.email,

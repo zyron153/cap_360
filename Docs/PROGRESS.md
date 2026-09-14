@@ -1,55 +1,75 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-12.
+> Snapshot overwritten each session. Última atualização: 2026-09-14.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
 
-- **M4 Health Plan Management — renovação manual + páginas dedicadas de lista/detalhe.** Decisão de
-  âmbito tomada com o utilizador antes de implementar (via Sherlock me): dos itens ainda por fazer
-  no TODO.md, ficaram para esta sessão a renovação (**endpoint manual**, não um job automático) e as
-  páginas dedicadas; o roster de membros (`POST /health-plans/:id/members`) ficou explicitamente
-  fora de âmbito.
-  - `POST /health-plans/:id/renew` (admin, receptionist) — estende `endDate` pelo novo campo
-    `HealthPlanProduct.durationMonths` (1/3/6/12 meses, `@default(1)` para não quebrar produtos já
-    existentes), a partir do que for mais tarde entre o `endDate` atual do plano e hoje, e reativa
-    um plano caducado (`active: false → true`). `400` se o produto já estiver desativado. Diff de
-    auditoria antes/depois via `RequestContext.setAuditDiff`, mesmo mecanismo do `cancel()` de
-    faturas.
-  - `GET /health-plans` e `GET /health-plans/:id` passam a incluir `holderPatientName` (lookup
-    batched, `HealthPlansRepository.findPatientNamesByIds`) quando o plano tem titular — necessário
-    para a lista mostrar quem é o titular sem N+1 queries; nunca aparece num plano sem titular.
-  - Frontend: `/health-plans` passou a ter tabs (**Produtos**, a página anterior, inalterada;
-    **Planos**, nova — todas as instâncias, pesquisa + filtro por estado [Ativo/A Expirar/
-    Expirado/Inativo, calculado no cliente a partir de `active`+`endDate`], ação rápida "Renovar")
-    e uma nova `/health-plans/[id]` (mesmo padrão de `billing/[id]`/`InvoiceDetailBody` — wrapper
-    fino + corpo partilhado) com a mesma ação de renovação. Ação "Renovar" também adicionada ao
-    `PlanModal` do perfil do paciente, e o badge de plano no perfil passou a ligar para a nova
-    página de detalhe — as páginas novas ficam alcançáveis a partir de todas as superfícies
-    existentes de gestão de planos, não só pela sidebar.
-  - **Bug de produção encontrado e corrigido**: `HealthPlansRepository.nextPlanNumber`'s
-    `pg_advisory_xact_lock(${NAMESPACE}, ${year})` (sem cast explícito) dá 42883 contra Postgres
-    real — o driver do Prisma faz bind de números simples como `bigint`, e não existe overload de
-    dois argumentos `bigint` (só a versão de um argumento `bigint`, ou a de dois argumentos `int`).
-    Isto significa que **qualquer** criação de plano sem `planNumber` fornecido pelo cliente estava
-    partida em produção — invisível porque a suite unitária mocka o repositório por completo.
-    Corrigido com `::int` explícito em ambos os argumentos. Só foi apanhado porque este é o
-    primeiro teste de integração a exercitar `createPlan()` sem `planNumber` contra uma BD real.
-  - **Segundo bug encontrado, mais grave**: toda a suite de testes de integração estava partida —
-    `test/integration/setup.ts` ainda chamava `app.useGlobalPipes(new ZodValidationPipe())` sem
-    schema, um resquício de antes da correção da REVIEW.md §4.3 que tornou o argumento `schema`
-    obrigatório (o `main.ts` real já tinha sido atualizado na altura; este ficheiro de teste não).
-    O construtor passou a rebentar, falhando todos os specs de integração antes de correr um único
-    teste — nenhum tinha corrido com sucesso desde essa correção. Removida a linha morta, igual ao
-    `main.ts`.
-  - Testes: 442 testes unitários (27 suites, +15 face aos 427 anteriores — 5 de `renew`, 3 de
-    enriquecimento com `holderPatientName`, 7 pré-existentes do módulo revalidados), novo
-    `health-plan-renewal.integration-spec.ts` (3 testes — agora 5 specs / 13 testes de integração,
-    todos a passar depois da correção do `setup.ts` acima), novo `health-plan-renewal.spec.ts` e2e
-    (2 testes — agora 8 specs / 17 testes e2e). Tudo verificado ao vivo contra a dev DB e no browser
-    (Playwright), incluindo o próprio fluxo de renovação a mudar o badge de estado em tempo real.
-  - Docs atualizados: `TODO.md` (M4, secção Testing), `modules/M4-health-plan-management.md`
-    (v1.2), `API-SPEC.md` §4, `DATABASE-SCHEMA.md` §4.2/4.3, `FRONTEND-ROUTES.md`.
+- **M4 Health Plan Management — campo Seguradora nos produtos.** Pedido rápido de follow-up à
+  sessão anterior (via Sherlock me): ao criar um produto de plano, novo campo obrigatório
+  "Seguradora" (`<select>`), carregado do grupo de parametrização `TIPO_SEGURADORA` (mesmo padrão
+  do campo "Tipo" existente, que já lia `TIPO_PLANO_SAUDE`). Guardado dentro do JSON
+  `coverageRules` (`coverageRules.seguradora`), sem alteração de schema — mas com validação real no
+  backend (`HealthPlansService.createProduct` rejeita com `400` se faltar). Editável depois via o
+  modal "Gerir" do produto (antes só de leitura). Descoberta a meio da implementação: o grupo
+  `TIPO_SEGURADORA` **já existia** na BD de dev, criado manualmente pelo utilizador via
+  Parametrizações (GARANTIA/IMPAR/ALIANÇA) — o seed script foi ajustado para espelhar esses valores
+  reais em vez de um palpite genérico. Decisão explícita do utilizador: este novo campo
+  **substitui** a antiga etiqueta "Seguradora" do modal "Gerir" (que na verdade mostrava
+  `product.company.name`, a ligação real à empresa) — essa ligação `companyId`/`Company` continua a
+  existir no schema para o que já usava, só deixou de aparecer rotulada como "Seguradora" em
+  qualquer sítio da UI de produtos. Verificado ao vivo contra a API real (criar sem seguradora →
+  400; com ela → 201 e persistida; `PATCH` a editar → funciona).
+
+- **M4 Health Plan Management — modelo de membership real, quota de sessões partilhada, botão de
+  renovação consolidado.** Decisão de âmbito tomada com o utilizador antes de implementar (via
+  Sherlock me), em duas rondas de perguntas: membership via **nova tabela de junção**
+  (`health_plan_members`), substituindo por completo `HealthPlan.holderPatientId`; `Patient
+  .healthPlanId` **removido por completo** (sem ponteiro desnormalizado, tudo derivado da
+  membership); **uma pool de sessões partilhada** por plano (não por membro); decremento de sessão
+  **só em `completed`**; renovação **reabastece** as sessões ao total do produto; botão "Renovar"
+  fica **só** na página de detalhe do plano.
+  - Schema: novo modelo `HealthPlanMember` (`healthPlanId`, `patientId`, `addedAt`, `removedAt`
+    nullable para remoção suave); `HealthPlanProduct.sessionsPerCycle` (sessões por ciclo, `null` =
+    ilimitado); `HealthPlan.sessionsRemaining` (contagem regressiva do ciclo atual, semeada/
+    reabastecida a partir do produto). Migração em 3 passos respeitando a convenção `db push` do
+    repo: push aditivo → script de backfill (uniu os dois ponteiros antigos, incluindo um caso real
+    de desincronização nos dados seed) → push destrutivo a remover `holderPatientId`/
+    `Patient.healthPlanId` de vez, já com todo o código migrado a ler só a nova tabela.
+  - Regras de negócio novas em `HealthPlansService`: um paciente só pode ter uma membership ativa
+    de cada vez (409 caso contrário); `HealthPlanProduct.maxMembers` passa a ser realmente aplicado
+    (400 se excedido); remoção é sempre suave (`removedAt`), nunca hard-delete, e é idempotente;
+    `recordSessionUsage` substitui `incrementUsage` — incrementa `usageCount` (tally vitalício) e
+    decrementa `sessionsRemaining` (nunca abaixo de 0, via `updateMany` guardado) em conjunto,
+    chamado sem condição a partir de `AppointmentsService` (antes só disparava se
+    `patient.healthPlanId` estivesse definido). `getActiveCoverage` (usado pelo desconto de
+    faturação) passa a exigir também sessões restantes, não só plano/produto ativos e não expirados.
+  - Novas rotas: `POST /health-plans/:id/members` e `DELETE /health-plans/:id/members/:patientId`
+    (admin, receptionist). `POST /health-plans` deixa de aceitar `holderPatientId` e passa a aceitar
+    `memberPatientIds[]` opcional, criando o plano e associando membros na mesma transação.
+  - Estado "a expirar" no frontend passa de um limiar único de 30 dias para 5 dias **ou** ≤5
+    sessões restantes (o que vier primeiro) — separado da cadência de notificação 30/15/7 dias, que
+    fica inalterada.
+  - Frontend: página de detalhe do plano ganha um cartão **Membros** (listar/adicionar/remover,
+    pesquisa de pacientes com debounce) e um indicador de sessões; a tab Planos troca a coluna
+    "Titular" por "Membros" (+contagem) e ganha uma coluna "Sessões", perdendo a ação rápida
+    "Renovar"; o modal de plano na lista de pacientes perde o botão "Renovar" e ganha um link "Ver
+    Plano" para a página de detalhe; a tab Produtos ganha campos "Sessões por Ciclo"/"Máx. Membros".
+  - Consumidores de backend migrados para a membership: `patients.service.ts` (filtro de plano e
+    listagem), `bff.service.ts` (ecrã do paciente), `analytics.service.ts` (distribuição de plano),
+    `notifications.processor.ts` (lembretes de expiração agora mensageiam todos os membros ativos e,
+    independentemente, a empresa, em vez do modelo titular-XOR-empresa anterior).
+  - Testes: specs unitários de `health-plans.service`, `appointments.service`,
+    `notifications.processor`, `analytics.service` e `patients.service`/`repository` reescritos para
+    o novo modelo; novo `health-plan-members.integration-spec.ts` (add/remove, limite de membros,
+    plano duplicado, reativação após remoção, remoção idempotente, plano inexistente);
+    `health-plan-renewal.integration-spec.ts` estendido com o ciclo de vida completo de sessões
+    (completar consulta → pool esvazia → renovar → pool reabastece); novo
+    `health-plan-members.spec.ts` e2e e `health-plan-renewal.spec.ts` atualizado (sem botão
+    "Renovar" na lista, novo placeholder de pesquisa).
+  - Docs atualizados: `modules/M4-health-plan-management.md` (v1.3), `API-SPEC.md` §4,
+    `DATABASE-SCHEMA.md` §1.1/§4, `modules/M6-billing-invoicing.md` (nota sobre o gate de sessões no
+    desconto).
 
 ## Em curso
 
@@ -62,11 +82,9 @@
 
 ## Próximo
 
-- M4: roster de membros (`POST /health-plans/:id/members`) — precisa de uma tabela de membership
-  nova (`HealthPlan` só liga a um titular via FK direta hoje); ficou fora de âmbito nesta sessão por
-  decisão explícita. Renovação automática/agendada também ficou de fora por decisão (ver
-  `modules/M4-health-plan-management.md` §3.4) — só faz sentido revisitar se o negócio quiser
-  opt-in de renovação automática por plano/produto.
+- M4: self-service portal para `corporate_hr` gerir membros/relatórios de utilização (§4/§5 do
+  módulo) — a membership existe, mas só é gerível via UI/API de admin/receptionist hoje. Renovação
+  automática/agendada continua fora por decisão (ver `modules/M4-health-plan-management.md` §3.4).
 - REVIEW.md Secção 6 (sugestões de redesign) — exercício de design, **não** é tarefa de
   implementação.
 - Trabalho de feature/infra em `TODO.md`: M3 WhatsApp, M5 Exames, M9 Visitas, Fase 4, k8s,

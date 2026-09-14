@@ -194,14 +194,13 @@ describe("PatientsRepository — right to erasure (softDelete)", () => {
     });
   });
 
-  it("keeps gender and healthPlanId untouched — not direct PII, useful for anonymous reporting", async () => {
+  it("keeps gender untouched — not direct PII, useful for anonymous reporting", async () => {
     prisma.patient.update.mockImplementation(({ data }) => Promise.resolve({ id: "p1", ...data }));
 
     await repo.softDelete("p1");
 
     const call = prisma.patient.update.mock.calls[0][0];
     expect(call.data).not.toHaveProperty("gender");
-    expect(call.data).not.toHaveProperty("healthPlanId");
   });
 
   it("never returns nifHash, consistent with every other repository method", async () => {

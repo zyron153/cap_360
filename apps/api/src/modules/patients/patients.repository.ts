@@ -79,9 +79,9 @@ export class PatientsRepository {
     return this.decrypted(patient);
   }
 
-  // Right to erasure: clears direct PII, not just deletedAt. gender/healthPlanId and every related
-  // record (appointments, invoices, notes, documents) are kept — they're not the identity itself,
-  // and billing/clinical history is retained for legal reasons (SECURITY.md).
+  // Right to erasure: clears direct PII, not just deletedAt. gender and every related record
+  // (appointments, invoices, notes, documents, health plan memberships) are kept — they're not
+  // the identity itself, and billing/clinical history is retained for legal reasons (SECURITY.md).
   async softDelete(id: string) {
     const patient = await this.prisma.patient.update({
       where: { id },

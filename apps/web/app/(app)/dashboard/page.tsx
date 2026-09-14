@@ -33,7 +33,7 @@ type RecentPatient = {
   id: string;
   fullName: string | null;
   phone: string | null;
-  healthPlanId: string | null;
+  activeHealthPlan: { id: string; planNumber: string; productName: string } | null;
   createdAt: string;
 };
 
@@ -534,7 +534,7 @@ export default function DashboardPage() {
                 <td className="px-5 py-2.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{p.phone ?? "—"}</td>
                 <td className="px-5 py-2.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{format(new Date(p.createdAt), "dd MMM yyyy", { locale: pt })}</td>
                 <td className="px-5 py-2.5 border-b border-dim-100">
-                  {p.healthPlanId
+                  {p.activeHealthPlan
                     ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-[0.04em] bg-blue-100 text-blue-700">Com Plano</span>
                     : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-[0.04em] bg-dim-100 text-dim-600">Particular</span>}
                 </td>

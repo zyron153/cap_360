@@ -130,7 +130,6 @@ model Patient {
   emergencyContactPhone String?   @db.VarChar(30)
   consentGiven          Boolean   @default(false)
   consentGivenAt        DateTime?
-  healthPlanId          String?
   deletedAt             DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
@@ -142,10 +141,11 @@ model Patient {
   communicationLogs CommunicationLog[]
   invoices          Invoice[]
   waitlistEntries   Waitlist[]
-  healthPlan        HealthPlan?        @relation(fields: [healthPlanId], references: [id])
   clinicalNotes     ClinicalNote[]
   prescriptions     Prescription[]
   referrals         Referral[]
+  /// Every plan a patient has ever been (or currently is) covered by — see HealthPlanMember.
+  healthPlanMemberships HealthPlanMember[]
 
   @@unique([phone])
   @@unique([nifHash])
@@ -585,6 +585,10 @@ model HealthPlanProduct {
   /// plan's new endDate on renewal. Defaults to 1 so every product predating this field renews
   /// monthly, matching monthlyFee's existing cadence.
   durationMonths  Int      @default(1)
+  /// Sessions/appointments included per renewal cycle, shared across every member of a plan on
+  /// this product (a 4-member family plan with 12 sessions shares one pool of 12, not 12 each).
+  /// Null = unlimited — no session-based cap or expiry for plans on this product.
+  sessionsPerCycle Int?
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -599,24 +603,53 @@ model HealthPlanProduct {
 model HealthPlan {
   id              String    @id @default(uuid())
   productId       String
-  holderPatientId String?
   companyId       String?
   planNumber      String    @unique @db.VarChar(50)
   startDate       DateTime  @db.Date
   endDate         DateTime? @db.Date
   active          Boolean   @default(true)
+  /// Lifetime tally, never reset — distinct from sessionsRemaining below, which is the live
+  /// countdown for the current cycle and IS reset on renewal.
   usageCount      Int       @default(0)
+  /// Live countdown of sessions left in the current cycle, shared across all members. Seeded from
+  /// product.sessionsPerCycle at creation, refilled to it on renew(). Null = unlimited.
+  sessionsRemaining Int?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   product  HealthPlanProduct @relation(fields: [productId], references: [id])
   company  Company?          @relation(fields: [companyId], references: [id])
-  patients Patient[]
+  /// Every patient covered by this plan — see HealthPlanMember.
+  members  HealthPlanMember[]
   invoices Invoice[]
 
-  @@index([holderPatientId])
   @@index([companyId])
   @@map("health_plans")
+}
+
+/// Every patient covered by a plan is a row here — there is no special-cased "holder". A family
+/// plan of four is four rows; a lone individual is one row.
+model HealthPlanMember {
+  id           String    @id @default(uuid())
+  healthPlanId String
+  patientId    String
+  addedAt      DateTime  @default(now())
+  /// Soft removal, not a hard delete — a past membership must stay explainable (e.g. why an old
+  /// invoice carried a plan discount), mirroring this app's soft-delete/deactivate posture
+  /// everywhere else (patients, health plan products, invoice cancellation).
+  removedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  healthPlan HealthPlan @relation(fields: [healthPlanId], references: [id], onDelete: Cascade)
+  patient    Patient    @relation(fields: [patientId], references: [id])
+
+  /// One row per (plan, patient) pair — re-adding a previously-removed patient revives this same
+  /// row (removedAt: null) via upsert, rather than inserting a second one.
+  @@unique([healthPlanId, patientId])
+  @@index([patientId, removedAt])
+  @@index([healthPlanId, removedAt])
+  @@map("health_plan_members")
 }
 
 // ─── Billing ─────────────────────────────────────────────────────────────────

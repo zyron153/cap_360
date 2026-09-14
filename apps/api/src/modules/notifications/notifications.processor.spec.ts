@@ -133,38 +133,63 @@ describe("NotificationsProcessor — health-plan-expiring job", () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 
-  it("WhatsApps the holder patient when consent is given and the integration is configured", async () => {
+  it("WhatsApps every active member when consent is given and the integration is configured", async () => {
     prisma.setting.findUnique.mockResolvedValue({ value: WA_CONFIGURED });
     prisma.healthPlan.findMany.mockResolvedValue([
-      { planNumber: "PLN-1", endDate: new Date(), holderPatientId: "p1", product: { name: "Plano Individual" }, company: null },
+      {
+        planNumber: "PLN-1", endDate: new Date(), product: { name: "Plano Individual" }, company: null,
+        members: [{ patient: { fullName: "Ana Costa", phone: "+2389912345", consentGiven: true } }],
+      },
     ]);
-    prisma.patient.findUnique.mockResolvedValue({ fullName: "Ana Costa", phone: "+2389912345", consentGiven: true });
 
     await processor.handleHealthPlanExpiring({} as never);
 
     expect(fetchSpy).toHaveBeenCalled();
   });
 
-  it("does not message a holder patient who withdrew consent", async () => {
+  it("does not message a member who withdrew consent", async () => {
     prisma.setting.findUnique.mockResolvedValue({ value: WA_CONFIGURED });
     prisma.healthPlan.findMany.mockResolvedValue([
-      { planNumber: "PLN-1", endDate: new Date(), holderPatientId: "p1", product: { name: "Plano Individual" }, company: null },
+      {
+        planNumber: "PLN-1", endDate: new Date(), product: { name: "Plano Individual" }, company: null,
+        members: [{ patient: { fullName: "Ana Costa", phone: "+2389912345", consentGiven: false } }],
+      },
     ]);
-    prisma.patient.findUnique.mockResolvedValue({ fullName: "Ana Costa", phone: "+2389912345", consentGiven: false });
 
     await processor.handleHealthPlanExpiring({} as never);
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("emails the company contact for a corporate plan (no holder patient)", async () => {
+  it("emails the company contact for a corporate plan with no members", async () => {
     prisma.setting.findUnique.mockResolvedValue({ value: SMTP_CONFIGURED });
     prisma.healthPlan.findMany.mockResolvedValue([
-      { planNumber: "PLN-2", endDate: new Date(), holderPatientId: null, product: { name: "Corporativo Total" }, company: { name: "IMPAR", email: "rh@impar.cv" } },
+      {
+        planNumber: "PLN-2", endDate: new Date(), product: { name: "Corporativo Total" },
+        company: { name: "IMPAR", email: "rh@impar.cv" }, members: [],
+      },
     ]);
 
     await processor.handleHealthPlanExpiring({} as never);
 
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: "rh@impar.cv" }));
+  });
+
+  it("both WhatsApps members AND emails the company for a plan that has both", async () => {
+    prisma.setting.findUnique.mockImplementation((args: { where: { key: string } }) =>
+      Promise.resolve({ value: args.where.key === "integration_whatsapp" ? WA_CONFIGURED : SMTP_CONFIGURED })
+    );
+    prisma.healthPlan.findMany.mockResolvedValue([
+      {
+        planNumber: "PLN-3", endDate: new Date(), product: { name: "Corporativo Familiar" },
+        company: { name: "IMPAR", email: "rh@impar.cv" },
+        members: [{ patient: { fullName: "Ana Costa", phone: "+2389912345", consentGiven: true } }],
+      },
+    ]);
+
+    await processor.handleHealthPlanExpiring({} as never);
+
+    expect(fetchSpy).toHaveBeenCalled();
     expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: "rh@impar.cv" }));
   });
 });

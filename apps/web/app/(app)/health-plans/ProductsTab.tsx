@@ -6,6 +6,7 @@ import { Shield, Users, TrendingUp, AlertTriangle, Plus, ChevronRight } from "lu
 import { Modal } from "@/components/ui/modal";
 import { useMessage } from "@/components/ui/message-handler";
 import { Field } from "@/components/ui/field";
+import type { HealthPlanInstance } from "@cap/types";
 
 /* ─── Types ──────────────────────────────────────────────────── */
 
@@ -15,23 +16,14 @@ type PlanProduct = {
   code: string;
   monthlyFee: number;
   durationMonths: number;
+  sessionsPerCycle: number | null;
+  maxMembers: number | null;
   active: boolean;
   company: { id: string; name: string } | null;
-  coverageRules: { type?: string; coverage?: number } | null;
+  coverageRules: { type?: string; coverage?: number; seguradora?: string } | null;
 };
 
-type PlanInstance = {
-  id: string;
-  planNumber: string;
-  startDate: string;
-  endDate: string | null;
-  active: boolean;
-  usageCount: number;
-  holderPatientId: string | null;
-  companyId: string | null;
-  product: { id: string; name: string; code: string; monthlyFee: number; active: boolean };
-  company: { id: string; name: string } | null;
-};
+type PlanInstance = HealthPlanInstance;
 
 /* ─── Constants ──────────────────────────────────────────────── */
 
@@ -67,13 +59,21 @@ const FALLBACK_PLAN_TYPES = [
   { value: "particular", label: "Particular"    },
 ];
 
+const FALLBACK_SEGURADORA_OPTIONS = [
+  { value: "garantia", label: "GARANTIA" },
+  { value: "impar",    label: "IMPAR"    },
+  { value: "alianca",  label: "ALIANÇA"  },
+];
+
 export function ProductsTab() {
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
   const [newOpen, setNewOpen]             = useState(false);
   const [managingProduct, setManagingProduct] = useState<PlanProduct | null>(null);
   const [deactivateConfirm, setDeactivateConfirm] = useState(false);
-  const [form, setForm] = useState({ name: "", code: "", type: "familiar", coverage: "80", monthlyFee: "", durationMonths: "1" });
+  const [editingSeguradora, setEditingSeguradora] = useState(false);
+  const [seguradoraDraft, setSeguradoraDraft] = useState("");
+  const [form, setForm] = useState({ name: "", code: "", type: "familiar", coverage: "80", monthlyFee: "", durationMonths: "1", sessionsPerCycle: "", maxMembers: "", seguradora: "" });
 
   const { data: planTypeParams = [] } = useQuery<{ id: number; valor: string; codigo: string | null }[]>({
     queryKey: ["parametrizacao", "TIPO_PLANO_SAUDE"],
@@ -83,6 +83,21 @@ export function ProductsTab() {
   const planTypeOptions = planTypeParams.length > 0
     ? planTypeParams.map(p => ({ value: p.codigo ?? p.valor, label: p.valor }))
     : FALLBACK_PLAN_TYPES;
+
+  const { data: seguradoraParams = [] } = useQuery<{ id: number; valor: string; codigo: string | null }[]>({
+    queryKey: ["parametrizacao", "TIPO_SEGURADORA"],
+    queryFn: () => fetch("/api/parametrizacao/TIPO_SEGURADORA").then(r => r.json()),
+    staleTime: 120_000,
+  });
+  const seguradoraOptions = seguradoraParams.length > 0
+    ? seguradoraParams.map(p => ({ value: p.codigo ?? p.valor, label: p.valor }))
+    : FALLBACK_SEGURADORA_OPTIONS;
+
+  function seguradoraLabel(value?: string): string | null {
+    if (!value) return null;
+    return seguradoraOptions.find(o => o.value === value)?.label ?? value;
+  }
+
   const [formErr, setFormErr] = useState("");
 
   function set(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
@@ -112,7 +127,7 @@ export function ProductsTab() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      if (!form.name.trim() || !form.code.trim() || !form.monthlyFee) throw new Error("Preencha todos os campos obrigatórios");
+      if (!form.name.trim() || !form.code.trim() || !form.monthlyFee || !form.seguradora) throw new Error("Preencha todos os campos obrigatórios");
       const codeClean = form.code.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
       if (!codeClean) throw new Error("Código inválido — use apenas letras, números e hífens");
       const res = await fetch("/api/health-plans/products", {
@@ -123,7 +138,9 @@ export function ProductsTab() {
           code: codeClean,
           monthlyFee: Number(form.monthlyFee),
           durationMonths: Number(form.durationMonths) || 1,
-          coverageRules: { type: form.type, coverage: Number(form.coverage) || 0 },
+          coverageRules: { type: form.type, coverage: Number(form.coverage) || 0, seguradora: form.seguradora },
+          ...(form.sessionsPerCycle.trim() ? { sessionsPerCycle: Number(form.sessionsPerCycle) } : {}),
+          ...(form.maxMembers.trim() ? { maxMembers: Number(form.maxMembers) } : {}),
         }),
       });
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao criar plano"); }
@@ -132,12 +149,32 @@ export function ProductsTab() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["health-plan-products"] });
       queryClient.invalidateQueries({ queryKey: ["health-plans"] });
-      setForm({ name: "", code: "", type: "familiar", coverage: "80", monthlyFee: "", durationMonths: "1" });
+      setForm({ name: "", code: "", type: "familiar", coverage: "80", monthlyFee: "", durationMonths: "1", sessionsPerCycle: "", maxMembers: "", seguradora: "" });
       setFormErr("");
       setNewOpen(false);
       addMessage("Success", "Produto de plano criado com sucesso!");
     },
     onError: (e: Error) => { setFormErr(e.message); addMessage("Error", e.message); },
+  });
+
+  const updateSeguradoraMutation = useMutation({
+    mutationFn: async () => {
+      if (!managingProduct) throw new Error("Nenhum produto selecionado");
+      const res = await fetch(`/api/health-plans/products/${managingProduct.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coverageRules: { ...managingProduct.coverageRules, seguradora: seguradoraDraft } }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao atualizar seguradora"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["health-plan-products"] });
+      setManagingProduct((prev) => prev ? { ...prev, coverageRules: { ...prev.coverageRules, seguradora: seguradoraDraft } } : prev);
+      setEditingSeguradora(false);
+      addMessage("Success", "Seguradora atualizada com sucesso!");
+    },
+    onError: (e: Error) => addMessage("Error", e.message),
   });
 
   const deactivateMutation = useMutation({
@@ -157,7 +194,7 @@ export function ProductsTab() {
   const activeInstances = instances.filter(p => p.active);
   const today           = new Date();
 
-  const totalSubscribers = activeInstances.filter(p => !!p.holderPatientId).length;
+  const totalSubscribers = activeInstances.reduce((s, i) => s + i.members.length, 0);
   const totalRevenue     = activeInstances.reduce((s, i) => s + Number(i.product.monthlyFee), 0);
   const expiringCount    = activeInstances.filter(p => {
     if (!p.endDate) return false;
@@ -297,8 +334,8 @@ export function ProductsTab() {
                   <tr key={product.id} className="hover:bg-dim-50 transition-colors group">
                     <td className="px-5 py-3.5 border-b border-dim-100">
                       <span className="text-[13px] font-semibold text-dim-900">{product.name}</span>
-                      {product.company && (
-                        <span className="block text-[11px] text-dim-400 mt-0.5">{product.company.name}</span>
+                      {product.coverageRules?.seguradora && (
+                        <span className="block text-[11px] text-dim-400 mt-0.5">{seguradoraLabel(product.coverageRules.seguradora)}</span>
                       )}
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">{product.code}</td>
@@ -336,7 +373,7 @@ export function ProductsTab() {
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100">
                       <button
-                        onClick={() => { setManagingProduct(product); setDeactivateConfirm(false); }}
+                        onClick={() => { setManagingProduct(product); setDeactivateConfirm(false); setEditingSeguradora(false); }}
                         className="flex items-center gap-0.5 text-[11px] font-semibold text-brand-600 hover:text-brand-700 opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         Gerir <ChevronRight className="w-3 h-3" />
@@ -372,6 +409,12 @@ export function ProductsTab() {
               {planTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
+          <Field label="Seguradora" required>
+            <select value={form.seguradora} onChange={e => set("seguradora", e.target.value)} className={inputCls}>
+              <option value="">Selecionar seguradora…</option>
+              {seguradoraOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
           <Field label="Cobertura (%)">
             <input type="number" value={form.coverage} onChange={e => set("coverage", e.target.value)} min="0" max="100" className={inputCls} />
           </Field>
@@ -383,6 +426,12 @@ export function ProductsTab() {
               {DURATION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
+          <Field label="Sessões por Ciclo" hint="Em branco = ilimitado">
+            <input type="number" value={form.sessionsPerCycle} onChange={e => set("sessionsPerCycle", e.target.value)} placeholder="Ilimitado" min="1" className={inputCls} />
+          </Field>
+          <Field label="Máx. Membros" hint="Em branco = sem limite">
+            <input type="number" value={form.maxMembers} onChange={e => set("maxMembers", e.target.value)} placeholder="Sem limite" min="1" className={inputCls} />
+          </Field>
         </div>
         {formErr && (
           <div className="mx-6 mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-[8px]">
@@ -392,7 +441,7 @@ export function ProductsTab() {
         <div className="px-6 py-4 border-t border-dim-100 flex items-center gap-3">
           <button
             onClick={() => createMutation.mutate()}
-            disabled={createMutation.isPending || !form.name.trim() || !form.code.trim() || !form.monthlyFee}
+            disabled={createMutation.isPending || !form.name.trim() || !form.code.trim() || !form.monthlyFee || !form.seguradora}
             className="bg-brand-700 hover:bg-brand-800 text-white font-semibold px-5 py-2.5 rounded-[10px] text-[13px] transition-colors disabled:opacity-50"
           >
             {createMutation.isPending ? "A guardar…" : "Guardar Produto"}
@@ -405,7 +454,7 @@ export function ProductsTab() {
 
       {/* ── Manage Product Modal ── */}
       {managingProduct && (
-        <Modal open onClose={() => { setManagingProduct(null); setDeactivateConfirm(false); }} title={managingProduct.name} description={managingProduct.code} size="md">
+        <Modal open onClose={() => { setManagingProduct(null); setDeactivateConfirm(false); setEditingSeguradora(false); }} title={managingProduct.name} description={managingProduct.code} size="md">
           <div className="px-6 py-5 flex flex-col gap-4">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
               {([
@@ -415,13 +464,52 @@ export function ProductsTab() {
                 ["Cobertura",      `${managingProduct.coverageRules?.coverage ?? 0}%`],
                 ["Mensalidade",    `${Number(managingProduct.monthlyFee).toLocaleString("pt-CV")} CVE`],
                 ["Ciclo Renovação", DURATION_OPTIONS.find(o => Number(o.value) === managingProduct.durationMonths)?.label ?? `${managingProduct.durationMonths} mês(es)`],
-                ["Seguradora",     managingProduct.company?.name ?? "—"],
+                ["Sessões por Ciclo", managingProduct.sessionsPerCycle == null ? "Ilimitado" : String(managingProduct.sessionsPerCycle)],
+                ["Máx. Membros",   managingProduct.maxMembers == null ? "Sem limite" : String(managingProduct.maxMembers)],
               ] as [string, string][]).map(([label, value]) => (
                 <div key={label}>
                   <dt className="text-[10px] font-bold uppercase tracking-wide text-dim-400">{label}</dt>
                   <dd className="text-[13px] text-dim-900 font-medium mt-0.5">{value}</dd>
                 </div>
               ))}
+              <div>
+                <dt className="text-[10px] font-bold uppercase tracking-wide text-dim-400">Seguradora</dt>
+                {editingSeguradora ? (
+                  <dd className="mt-1 flex items-center gap-1.5">
+                    <select
+                      value={seguradoraDraft}
+                      onChange={e => setSeguradoraDraft(e.target.value)}
+                      className="flex-1 border border-dim-200 rounded-[8px] px-2 py-1 text-[12px] text-dim-900 bg-white focus:outline-none focus:border-brand-500"
+                    >
+                      <option value="">Selecionar…</option>
+                      {seguradoraOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <button
+                      onClick={() => updateSeguradoraMutation.mutate()}
+                      disabled={updateSeguradoraMutation.isPending || !seguradoraDraft}
+                      className="text-[11px] font-semibold px-2 py-1 rounded-[6px] bg-brand-700 hover:bg-brand-800 text-white transition-colors disabled:opacity-50"
+                    >
+                      {updateSeguradoraMutation.isPending ? "…" : "Guardar"}
+                    </button>
+                    <button
+                      onClick={() => setEditingSeguradora(false)}
+                      className="text-[11px] font-semibold px-2 py-1 rounded-[6px] border border-dim-200 text-dim-600 hover:bg-dim-50 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                  </dd>
+                ) : (
+                  <dd className="text-[13px] text-dim-900 font-medium mt-0.5 flex items-center gap-2">
+                    {seguradoraLabel(managingProduct.coverageRules?.seguradora) ?? "—"}
+                    <button
+                      onClick={() => { setSeguradoraDraft(managingProduct.coverageRules?.seguradora ?? ""); setEditingSeguradora(true); }}
+                      className="text-[11px] font-semibold text-brand-600 hover:text-brand-700 transition-colors"
+                    >
+                      Editar
+                    </button>
+                  </dd>
+                )}
+              </div>
             </dl>
 
             {managingProduct.active && (

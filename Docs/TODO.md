@@ -171,7 +171,8 @@ piece of groundwork already laid — ready to be pointed at a real send service.
 - [x] ~~Utilisation counter — `usageCount` column exists, nothing increments it~~ — corrected: `AppointmentsService.updateStatus()`'s completed branch calls `healthPlansService.incrementUsage()`, unit-tested; this line was stale
 - [x] ~~Expiry notification job (30/15/7 days)~~ — corrected: `NotificationsProcessor.handleHealthPlanExpiring()` exists, scheduled daily at 08:00 (`notifications.service.ts`), 4 tests; this line was stale
 - [x] Co-pay/coverage discount — `HealthPlansService.getActiveCoverage()` (active plan+product,
-  unexpired, `coverageRules.coverage` > 0) + `BillingService.applyHealthPlanDiscount()` apply the
+  unexpired, `coverageRules.coverage` > 0, **and now also `sessionsRemaining` not exhausted** — see
+  the membership/sessions item below) + `BillingService.applyHealthPlanDiscount()` apply the
   patient's coverage % as a negative line item on invoice creation and on the appointment-completion
   auto-draft alike; invoice gets linked to that `healthPlanId` when the caller didn't already supply
   one. 14 new unit tests (`billing.service.spec.ts`, `health-plans.service.spec.ts`).
@@ -188,11 +189,40 @@ piece of groundwork already laid — ready to be pointed at a real send service.
   > consequences (a fresh plan-period, implicitly a fresh charge), so staff confirm it rather than
   > it happening silently overnight. "Auto-renew logic" in this file's title now means "the logic
   > that computes a renewal," not "an automatic scheduler."
-- [x] `HealthPlan`/`HealthPlan` list responses now include `holderPatientName` (batched lookup,
-  `HealthPlansRepository.findPatientNamesByIds`) when a plan has a `holderPatientId` — needed once
-  a dedicated list page (below) had to show *who* holds a plan without an N+1 query per row; only
-  added to `findAllPlans`/`findPlanById`, so it never appears on a plan with no holder.
-- [ ] `POST /health-plans/:id/members` / member roster — a `HealthPlan` links to one holder patient directly today, not a membership join table (explicitly out of scope for this pass — see scope decision above)
+- [x] ~~`HealthPlan`/`HealthPlan` list responses now include `holderPatientName`...~~ — superseded
+  (2026-09-13): `holderPatientId`/`holderPatientName` are gone entirely, replaced by a real
+  `members[]` array (see membership item directly below); every plan response now flattens
+  `members[].patient.fullName` into `patientName` per member, still zero extra queries.
+- [x] **Real membership model** (2026-09-13) — new `HealthPlanMember` join table
+  (`healthPlanId`, `patientId`, `addedAt`, `removedAt`) replaces the old `HealthPlan
+  .holderPatientId`/`Patient.healthPlanId` pair entirely (both dropped in a destructive `db push`
+  once every call site was migrated). `POST /health-plans/:id/members` and `DELETE
+  .../members/:patientId` (admin, receptionist); a patient may hold only one active membership at a
+  time (409 otherwise), `HealthPlanProduct.maxMembers` is now actually enforced (400 if exceeded),
+  and removal is soft (`removedAt`) and idempotent. `POST /health-plans` now takes an optional
+  `memberPatientIds[]` instead of `holderPatientId`, creating the plan and its members in one
+  transaction. Also new: `HealthPlanProduct.sessionsPerCycle` / `HealthPlan.sessionsRemaining` — a
+  shared session pool per plan (not per member), decremented once per completed appointment for any
+  member (`HealthPlansService.recordSessionUsage`, replacing the old unconditional
+  `incrementUsage`) and refilled to the product's current `sessionsPerCycle` on renewal. The
+  frontend's "a expirar" threshold now also reacts to ≤5 sessions remaining, not just a 5-day
+  (previously 30-day) date window — separate from the unchanged 30/15/7-day notification cadence.
+  Full rewrite of `health-plans.service.spec.ts`/`.repository.ts`, plus updated
+  `appointments.service.spec.ts`, `notifications.processor.spec.ts`, `analytics.service.spec.ts`,
+  `patients.service.spec.ts`; new `health-plan-members.integration-spec.ts` and
+  `health-plan-members.spec.ts` (e2e); `health-plan-renewal.integration-spec.ts` extended with a
+  full session-lifecycle test.
+- [x] **Seguradora field on products** (2026-09-14) — `POST/PATCH /health-plans/products` now
+  carries `coverageRules.seguradora`, a required insurer tag picked from a `<select>` sourced from
+  parametrização group `TIPO_SEGURADORA` (mirrors the existing "Tipo" field/`TIPO_PLANO_SAUDE`
+  pattern). Enforced server-side (`400` if missing on create) in `HealthPlansService.createProduct`,
+  stored inside the existing untyped `coverageRules` JSON — no schema change. Editable afterward via
+  the product's "Gerir" modal (previously read-only). This label now always means this tag — it
+  **replaces** the old "Seguradora" row in that same modal, which actually displayed the product's
+  real `companyId`/`Company` link; that relation is untouched in the schema/backend, just no longer
+  shown anywhere in the product UI. The `TIPO_SEGURADORA` parametrização group turned out to already
+  exist on the dev DB (created manually by clinic staff — GARANTIA/IMPAR/ALIANÇA); the seed script
+  was updated to match those real values instead of a guessed placeholder set.
 
 ~~Bug found while building the renewal endpoint above (2026-09-12): `HealthPlansRepository
 .nextPlanNumber`'s two-argument advisory lock — `pg_advisory_xact_lock(${NAMESPACE}, ${year})` with
@@ -212,15 +242,19 @@ itself broken (see Testing section) until this same pass, so nothing ever actual
   the first frontend for the `Company` entity/`/companies` API, which existed backend-only until now.
   Not a corporate HR portal (see below) — this is admin-side company-record management only.
 - [x] Dedicated health plans list/detail pages — `/health-plans` is now tabbed (**Produtos**, the
-  pre-existing product-catalogue/KPI page, unchanged; **Planos**, new — every plan instance, with
-  search + status filter pills [Ativo/A Expirar/Expirado/Inativo, computed client-side from
-  `active`+`endDate`] and an inline "Renovar" action) plus a new `/health-plans/[id]` detail page
-  (mirrors `billing/[id]`'s thin-wrapper-around-a-shared-body pattern) showing one plan's full
-  detail with its own "Renovar Plano" action. A "Renovar" action was also added to the pre-existing
-  patient-profile `PlanModal` (`patients/page.tsx`) for a lapsed/expiring plan, and the patient
-  profile's plan badge now links to `/health-plans/[id]`, so the new pages are reachable from every
-  existing plan-management surface, not just the sidebar. New "Ciclo de Renovação" field on the
-  product create form sets `durationMonths` (defaults to monthly if left alone).
+  pre-existing product-catalogue/KPI page, now also showing a real member-count KPI and
+  "Sessões por Ciclo"/"Máx. Membros" fields; **Planos**, new — every plan instance, with search +
+  status filter pills [Ativo/A Expirar/Expirado/Inativo, computed client-side from
+  `active`+`endDate`+`sessionsRemaining`] and a "Membros"/"Sessões" column) plus a new
+  `/health-plans/[id]` detail page (mirrors `billing/[id]`'s thin-wrapper-around-a-shared-body
+  pattern) showing one plan's full detail with its own "Renovar Plano" action **and** a "Membros"
+  card (list, add via debounced patient search, inline two-step remove).
+  > **2026-09-13 update:** the quick "Renovar" action on the Planos list row, and the one
+  > previously added to the patient-profile `PlanModal`, were both **removed** — renewal now lives
+  > only on the plan detail page, by explicit decision (see membership item above). The patient
+  > profile's plan badge still links to `/health-plans/[id]`, and the `PlanModal` gained a "Ver
+  > Plano" link there instead of its own renew button. New "Ciclo de Renovação" field on the
+  > product create form sets `durationMonths` (defaults to monthly if left alone).
 - [ ] Corporate HR self-service portal (Phase 4) — still nothing lets a `corporate_hr` account log in
   and self-serve; Organização doesn't change this, it's an admin tool
 

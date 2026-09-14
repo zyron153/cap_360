@@ -24,7 +24,7 @@ import { PatientBalancePanel } from "./PatientBalancePanel";
 import { usePermissions } from "../../hooks/use-permissions";
 
 interface PatientScreenResponse {
-  patient: Patient & { healthPlan?: { planNumber: string; product: { name: string } } | null };
+  patient: Patient;
   timeline: TimelineEvent[];
 }
 
@@ -101,12 +101,12 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
               </div>
               <h2 className="mt-3 font-display font-bold text-dim-900 text-[17px] leading-tight">{patient.fullName}</h2>
               <p className="text-[12px] text-dim-500 mt-0.5">{age} anos · {genderLabels[patient.gender] ?? patient.gender}</p>
-              {patient.healthPlanId ? (
+              {patient.activeHealthPlan ? (
                 <Link
-                  href={`/health-plans/${patient.healthPlanId}`}
+                  href={`/health-plans/${patient.activeHealthPlan.id}`}
                   className="inline-block mt-2 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors"
                 >
-                  {patient.healthPlan ? patient.healthPlan.product.name : "Plano Ativo"}
+                  {patient.activeHealthPlan.productName}
                 </Link>
               ) : null}
             </div>

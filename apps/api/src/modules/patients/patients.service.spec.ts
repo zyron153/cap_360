@@ -3,6 +3,7 @@ import { ConflictException, BadRequestException } from "@nestjs/common";
 import { Prisma } from "@cap/database";
 import { PatientsService } from "./patients.service";
 import { PatientsRepository } from "./patients.repository";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import { RequestContext } from "../../common/context/request-context";
 
 const repo = {
@@ -18,6 +19,7 @@ const repo = {
   findNotesForPatient: jest.fn(),
   findTimelineEvents: jest.fn(),
 };
+const healthPlansMock = { findActivePlanSummaries: jest.fn() };
 
 const BASE_DTO = {
   fullName: "Ana Costa",
@@ -35,10 +37,12 @@ describe("PatientsService", () => {
       providers: [
         PatientsService,
         { provide: PatientsRepository, useValue: repo },
+        { provide: HealthPlansService, useValue: healthPlansMock },
       ],
     }).compile();
     service = mod.get(PatientsService);
     jest.clearAllMocks();
+    healthPlansMock.findActivePlanSummaries.mockResolvedValue(new Map());
   });
 
   describe("phone normalisation", () => {

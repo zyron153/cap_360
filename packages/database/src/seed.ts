@@ -127,8 +127,8 @@ async function main() {
 
   // ─── Health Plan Products ───────────────────────────────────────────────────
   await Promise.all([
-    prisma.healthPlanProduct.upsert({ where: { code: "IMPAR-FAM-001" }, update: {}, create: { name: "Plano Familiar Ouro",        code: "IMPAR-FAM-001", companyId: compImpar.id,    monthlyFee: 4800,  coverageRules: { type: "familiar",   coverage: 85 } } }),
-    prisma.healthPlanProduct.upsert({ where: { code: "IMPAR-IND-001" }, update: {}, create: { name: "Plano Individual Plus",       code: "IMPAR-IND-001", companyId: compImpar.id,    monthlyFee: 1200,  coverageRules: { type: "particular", coverage: 70 } } }),
+    prisma.healthPlanProduct.upsert({ where: { code: "IMPAR-FAM-001" }, update: {}, create: { name: "Plano Familiar Ouro",        code: "IMPAR-FAM-001", companyId: compImpar.id,    monthlyFee: 4800,  coverageRules: { type: "familiar",   coverage: 85 }, sessionsPerCycle: 12, maxMembers: 4 } }),
+    prisma.healthPlanProduct.upsert({ where: { code: "IMPAR-IND-001" }, update: {}, create: { name: "Plano Individual Plus",       code: "IMPAR-IND-001", companyId: compImpar.id,    monthlyFee: 1200,  coverageRules: { type: "particular", coverage: 70 }, sessionsPerCycle: 10 } }),
     prisma.healthPlanProduct.upsert({ where: { code: "IMPAR-FAM-002" }, update: {}, create: { name: "Plano Familiar Bronze",       code: "IMPAR-FAM-002", companyId: compImpar.id,    monthlyFee: 2400,  coverageRules: { type: "familiar",   coverage: 65 } } }),
     prisma.healthPlanProduct.upsert({ where: { code: "BCA-CORP-001"  }, update: {}, create: { name: "Corporativo Saúde Total",     code: "BCA-CORP-001",  companyId: compBca.id,      monthlyFee: 18000, coverageRules: { type: "corp",       coverage: 90 } } }),
     prisma.healthPlanProduct.upsert({ where: { code: "BCA-CORP-002"  }, update: {}, create: { name: "Empresarial Premium",         code: "BCA-CORP-002",  companyId: compBca.id,      monthlyFee: 14400, coverageRules: { type: "corp",       coverage: 95 } } }),
@@ -465,13 +465,48 @@ async function main() {
         update: {},
         create: {
           productId: planIndividual.id,
-          holderPatientId: p2.id,
           planNumber: "IMPAR-IND-SEED-0001",
           startDate: monthOffset(6, 1),
           active: true,
+          sessionsRemaining: 7,
         },
       })
     : null;
+  if (seedHealthPlan) {
+    await prisma.healthPlanMember.upsert({
+      where: { healthPlanId_patientId: { healthPlanId: seedHealthPlan.id, patientId: p2.id } },
+      update: {},
+      create: { healthPlanId: seedHealthPlan.id, patientId: p2.id },
+    });
+  }
+
+  // A second, multi-member plan (a family plan covering two patients sharing one session pool) so
+  // the members UI has real data to render without any manual setup.
+  const planFamily = await prisma.healthPlanProduct.findUnique({ where: { code: "IMPAR-FAM-001" } });
+  const seedFamilyPlan = planFamily
+    ? await prisma.healthPlan.upsert({
+        where: { planNumber: "IMPAR-FAM-SEED-0001" },
+        update: {},
+        create: {
+          productId: planFamily.id,
+          planNumber: "IMPAR-FAM-SEED-0001",
+          startDate: monthOffset(3, 1),
+          active: true,
+          sessionsRemaining: 9,
+        },
+      })
+    : null;
+  if (seedFamilyPlan) {
+    await Promise.all(
+      [p1.id, p3.id].map((patientId) =>
+        prisma.healthPlanMember.upsert({
+          where: { healthPlanId_patientId: { healthPlanId: seedFamilyPlan.id, patientId } },
+          update: {},
+          create: { healthPlanId: seedFamilyPlan.id, patientId },
+        })
+      )
+    );
+  }
 
   // The two "completed" appointments above are the natural candidates for a real appointmentId
   // link on an invoice — in the running app this is exactly when an invoice auto-generates, but
@@ -590,6 +625,14 @@ async function main() {
       { valor: "Familiar",    codigo: "familiar"   },
       { valor: "Corporativo", codigo: "corp"       },
       { valor: "Particular",  codigo: "particular" },
+    ]),
+    // Matches the real values already configured by clinic staff in Parametrizações on this dev DB
+    // (this group already existed before this field was wired up) — kept in sync so a fresh
+    // database seeds the same reference data, not a guessed placeholder set.
+    seedGroup("TIPO_SEGURADORA", [
+      { valor: "GARANTIA", codigo: "garantia" },
+      { valor: "IMPAR",    codigo: "impar"    },
+      { valor: "ALIANÇA",  codigo: "alianca"  },
     ]),
     seedGroup("PROFILE_SETTINGS", [
       { valor: "Administrador/a", codigo: "admin"        },

@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle, RefreshCw } from "lucide-react";
+import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Field } from "../../../components/ui/field";
@@ -163,12 +163,15 @@ function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void
 // ── Plan Modal ─────────────────────────────────────────────────
 
 type PlanProduct = { id: string; name: string; code: string; monthlyFee: number; company: { id: string; name: string } | null };
-type HealthPlan  = { id: string; planNumber: string; startDate: string; endDate?: string | null; active: boolean; product: PlanProduct; company: { name: string } | null };
+type HealthPlan  = {
+  id: string; planNumber: string; startDate: string; endDate?: string | null; active: boolean;
+  sessionsRemaining: number | null; product: PlanProduct & { sessionsPerCycle: number | null }; company: { name: string } | null;
+};
 
 function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
-  const hasplan = !!patient.healthPlanId;
+  const hasplan = !!patient.activeHealthPlan;
   const [mode, setMode] = useState<"view" | "edit">(hasplan ? "view" : "edit");
   const TODAY = new Date().toISOString().split("T")[0];
   // planNumber starts blank — left blank, the server generates a race-safe one (see
@@ -188,8 +191,8 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
   const selectedProduct = products.find(p => p.id === form.productId);
 
   const { data: currentPlan, isLoading: planLoading } = useQuery<HealthPlan>({
-    queryKey: ["health-plan", patient.healthPlanId],
-    queryFn:  () => fetch(`/api/health-plans/${patient.healthPlanId}`).then(r => r.json()),
+    queryKey: ["health-plan", patient.activeHealthPlan?.id],
+    queryFn:  () => fetch(`/api/health-plans/${patient.activeHealthPlan!.id}`).then(r => r.json()),
     enabled:  hasplan,
     staleTime: 60_000,
   });
@@ -203,19 +206,18 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!form.productId || !form.startDate) throw new Error("Preencha todos os campos obrigatórios");
-      const plan = await fetch("/api/health-plans", {
+      if (hasplan) {
+        await fetch(`/api/health-plans/${patient.activeHealthPlan!.id}/members/${patient.id}`, { method: "DELETE" })
+          .then(async r => { if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao remover plano atual"); } });
+      }
+      await fetch("/api/health-plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          productId: form.productId, holderPatientId: patient.id, startDate: form.startDate,
+          productId: form.productId, memberPatientIds: [patient.id], startDate: form.startDate,
           ...(form.planNumber.trim() ? { planNumber: form.planNumber.trim() } : {}),
         }),
       }).then(async r => { if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro ao criar plano"); } return r.json(); });
-      await fetch(`/api/patients/${patient.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ healthPlanId: plan.id }),
-      }).then(async r => { if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro ao associar plano"); } });
     },
     onSuccess: () => {
       invalidate();
@@ -226,28 +228,14 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
   });
 
   const removeMutation = useMutation({
-    mutationFn: () => fetch(`/api/patients/${patient.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ healthPlanId: null }),
-    }).then(async r => { if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro ao remover plano"); } }),
+    mutationFn: () => fetch(`/api/health-plans/${patient.activeHealthPlan!.id}/members/${patient.id}`, { method: "DELETE" })
+      .then(async r => { if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao remover plano"); } }),
     onSuccess: () => {
       invalidate();
       addMessage("Success", "Plano removido com sucesso.");
       onClose();
     },
     onError: (e: Error) => { setErr(e.message); addMessage("Error", e.message); },
-  });
-
-  const renewMutation = useMutation({
-    mutationFn: () => fetch(`/api/health-plans/${patient.healthPlanId}/renew`, { method: "POST" })
-      .then(async r => { if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao renovar plano"); } return r.json(); }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["health-plan", patient.healthPlanId] });
-      queryClient.invalidateQueries({ queryKey: ["health-plans"] });
-      addMessage("Success", "Plano renovado com sucesso!");
-    },
-    onError: (e: Error) => addMessage("Error", e.message),
   });
 
   const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)]";
@@ -286,9 +274,13 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
                   )}
                   <span>Mensalidade</span>
                   <span className="font-mono font-semibold text-dim-800">{Number(currentPlan.product.monthlyFee).toLocaleString("pt-CV")} CVE/mês</span>
+                  <span>Sessões</span>
+                  <span className="font-mono font-semibold text-dim-800">
+                    {currentPlan.product.sessionsPerCycle == null ? "Ilimitado" : `${currentPlan.sessionsRemaining ?? 0}/${currentPlan.product.sessionsPerCycle}`}
+                  </span>
                   {currentPlan.company && (
                     <>
-                      <span>Seguradora</span>
+                      <span>Empresa</span>
                       <span className="font-semibold text-dim-800">{currentPlan.company.name}</span>
                     </>
                   )}
@@ -311,11 +303,10 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
                 </div>
               ) : (
                 <div className="flex gap-2">
-                  <button onClick={() => renewMutation.mutate()} disabled={renewMutation.isPending}
-                    className="flex items-center justify-center gap-1.5 flex-1 text-[12px] font-semibold py-2 rounded-[10px] border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors disabled:opacity-50">
-                    <RefreshCw className={`w-3.5 h-3.5 ${renewMutation.isPending ? "animate-spin" : ""}`} />
-                    {renewMutation.isPending ? "A renovar…" : "Renovar"}
-                  </button>
+                  <Link href={`/health-plans/${currentPlan.id}`}
+                    className="flex items-center justify-center flex-1 text-[12px] font-semibold py-2 rounded-[10px] border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors">
+                    Ver Plano
+                  </Link>
                   <button onClick={() => setMode("edit")}
                     className="flex-1 text-[12px] font-semibold py-2 rounded-[10px] bg-brand-700 hover:bg-brand-800 text-white transition-colors">
                     Alterar Plano
@@ -557,7 +548,7 @@ export default function PatientsPage() {
                           <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[12px] text-dim-600">{patient.phone}</td>
                           <td className="px-5 py-3.5 border-b border-dim-100 text-[12px] text-dim-500">{patient.email ?? "—"}</td>
                           <td className="px-5 py-3.5 border-b border-dim-100">
-                            {patient.healthPlanId ? (
+                            {patient.activeHealthPlan ? (
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80">
                                 Plano Ativo
                               </span>
@@ -571,7 +562,7 @@ export default function PatientsPage() {
                                 onClick={() => setPlanPatient(patient)}
                                 className="text-[11px] font-semibold px-2.5 py-1 rounded-[7px] border border-dim-200 text-dim-600 hover:border-brand-400 hover:text-brand-700 hover:bg-brand-50 transition-colors"
                               >
-                                {patient.healthPlanId ? "Gerir Plano" : "Adicionar Plano"}
+                                {patient.activeHealthPlan ? "Gerir Plano" : "Adicionar Plano"}
                               </button>
                               <Link
                                 href={`/patients/${patient.id}`}

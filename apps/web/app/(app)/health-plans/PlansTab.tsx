@@ -1,41 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { AlertCircle, ChevronRight, RefreshCw, Search, Shield } from "lucide-react";
-import { useMessage } from "@/components/ui/message-handler";
+import { AlertCircle, ChevronRight, Search, Shield } from "lucide-react";
+import type { HealthPlanInstance } from "@cap/types";
 import { PLAN_STATUS_META, planStatus, type PlanStatusKey } from "./status";
 
-type PlanInstance = {
-  id: string;
-  planNumber: string;
-  startDate: string;
-  endDate: string | null;
-  active: boolean;
-  usageCount: number;
-  holderPatientId: string | null;
-  holderPatientName?: string | null;
-  companyId: string | null;
-  product: { id: string; name: string; code: string; monthlyFee: number; active: boolean };
-  company: { id: string; name: string } | null;
-};
+type PlanInstance = HealthPlanInstance;
 
 async function fetchPlans() {
   const res = await fetch("/api/health-plans");
   if (!res.ok) throw new Error("Erro ao carregar planos");
   return res.json() as Promise<PlanInstance[]>;
-}
-
-async function renewPlan(id: string) {
-  const res = await fetch(`/api/health-plans/${id}/renew`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? "Erro ao renovar plano");
-  }
-  return res.json();
 }
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
@@ -60,26 +39,13 @@ function SkeletonRow() {
 }
 
 export function PlansTab() {
-  const queryClient = useQueryClient();
-  const { addMessage } = useMessage();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | PlanStatusKey>("all");
-  const [renewingId, setRenewingId] = useState<string | null>(null);
 
   const { data: plans = [], isLoading, error } = useQuery({
     queryKey: ["health-plans", "all"],
     queryFn: fetchPlans,
     staleTime: 30_000,
-  });
-
-  const renewMutation = useMutation({
-    mutationFn: renewPlan,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["health-plans"] });
-      addMessage("Success", "Plano renovado com sucesso!");
-      setRenewingId(null);
-    },
-    onError: (e: Error) => { addMessage("Error", e.message); setRenewingId(null); },
   });
 
   const filtered = useMemo(() => {
@@ -89,7 +55,7 @@ export function PlansTab() {
       if (!q) return true;
       return (
         p.planNumber.toLowerCase().includes(q) ||
-        (p.holderPatientName?.toLowerCase().includes(q) ?? false) ||
+        p.members.some(m => m.patientName?.toLowerCase().includes(q)) ||
         (p.company?.name.toLowerCase().includes(q) ?? false) ||
         p.product.name.toLowerCase().includes(q)
       );
@@ -114,7 +80,7 @@ export function PlansTab() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Titular, empresa, produto, nº plano…"
+            placeholder="Membro, empresa, produto, nº plano…"
             className="w-full border border-dim-200 rounded-[10px] pl-8 pr-3 py-2 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all"
           />
         </div>
@@ -139,7 +105,7 @@ export function PlansTab() {
           <table className="w-full border-collapse">
             <thead>
               <tr>
-                {["Nº Plano", "Titular", "Produto", "Validade", "Estado", ""].map(h => (
+                {["Nº Plano", "Membros", "Produto", "Sessões", "Validade", "Estado", ""].map(h => (
                   <th key={h} className="text-left text-[10px] font-bold uppercase tracking-[0.07em] text-dim-400 px-5 py-2.5 border-b border-dim-100 bg-dim-50">
                     {h}
                   </th>
@@ -151,7 +117,7 @@ export function PlansTab() {
                 Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
               ) : error ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center">
+                  <td colSpan={7} className="py-16 text-center">
                     <div className="w-12 h-12 bg-red-50 rounded-[16px] flex items-center justify-center mx-auto mb-3">
                       <AlertCircle className="w-6 h-6 text-red-500" />
                     </div>
@@ -160,7 +126,7 @@ export function PlansTab() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center">
+                  <td colSpan={7} className="py-16 text-center">
                     <div className="w-12 h-12 bg-dim-100 rounded-[16px] flex items-center justify-center mx-auto mb-3">
                       <Shield className="w-6 h-6 text-dim-400" />
                     </div>
@@ -172,16 +138,22 @@ export function PlansTab() {
               ) : filtered.map(plan => {
                 const status = planStatus(plan);
                 const meta = PLAN_STATUS_META[status];
+                const [firstMember, ...restMembers] = plan.members;
                 return (
                   <tr key={plan.id} className="hover:bg-dim-50 transition-colors group">
                     <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[12px] text-dim-700">
                       {plan.planNumber}
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100">
-                      {plan.holderPatientId ? (
-                        <Link href={`/patients/${plan.holderPatientId}`} className="text-[13px] font-medium text-dim-900 hover:text-brand-700 transition-colors">
-                          {plan.holderPatientName ?? "Ver paciente"}
-                        </Link>
+                      {firstMember ? (
+                        <div className="flex items-center gap-1.5">
+                          <Link href={`/patients/${firstMember.patientId}`} className="text-[13px] font-medium text-dim-900 hover:text-brand-700 transition-colors">
+                            {firstMember.patientName ?? "Ver paciente"}
+                          </Link>
+                          {restMembers.length > 0 && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-dim-100 text-dim-500">+{restMembers.length}</span>
+                          )}
+                        </div>
                       ) : plan.company ? (
                         <span className="text-[13px] font-medium text-dim-900">{plan.company.name}</span>
                       ) : (
@@ -192,6 +164,9 @@ export function PlansTab() {
                       {plan.product.name}
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">
+                      {plan.product.sessionsPerCycle == null ? "Ilimitado" : `${plan.sessionsRemaining ?? 0}/${plan.product.sessionsPerCycle}`}
+                    </td>
+                    <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[11px] text-dim-500">
                       {plan.endDate ? format(new Date(plan.endDate), "d MMM yyyy", { locale: pt }) : "Sem validade"}
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100">
@@ -199,14 +174,6 @@ export function PlansTab() {
                     </td>
                     <td className="px-5 py-3.5 border-b border-dim-100">
                       <div className="flex items-center gap-3 justify-end">
-                        <button
-                          onClick={() => { setRenewingId(plan.id); renewMutation.mutate(plan.id); }}
-                          disabled={renewMutation.isPending && renewingId === plan.id}
-                          className="flex items-center gap-1 text-[11px] font-semibold text-brand-600 hover:text-brand-700 disabled:opacity-50 transition-colors"
-                        >
-                          <RefreshCw className={`w-3 h-3 ${renewMutation.isPending && renewingId === plan.id ? "animate-spin" : ""}`} />
-                          Renovar
-                        </button>
                         <Link
                           href={`/health-plans/${plan.id}`}
                           className="flex items-center gap-0.5 text-[11px] font-semibold text-dim-500 hover:text-dim-800 opacity-0 group-hover:opacity-100 transition-opacity"

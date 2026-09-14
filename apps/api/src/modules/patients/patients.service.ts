@@ -6,6 +6,8 @@ import {
 } from "@nestjs/common";
 import { PatientsRepository } from "./patients.repository";
 import { RequestContext } from "../../common/context/request-context";
+import { HealthPlansService } from "../health-plans/health-plans.service";
+import { activeMembershipWhere } from "../health-plans/health-plan-coverage";
 import { Prisma } from "@cap/database";
 import {
   CreatePatientDto,
@@ -18,7 +20,10 @@ import {
 
 @Injectable()
 export class PatientsService {
-  constructor(private readonly repo: PatientsRepository) {}
+  constructor(
+    private readonly repo: PatientsRepository,
+    private readonly healthPlans: HealthPlansService,
+  ) {}
 
   async findAll(query: PatientSearchQuery) {
     const { q, planFilter, page, limit } = query;
@@ -39,9 +44,9 @@ export class PatientsService {
           }
         : {}),
       ...(planFilter === "plan"
-        ? { healthPlanId: { not: null } }
+        ? { healthPlanMemberships: { some: activeMembershipWhere() } }
         : planFilter === "none"
-        ? { healthPlanId: null }
+        ? { healthPlanMemberships: { none: activeMembershipWhere() } }
         : {}),
     };
 
@@ -59,7 +64,6 @@ export class PatientsService {
           phone: true,
           email: true,
           consentGiven: true,
-          healthPlanId: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -67,7 +71,10 @@ export class PatientsService {
       this.repo.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    const summaries = await this.healthPlans.findActivePlanSummaries(data.map((p) => p.id));
+    const withPlans = data.map((p) => ({ ...p, activeHealthPlan: summaries.get(p.id) ?? null }));
+
+    return { data: withPlans, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findById(id: string) {

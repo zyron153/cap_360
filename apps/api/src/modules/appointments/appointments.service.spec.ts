@@ -39,7 +39,7 @@ const gateway = { emitAppointmentCreated: jest.fn(), emitAppointmentUpdated: jes
 const redis = { set: jest.fn(), del: jest.fn() };
 const queue = { add: jest.fn(), getJob: jest.fn() };
 const billingMock = { createDraft: jest.fn() };
-const healthPlansMock = { incrementUsage: jest.fn() };
+const healthPlansMock = { recordSessionUsage: jest.fn() };
 const notifMock = { notifyConfirm: jest.fn(), notifyCancel: jest.fn(), isReminderEnabled: jest.fn() };
 
 const STAFF_ID = "staff-1";
@@ -691,13 +691,13 @@ describe("AppointmentsService", () => {
     beforeEach(() => {
       repo.update.mockResolvedValue({ id: "appt-1", status: "completed" });
       billingMock.createDraft.mockResolvedValue({});
-      healthPlansMock.incrementUsage.mockResolvedValue({});
+      healthPlansMock.recordSessionUsage.mockResolvedValue(null);
     });
 
     it("creates a billing draft for a service with a real price", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: null },
+        patient: { id: "p1" },
         service: { id: "s1", name: "Consulta Geral", price: "1500" },
       });
       await service.updateStatus("appt-1", { status: "completed" });
@@ -709,7 +709,7 @@ describe("AppointmentsService", () => {
     it("scales the draft's price when a confirmed duration and standard duration are both known", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: null },
+        patient: { id: "p1" },
         service: { id: "s1", name: "Consulta Geral", price: "1500", durationMinutes: 30 },
       });
       await service.updateStatus("appt-1", { status: "completed", durationMinutes: 45 });
@@ -726,7 +726,7 @@ describe("AppointmentsService", () => {
     it("falls back to the flat catalogue price when the service has no standard duration", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: null },
+        patient: { id: "p1" },
         service: { id: "s1", name: "Consulta Geral", price: "1500" },
       });
       await service.updateStatus("appt-1", { status: "completed", durationMinutes: 45 });
@@ -738,40 +738,30 @@ describe("AppointmentsService", () => {
     it("skips the billing draft for a zero-price service", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: null },
+        patient: { id: "p1" },
         service: { id: "s1", name: "Consulta Gratuita", price: "0" },
       });
       await service.updateStatus("appt-1", { status: "completed" });
       expect(billingMock.createDraft).not.toHaveBeenCalled();
     });
 
-    it("increments the patient's health plan usage when they have an active plan", async () => {
+    it("records session usage for the completed appointment's patient — recordSessionUsage itself no-ops for patients with no active plan", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: "plan-1" },
+        patient: { id: "p1" },
         service: { id: "s1", name: "Consulta Geral", price: "1500" },
       });
       await service.updateStatus("appt-1", { status: "completed" });
-      expect(healthPlansMock.incrementUsage).toHaveBeenCalledWith("plan-1");
+      expect(healthPlansMock.recordSessionUsage).toHaveBeenCalledWith("p1");
     });
 
-    it("does not touch health plan usage for a patient with no active plan", async () => {
+    it("does not let a session-usage failure break the status update", async () => {
       repo.findById.mockResolvedValue({
         id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: null },
+        patient: { id: "p1" },
         service: { id: "s1", name: "Consulta Geral", price: "1500" },
       });
-      await service.updateStatus("appt-1", { status: "completed" });
-      expect(healthPlansMock.incrementUsage).not.toHaveBeenCalled();
-    });
-
-    it("does not let a usage-increment failure break the status update", async () => {
-      repo.findById.mockResolvedValue({
-        id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
-        patient: { id: "p1", healthPlanId: "plan-1" },
-        service: { id: "s1", name: "Consulta Geral", price: "1500" },
-      });
-      healthPlansMock.incrementUsage.mockRejectedValue(new Error("db down"));
+      healthPlansMock.recordSessionUsage.mockRejectedValue(new Error("db down"));
       await expect(service.updateStatus("appt-1", { status: "completed" })).resolves.toEqual({
         id: "appt-1", status: "completed",
       });

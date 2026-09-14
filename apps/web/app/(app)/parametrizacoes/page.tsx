@@ -19,7 +19,7 @@ type Group = { nome: string; count: number };
 const SECTIONS: { label: string; nomes: string[] }[] = [
   { label: "Colaboradores", nomes: ["PROFILE_SETTINGS", "FUNCAO", "ESPECIALIDADE"] },
   { label: "Clínica",       nomes: ["TIPO_SERVICO", "TIPO_EXAME", "TIPO_CONSULTA"] },
-  { label: "Planos",        nomes: ["TIPO_PLANO_SAUDE"] },
+  { label: "Planos",        nomes: ["TIPO_PLANO_SAUDE", "TIPO_SEGURADORA"] },
 ];
 const DEFAULT_NOMES = SECTIONS.flatMap(s => s.nomes);
 

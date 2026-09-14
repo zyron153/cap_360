@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 import type { TimelineEvent } from "@cap/types";
 
 @Injectable()
@@ -8,14 +9,12 @@ export class BffService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly encryption: EncryptionService,
+    private readonly healthPlans: HealthPlansService,
   ) {}
 
   async getPatientScreen(id: string) {
-    const [patient, appointments, comms, invoices] = await Promise.all([
-      this.prisma.patient.findFirst({
-        where: { id, deletedAt: null },
-        include: { healthPlan: { select: { planNumber: true, product: { select: { name: true } } } } },
-      }),
+    const [patient, appointments, comms, invoices, planSummaries] = await Promise.all([
+      this.prisma.patient.findFirst({ where: { id, deletedAt: null } }),
       this.prisma.appointment.findMany({
         where: { patientId: id, deletedAt: null },
         select: {
@@ -53,6 +52,7 @@ export class BffService {
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
+      this.healthPlans.findActivePlanSummaries([id]),
     ]);
 
     if (!patient) throw new NotFoundException(`Patient ${id} not found`);
@@ -61,6 +61,8 @@ export class BffService {
     // read path — nothing has decrypted these two columns yet.
     if (patient.dateOfBirth) patient.dateOfBirth = this.encryption.decrypt(patient.dateOfBirth);
     if (patient.nif) patient.nif = this.encryption.decrypt(patient.nif);
+
+    const patientWithPlan = { ...patient, activeHealthPlan: planSummaries.get(id) ?? null };
 
     const timeline: TimelineEvent[] = [
       ...appointments.map((a) => ({
@@ -88,7 +90,7 @@ export class BffService {
       })),
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-    return { patient, timeline };
+    return { patient: patientWithPlan, timeline };
   }
 
   getStaffList() {

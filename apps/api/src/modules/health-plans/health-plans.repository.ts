@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { Prisma } from "@cap/database";
+import { activeMembershipWhere } from "./health-plan-coverage";
 
 @Injectable()
 export class HealthPlansRepository {
@@ -37,13 +38,21 @@ export class HealthPlansRepository {
     endDate: true,
     active: true,
     usageCount: true,
+    sessionsRemaining: true,
     createdAt: true,
-    holderPatientId: true,
     companyId: true,
     product: {
-      select: { id: true, name: true, code: true, monthlyFee: true, active: true, durationMonths: true },
+      select: {
+        id: true, name: true, code: true, monthlyFee: true, active: true,
+        durationMonths: true, sessionsPerCycle: true, maxMembers: true,
+      },
     },
     company: { select: { id: true, name: true } },
+    members: {
+      where: { removedAt: null },
+      orderBy: { addedAt: "asc" },
+      select: { patientId: true, addedAt: true, patient: { select: { fullName: true } } },
+    },
   } as const;
 
   findAllPlans(companyId?: string) {
@@ -61,22 +70,23 @@ export class HealthPlansRepository {
     });
   }
 
-  createPlan(data: Prisma.HealthPlanCreateInput) {
-    return this.prisma.healthPlan.create({ data, include: { product: true, company: true } });
+  /** Plan creation and first-member attachment as one transaction — the two used to be a
+   * non-atomic pair of separate HTTP requests from the frontend (create the plan, then PATCH the
+   * patient to point at it), which could leave a plan with no coverage if the second call failed. */
+  async createPlanWithMembers(data: Prisma.HealthPlanCreateInput, patientIds: string[]) {
+    return this.prisma.$transaction(async (tx) => {
+      const plan = await tx.healthPlan.create({ data });
+      if (patientIds.length > 0) {
+        await tx.healthPlanMember.createMany({
+          data: patientIds.map((patientId) => ({ healthPlanId: plan.id, patientId })),
+        });
+      }
+      return tx.healthPlan.findUniqueOrThrow({ where: { id: plan.id }, select: this.planSelect });
+    });
   }
 
   updatePlan(id: string, data: Prisma.HealthPlanUpdateInput) {
     return this.prisma.healthPlan.update({ where: { id }, data, select: this.planSelect });
-  }
-
-  /** holderPatientId (see note on findExpiringBetween below) has no Prisma @relation, so a plan's
-   * holder name can't come back via `include` — batched separately here instead of N+1-querying
-   * per plan. Only ever called with the non-empty, deduplicated id list a caller already filtered. */
-  findPatientNamesByIds(ids: string[]) {
-    return this.prisma.patient.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, fullName: true },
-    });
   }
 
   /** Race-safe plan-number generation, mirroring BillingRepository.nextInvoiceNumber's advisory
@@ -116,35 +126,85 @@ export class HealthPlansRepository {
     });
   }
 
-  findActiveHealthPlanForPatient(patientId: string) {
-    return this.prisma.patient.findUnique({
-      where: { id: patientId },
+  /** Guarded updateMany (not a plain `update` + `{ decrement: 1 }`) so the counter can never go
+   * negative under concurrent completions — the `gt: 0` means an already-exhausted plan's call
+   * here simply matches zero rows and no-ops. */
+  decrementSession(id: string) {
+    return this.prisma.healthPlan.updateMany({
+      where: { id, sessionsRemaining: { gt: 0 } },
+      data: { sessionsRemaining: { decrement: 1 } },
+    });
+  }
+
+  /** One batched lookup, used by the single-patient billing path, the patients list (a page of
+   * 20), and analytics' whole-clinic batch alike — this clinic's patient count is in the hundreds,
+   * not millions, so a single `IN` query beats a per-patient loop everywhere it's called from. */
+  findActiveMembershipsForPatients(patientIds: string[]) {
+    return this.prisma.healthPlanMember.findMany({
+      where: { patientId: { in: patientIds }, ...activeMembershipWhere() },
       select: {
+        patientId: true,
         healthPlan: {
           select: {
-            id: true,
-            active: true,
-            endDate: true,
-            product: { select: { name: true, active: true, coverageRules: true } },
+            id: true, planNumber: true, endDate: true, sessionsRemaining: true,
+            product: { select: { name: true, coverageRules: true } },
           },
         },
       },
     });
   }
 
-  /** holderPatientId has no Prisma @relation (it's a soft reference, unlike companyId) — callers
-   * that need the holder's contact info must look the patient up separately by that id. */
-  findExpiringBetween(from: Date, to: Date) {
-    return this.prisma.healthPlan.findMany({
-      where: { active: true, endDate: { gte: from, lte: to } },
-      select: {
-        id: true,
-        planNumber: true,
-        endDate: true,
-        holderPatientId: true,
-        product: { select: { name: true } },
-        company: { select: { name: true, email: true } },
-      },
+  /** First active membership for a patient, anywhere — used to enforce "one active plan at a
+   * time" before adding them to a different plan. Includes the plan's own number for a friendly
+   * conflict message. Deliberately not gated through activeMembershipWhere() (which also checks
+   * plan/product active + endDate) — a patient already on a *lapsed* plan should still be treated
+   * as "on a plan" for this check, since renewing it is the fix, not silently allowing a second one. */
+  findActiveMembership(patientId: string) {
+    return this.prisma.healthPlanMember.findFirst({
+      where: { patientId, removedAt: null },
+      select: { healthPlanId: true, patientId: true, healthPlan: { select: { planNumber: true } } },
+    });
+  }
+
+  /** By the composite unique key, regardless of removedAt — addMember needs to know whether to
+   * insert a fresh row or revive a previously-removed one. */
+  findMembership(healthPlanId: string, patientId: string) {
+    return this.prisma.healthPlanMember.findUnique({
+      where: { healthPlanId_patientId: { healthPlanId, patientId } },
+    });
+  }
+
+  countActiveMembers(healthPlanId: string) {
+    return this.prisma.healthPlanMember.count({ where: { healthPlanId, removedAt: null } });
+  }
+
+  /** Existence check for addMember — the FK on HealthPlanMember.patientId would reject a bogus id
+   * anyway, but a friendly 404 beats a raw Prisma constraint error surfacing to the caller. */
+  findPatientById(patientId: string) {
+    return this.prisma.patient.findFirst({
+      where: { id: patientId, deletedAt: null },
+      select: { id: true },
+    });
+  }
+
+  /** Upsert on the composite unique — re-adding a previously-removed patient revives that same
+   * row (and resets addedAt, since it's effectively a fresh enrollment) rather than inserting a
+   * second one, which the unique constraint would reject anyway. */
+  addMember(healthPlanId: string, patientId: string) {
+    return this.prisma.healthPlanMember.upsert({
+      where: { healthPlanId_patientId: { healthPlanId, patientId } },
+      update: { removedAt: null, addedAt: new Date() },
+      create: { healthPlanId, patientId },
+    });
+  }
+
+  /** Soft removal only — an invoice can carry a permanent snapshot discount tied to this
+   * membership having existed, so the row itself is never deleted. A no-op (0 rows) is not an
+   * error; the service treats "not currently an active member" as already-achieved, not a 404. */
+  softRemoveMember(healthPlanId: string, patientId: string) {
+    return this.prisma.healthPlanMember.updateMany({
+      where: { healthPlanId, patientId, removedAt: null },
+      data: { removedAt: new Date() },
     });
   }
 }

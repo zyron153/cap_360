@@ -482,11 +482,9 @@ export class AppointmentsService {
         });
       }
 
-      if (appointment.patient?.healthPlanId) {
-        await this.healthPlansService.incrementUsage(appointment.patient.healthPlanId).catch((err: unknown) => {
-          this.logger.error(`[health-plans] usage increment failed for appointment ${id}`, err instanceof Error ? err.stack : String(err));
-        });
-      }
+      await this.healthPlansService.recordSessionUsage(appointment.patientId).catch((err: unknown) => {
+        this.logger.error(`[health-plans] usage/session bump failed for appointment ${id}`, err instanceof Error ? err.stack : String(err));
+      });
     }
 
     return updated;

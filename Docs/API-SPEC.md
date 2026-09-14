@@ -367,27 +367,48 @@ GET    /financeiro/saldos/:patientId            → one patient's outstanding ba
 ```
 GET    /health-plans/products                                    roles: +doctor
 GET    /health-plans/products/:id                                roles: +doctor
-POST   /health-plans/products         roles: admin      body: name,code,description?,monthlyFee,maxMembers?,coverageRules?,durationMonths?
+POST   /health-plans/products         roles: admin      body: name,code,description?,monthlyFee,maxMembers?,coverageRules?,durationMonths?,sessionsPerCycle?
 PATCH  /health-plans/products/:id     roles: admin
 DELETE /health-plans/products/:id     roles: admin
 
 GET    /health-plans                                              query: companyId? — list subscriptions,
-                                                                   each with holderPatientName when it has a holder
+                                                                   each with its members[] (patientId,
+                                                                   patientName, addedAt) and sessionsRemaining
 GET    /health-plans/:id
-POST   /health-plans                  roles: admin, receptionist   body: productId, holderPatientId? XOR companyId, planNumber?, startDate, endDate?
+POST   /health-plans                  roles: admin, receptionist   body: productId, companyId?, memberPatientIds?,
+                                                                   planNumber?, startDate, endDate?
 POST   /health-plans/:id/renew        roles: admin, receptionist   staff-triggered renewal — extends endDate by the
                                                                    product's durationMonths (from whichever is later,
-                                                                   the current endDate or today) and reactivates a
-                                                                   lapsed plan; 400 if the product has been
-                                                                   deactivated. No scheduled auto-renew job — see
-                                                                   TODO.md's M4 scope-decision note.
+                                                                   the current endDate or today), refills
+                                                                   sessionsRemaining to the product's current
+                                                                   sessionsPerCycle, and reactivates a lapsed plan;
+                                                                   400 if the product has been deactivated. No
+                                                                   scheduled auto-renew job — see TODO.md's M4
+                                                                   scope-decision note.
+POST   /health-plans/:id/members      roles: admin, receptionist   body: patientId — 409 if already an active
+                                                                   member of this or another plan, 400 if it would
+                                                                   exceed the product's maxMembers
+DELETE /health-plans/:id/members/:patientId
+                                       roles: admin, receptionist   soft-removes the member (idempotent — 200 even
+                                                                   if not currently a member; only an unknown plan
+                                                                   404s)
 ```
 
 `planNumber` is generated server-side, race-safe via a Postgres advisory lock keyed by product code
 + year (`HealthPlansRepository.nextPlanNumber`) — a caller-supplied value is still honored as-is
-when provided, so the `planNumber` body field above is optional, not required. There is no
-`POST /health-plans/:id/members` / `DELETE .../members/:patient_id` — a `HealthPlan` links to at
-most one holder patient directly (`patients.healthPlanId`), not a membership join table.
+when provided, so the `planNumber` body field above is optional, not required. Every patient
+covered by a plan is a row in the `health_plan_members` join table — there is no special-cased
+"holder"; a family plan of four is four rows, a lone individual is one. Sessions/appointments are a
+single shared pool per plan (`sessionsRemaining`), decremented once per completed appointment for
+any member, not tracked per-member.
+
+`coverageRules` is a free-form JSON blob, not a typed column — by convention it holds `type`
+(category, sourced from parametrização group `TIPO_PLANO_SAUDE`), `coverage` (billing discount %),
+and `seguradora` (insurer, sourced from parametrização group `TIPO_SEGURADORA`). `seguradora` is the
+one key of the three that's actually enforced server-side: `POST /health-plans/products` rejects
+(`400`) a request whose `coverageRules.seguradora` is missing or blank — this is *not* the same as
+the product's real `companyId`/`Company` relation, which still exists on the model but is no longer
+surfaced anywhere in the product UI.
 
 ---
 

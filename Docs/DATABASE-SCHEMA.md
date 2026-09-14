@@ -30,7 +30,6 @@ CREATE TABLE patients (
   "emergencyContactPhone" VARCHAR(30),
   "consentGiven"          BOOLEAN NOT NULL DEFAULT false,
   "consentGivenAt"        TIMESTAMPTZ,
-  "healthPlanId"          UUID REFERENCES health_plans(id),
   "deletedAt"             TIMESTAMPTZ,
   "createdAt"             TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedAt"             TIMESTAMPTZ NOT NULL
@@ -49,8 +48,8 @@ exact-match lookup/uniqueness on the encrypted `nif`; it is never returned by th
 
 Right to erasure (`PatientsRepository.softDelete`) nulls `fullName`, `dateOfBirth`, `nif`,
 `nifHash`, `phone`, `email`, `address`, `emergencyContactName`, `emergencyContactPhone` — `gender`
-and `healthPlanId` are kept (not identifying on their own), as are all related records
-(appointments, invoices, notes, documents), for legal/billing retention.
+is kept (not identifying on its own), as are all related records (appointments, invoices, notes,
+documents, health plan memberships), for legal/billing retention.
 
 Fields present in the original design but never implemented: `nationality`, `phone_secondary`,
 `zone`, `primary_doctor_id`, `photo_url`, `tags`, generic `notes`. Not planned.
@@ -348,6 +347,7 @@ CREATE TABLE health_plan_products (
   "maxMembers"    INT,
   "coverageRules" JSONB,
   "durationMonths" INT NOT NULL DEFAULT 1,          -- renewal cycle length (1=monthly, 12=annual, etc.)
+  "sessionsPerCycle" INT,                           -- sessions/appointments per cycle, shared across every member; NULL = unlimited
   active          BOOLEAN NOT NULL DEFAULT true,
   "createdAt"     TIMESTAMPTZ NOT NULL DEFAULT now(),
   "updatedAt"     TIMESTAMPTZ NOT NULL
@@ -356,30 +356,63 @@ CREATE TABLE health_plan_products (
 CREATE INDEX ON health_plan_products("companyId");
 ```
 
+`coverageRules` is an untyped JSON blob holding, by convention, `type` (category from
+parametrização group `TIPO_PLANO_SAUDE`), `coverage` (billing discount %), and `seguradora`
+(insurer, from parametrização group `TIPO_SEGURADORA`, **required** at creation — enforced in
+`HealthPlansService.createProduct`, not a DB constraint, since the column itself is untyped JSON).
+`seguradora` is unrelated to the real `companyId`/`company` relation above — that FK still exists
+and is set for corporate-linked products, it's just no longer shown as "Seguradora" anywhere in the
+product UI (that label now always means the `coverageRules.seguradora` tag).
+
 ### 4.3 `health_plans` (subscriptions)
 
 ```sql
 CREATE TABLE health_plans (
-  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "productId"       UUID NOT NULL REFERENCES health_plan_products(id),
-  "holderPatientId" UUID,
-  "companyId"       UUID REFERENCES companies(id),
-  "planNumber"      VARCHAR(50) NOT NULL UNIQUE,   -- server-generated, advisory-lock race-safe — see M4 module doc
-  "startDate"       DATE NOT NULL,
-  "endDate"         DATE,
-  active            BOOLEAN NOT NULL DEFAULT true,
-  "usageCount"      INT NOT NULL DEFAULT 0,        -- incremented on appointment completion, see M4 module doc
-  "createdAt"       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  "updatedAt"       TIMESTAMPTZ NOT NULL
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "productId"         UUID NOT NULL REFERENCES health_plan_products(id),
+  "companyId"         UUID REFERENCES companies(id),
+  "planNumber"        VARCHAR(50) NOT NULL UNIQUE,   -- server-generated, advisory-lock race-safe — see M4 module doc
+  "startDate"         DATE NOT NULL,
+  "endDate"           DATE,
+  active              BOOLEAN NOT NULL DEFAULT true,
+  "usageCount"        INT NOT NULL DEFAULT 0,        -- lifetime tally, never reset — incremented on appointment completion
+  "sessionsRemaining" INT,                           -- live countdown for the current cycle, shared across all members; seeded
+                                                      -- from product.sessionsPerCycle, refilled to it on renew; NULL = unlimited
+  "createdAt"         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"         TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX ON health_plans("holderPatientId");
 CREATE INDEX ON health_plans("companyId");
 ```
 
-A `Patient` links to its plan via `patients."healthPlanId" → health_plans.id` (one active plan per
-patient, not a join table). There is no `corporate_plan_members` table — a corporate plan's
-membership model was never built out beyond this single FK.
+### 4.4 `health_plan_members`
+
+```sql
+CREATE TABLE health_plan_members (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "healthPlanId" UUID NOT NULL REFERENCES health_plans(id) ON DELETE CASCADE,
+  "patientId"    UUID NOT NULL REFERENCES patients(id),
+  "addedAt"      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "removedAt"    TIMESTAMPTZ,                        -- soft removal — a past membership stays explainable
+  "createdAt"    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"    TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX ON health_plan_members("healthPlanId", "patientId");
+CREATE INDEX ON health_plan_members("patientId", "removedAt");
+CREATE INDEX ON health_plan_members("healthPlanId", "removedAt");
+```
+
+Every patient covered by a plan is a row here — there is no special-cased "holder". A family plan
+of four is four rows; a lone individual is one row. Re-adding a previously-removed patient revives
+their existing row (`removedAt` set back to `NULL`) rather than inserting a second one, via the
+`(healthPlanId, patientId)` unique index. A patient may only hold one *active* membership at a
+time (enforced in `HealthPlansService`, not a DB constraint) — "active" means `removedAt IS NULL`
+and the plan/product are both active and unexpired, the same predicate `getActiveCoverage` and the
+patients-list/analytics plan-mix queries all share (`health-plan-coverage.ts`'s
+`activeMembershipWhere`). Sessions are a single shared pool per plan (`health_plans
+.sessionsRemaining`), decremented once per completed appointment for any member, not tracked
+per-member.
 
 ---
 

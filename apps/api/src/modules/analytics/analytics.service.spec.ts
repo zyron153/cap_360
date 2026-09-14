@@ -1,11 +1,12 @@
 import { Test } from "@nestjs/testing";
 import { AnalyticsService } from "./analytics.service";
 import { PrismaService } from "../../prisma/prisma.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 
 const prisma = {
   appointment: { findMany: jest.fn() },
-  patient: { findMany: jest.fn() },
 };
+const healthPlansMock = { findActivePlanSummaries: jest.fn() };
 
 function appt(overrides: Partial<{ scheduledAt: Date; status: string; service: { name: string } | null }>) {
   return {
@@ -21,11 +22,15 @@ describe("AnalyticsService", () => {
 
   beforeEach(async () => {
     const mod = await Test.createTestingModule({
-      providers: [AnalyticsService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AnalyticsService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: HealthPlansService, useValue: healthPlansMock },
+      ],
     }).compile();
     service = mod.get(AnalyticsService);
     jest.clearAllMocks();
-    prisma.patient.findMany.mockResolvedValue([]);
+    healthPlansMock.findActivePlanSummaries.mockResolvedValue(new Map());
   });
 
   describe("getSummary", () => {
@@ -100,39 +105,32 @@ describe("AnalyticsService", () => {
         if (distinct) return Promise.resolve([{ patientId: "p1" }, { patientId: "p2" }]);
         return Promise.resolve([]);
       });
-      prisma.patient.findMany.mockResolvedValue([
-        { healthPlan: null },
-        { healthPlan: null },
-      ]);
-
       const result = await service.getSummary();
 
       expect(result.activePatients).toBe(2);
     });
 
     it("buckets active patients into their health-plan product name, or 'Particular' with no active coverage", async () => {
-      const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-      const past = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       prisma.appointment.findMany.mockImplementation(({ distinct }: { distinct?: string[] }) => {
         if (distinct) return Promise.resolve([{ patientId: "p1" }, { patientId: "p2" }, { patientId: "p3" }, { patientId: "p4" }]);
         return Promise.resolve([]);
       });
-      prisma.patient.findMany.mockResolvedValue([
-        { healthPlan: { active: true, endDate: future, product: { name: "Familiar", active: true } } },
-        { healthPlan: { active: true, endDate: null, product: { name: "Familiar", active: true } } },
-        { healthPlan: { active: true, endDate: past, product: { name: "Familiar", active: true } } }, // expired
-        { healthPlan: null },
-      ]);
+      healthPlansMock.findActivePlanSummaries.mockResolvedValue(new Map([
+        ["p1", { id: "plan-1", planNumber: "PLN-1", productName: "Familiar" }],
+        ["p2", { id: "plan-2", planNumber: "PLN-2", productName: "Familiar" }],
+        // p3, p4 have no entry — no active coverage (expired, exhausted, or never subscribed)
+      ]));
 
       const result = await service.getSummary();
 
+      expect(healthPlansMock.findActivePlanSummaries).toHaveBeenCalledWith(["p1", "p2", "p3", "p4"]);
       expect(result.planDistribution).toEqual([
         { label: "Familiar", count: 2, pct: 50 },
         { label: "Particular", count: 2, pct: 50 },
       ]);
     });
 
-    it("skips the plan-distribution patient query entirely when there are no active patients", async () => {
+    it("skips the plan-distribution lookup entirely when there are no active patients", async () => {
       prisma.appointment.findMany.mockImplementation(({ distinct }: { distinct?: string[] }) => {
         if (distinct) return Promise.resolve([]);
         return Promise.resolve([]);
@@ -141,7 +139,7 @@ describe("AnalyticsService", () => {
       const result = await service.getSummary();
 
       expect(result.planDistribution).toEqual([]);
-      expect(prisma.patient.findMany).not.toHaveBeenCalled();
+      expect(healthPlansMock.findActivePlanSummaries).not.toHaveBeenCalled();
     });
   });
 });

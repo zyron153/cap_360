@@ -68,17 +68,18 @@ test("renewing an expired plan from its detail page extends the validity and fli
   await expect(page.getByTestId("plan-status")).toHaveText("Ativo", { timeout: 10_000 });
 });
 
-test("the Planos tab lists the plan and lets it be filtered and renewed from the list", async ({ page }) => {
+test("the Planos tab lists the plan, lets it be filtered, and has no renew action of its own", async ({ page }) => {
   await page.goto("/health-plans");
   await page.getByRole("button", { name: "Planos" }).click();
 
-  await page.getByPlaceholder("Titular, empresa, produto, nº plano…").fill(planNumber);
+  await page.getByPlaceholder("Membro, empresa, produto, nº plano…").fill(planNumber);
   const row = page.locator("tr", { hasText: planNumber });
   await expect(row).toBeVisible({ timeout: 10_000 });
 
-  // The first spec already renewed this same plan, so it should show as active — but renewal is
-  // a manual, staff-triggered action available at any time, not gated on status, so the quick
-  // "Renovar" action stays in the row regardless.
+  // The first spec already renewed this same plan, so it should show as active. Renewal now lives
+  // only on the plan's detail page — the list row offers no "Renovar" action of its own, just a
+  // link through to the detail page where renewal actually happens.
   await expect(row.getByText("Ativo", { exact: true })).toBeVisible();
-  await expect(row.getByRole("button", { name: "Renovar" })).toBeVisible();
+  await expect(row.getByRole("button", { name: "Renovar" })).toHaveCount(0);
+  await expect(row.getByRole("link", { name: "Ver" })).toBeVisible();
 });

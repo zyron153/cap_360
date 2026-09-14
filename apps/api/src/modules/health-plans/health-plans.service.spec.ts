@@ -1,5 +1,5 @@
 import { Test } from "@nestjs/testing";
-import { NotFoundException, BadRequestException } from "@nestjs/common";
+import { NotFoundException, BadRequestException, ConflictException } from "@nestjs/common";
 import { HealthPlansService } from "./health-plans.service";
 import { HealthPlansRepository } from "./health-plans.repository";
 import { StaffRepository } from "../staff/staff.repository";
@@ -7,21 +7,40 @@ import { StaffRepository } from "../staff/staff.repository";
 const repo = {
   findAllPlans: jest.fn(),
   findPlanById: jest.fn(),
-  incrementUsage: jest.fn(),
-  findExpiringBetween: jest.fn(),
   findProductById: jest.fn(),
   nextPlanNumber: jest.fn(),
-  createPlan: jest.fn(),
+  createPlanWithMembers: jest.fn(),
   updatePlan: jest.fn(),
-  findActiveHealthPlanForPatient: jest.fn(),
-  findPatientNamesByIds: jest.fn(),
+  findActiveMembership: jest.fn(),
+  findActiveMembershipsForPatients: jest.fn(),
+  findPatientById: jest.fn(),
+  addMember: jest.fn(),
+  softRemoveMember: jest.fn(),
+  countActiveMembers: jest.fn(),
+  incrementUsage: jest.fn(),
+  decrementSession: jest.fn(),
 };
 const staffRepo = { findById: jest.fn() };
 
 const ADMIN = { sub: "admin-1", email: "a@cap.cv", roles: ["admin"] };
 const HR = { sub: "hr-1", email: "hr@cap.cv", roles: ["corporate_hr"] };
 
-describe("HealthPlansService — company scoping for corporate_hr", () => {
+// mapPlan() flattens plan.members[].patient.fullName into patientName — every repo plan fixture
+// needs a `members` array (possibly empty) with this nested shape, or mapPlan throws.
+function planFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "plan-1",
+    companyId: null,
+    endDate: null as Date | null,
+    active: true,
+    sessionsRemaining: null as number | null,
+    product: { name: "Plano Familiar", active: true, durationMonths: 1, sessionsPerCycle: null as number | null },
+    members: [] as { patientId: string; addedAt: Date; patient: { fullName: string | null } }[],
+    ...overrides,
+  };
+}
+
+describe("HealthPlansService", () => {
   let service: HealthPlansService;
 
   beforeEach(async () => {
@@ -36,7 +55,7 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
     jest.clearAllMocks();
   });
 
-  describe("findAllPlans", () => {
+  describe("findAllPlans — company scoping for corporate_hr", () => {
     it("lets admin/receptionist filter by any companyId query param, or none at all", async () => {
       repo.findAllPlans.mockResolvedValue([]);
       await service.findAllPlans("company-x", ADMIN);
@@ -65,37 +84,53 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
       expect(result).toEqual([]);
       expect(repo.findAllPlans).not.toHaveBeenCalled();
     });
+
+    it("flattens members[].patient.fullName into a flat patientName per member", async () => {
+      repo.findAllPlans.mockResolvedValue([
+        planFixture({
+          id: "plan-1",
+          members: [{ patientId: "pat-1", addedAt: new Date("2026-01-01"), patient: { fullName: "Ana Silva" } }],
+        }),
+      ]);
+
+      const result = await service.findAllPlans(undefined, ADMIN);
+
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: "plan-1",
+          members: [{ patientId: "pat-1", patientName: "Ana Silva", addedAt: new Date("2026-01-01") }],
+        }),
+      ]);
+    });
   });
 
   describe("findPlanById", () => {
     it("lets admin/receptionist fetch any plan", async () => {
-      repo.findPlanById.mockResolvedValue({ id: "plan-1", companyId: "company-b" });
-      await expect(service.findPlanById("plan-1", ADMIN)).resolves.toEqual({
-        id: "plan-1",
-        companyId: "company-b",
-      });
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1", companyId: "company-b" }));
+      await expect(service.findPlanById("plan-1", ADMIN)).resolves.toEqual(
+        expect.objectContaining({ id: "plan-1", companyId: "company-b" })
+      );
     });
 
     it("lets a corporate_hr caller fetch a plan belonging to their own company", async () => {
       staffRepo.findById.mockResolvedValue({ id: "hr-1", companyId: "company-a" });
-      repo.findPlanById.mockResolvedValue({ id: "plan-1", companyId: "company-a" });
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1", companyId: "company-a" }));
 
-      await expect(service.findPlanById("plan-1", HR)).resolves.toEqual({
-        id: "plan-1",
-        companyId: "company-a",
-      });
+      await expect(service.findPlanById("plan-1", HR)).resolves.toEqual(
+        expect.objectContaining({ id: "plan-1", companyId: "company-a" })
+      );
     });
 
     it("throws NotFoundException — not a bare 403 — when a corporate_hr caller requests another company's plan", async () => {
       staffRepo.findById.mockResolvedValue({ id: "hr-1", companyId: "company-a" });
-      repo.findPlanById.mockResolvedValue({ id: "plan-1", companyId: "company-b" });
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1", companyId: "company-b" }));
 
       await expect(service.findPlanById("plan-1", HR)).rejects.toThrow(NotFoundException);
     });
 
     it("throws NotFoundException for a corporate_hr caller with no company assigned, even if the plan exists", async () => {
       staffRepo.findById.mockResolvedValue({ id: "hr-1", companyId: null });
-      repo.findPlanById.mockResolvedValue({ id: "plan-1", companyId: "company-a" });
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1", companyId: "company-a" }));
 
       await expect(service.findPlanById("plan-1", HR)).rejects.toThrow(NotFoundException);
     });
@@ -106,59 +141,197 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
     });
   });
 
-  describe("incrementUsage / findExpiringBetween", () => {
-    it("delegates usage increments to the repository", async () => {
-      repo.incrementUsage.mockResolvedValue({ id: "plan-1", usageCount: 4 });
-      await service.incrementUsage("plan-1");
-      expect(repo.incrementUsage).toHaveBeenCalledWith("plan-1");
-    });
+  describe("createPlan", () => {
+    const product = { id: "prod-1", name: "Plano Individual", code: "IMPAR-IND-001", maxMembers: null, sessionsPerCycle: 10 };
 
-    it("delegates the expiring-plans window query to the repository", async () => {
-      repo.findExpiringBetween.mockResolvedValue([]);
-      const from = new Date("2026-09-01");
-      const to = new Date("2026-09-30");
-      await service.findExpiringBetween(from, to);
-      expect(repo.findExpiringBetween).toHaveBeenCalledWith(from, to);
-    });
-  });
-
-  describe("createPlan — server-side plan number generation", () => {
     it("uses a caller-supplied planNumber as-is, without generating one", async () => {
-      repo.createPlan.mockResolvedValue({ id: "plan-1", planNumber: "CUSTOM-001" });
+      repo.findProductById.mockResolvedValue(product);
+      repo.createPlanWithMembers.mockResolvedValue(planFixture({ id: "plan-1", planNumber: "CUSTOM-001" } as never));
+
       await service.createPlan({
-        productId: "prod-1", holderPatientId: "pat-1", planNumber: "CUSTOM-001", startDate: "2026-01-01",
+        productId: "prod-1", planNumber: "CUSTOM-001", startDate: "2026-01-01",
       } as never);
-      expect(repo.findProductById).not.toHaveBeenCalled();
+
       expect(repo.nextPlanNumber).not.toHaveBeenCalled();
-      expect(repo.createPlan).toHaveBeenCalledWith(expect.objectContaining({ planNumber: "CUSTOM-001" }));
+      expect(repo.createPlanWithMembers).toHaveBeenCalledWith(
+        expect.objectContaining({ planNumber: "CUSTOM-001", sessionsRemaining: 10 }),
+        []
+      );
     });
 
     it("generates a race-safe plan number server-side when none is provided, keyed by the product's own code and the start year", async () => {
-      repo.findProductById.mockResolvedValue({ id: "prod-1", code: "IMPAR-IND-001" });
+      repo.findProductById.mockResolvedValue(product);
       repo.nextPlanNumber.mockResolvedValue("IMPAR-IND-001-2026-004");
-      repo.createPlan.mockResolvedValue({ id: "plan-1" });
+      repo.createPlanWithMembers.mockResolvedValue(planFixture());
 
-      await service.createPlan({ productId: "prod-1", holderPatientId: "pat-1", startDate: "2026-01-01" } as never);
+      await service.createPlan({ productId: "prod-1", startDate: "2026-01-01" } as never);
 
       expect(repo.nextPlanNumber).toHaveBeenCalledWith("IMPAR-IND-001", 2026);
-      expect(repo.createPlan).toHaveBeenCalledWith(expect.objectContaining({ planNumber: "IMPAR-IND-001-2026-004" }));
+      expect(repo.createPlanWithMembers).toHaveBeenCalledWith(
+        expect.objectContaining({ planNumber: "IMPAR-IND-001-2026-004" }),
+        []
+      );
     });
 
-    it("throws NotFoundException when generating a number for a nonexistent product, without creating a plan", async () => {
+    it("throws NotFoundException for a nonexistent product, without creating a plan", async () => {
       repo.findProductById.mockResolvedValue(null);
       await expect(
-        service.createPlan({ productId: "ghost", holderPatientId: "pat-1", startDate: "2026-01-01" } as never)
+        service.createPlan({ productId: "ghost", startDate: "2026-01-01" } as never)
       ).rejects.toThrow(NotFoundException);
-      expect(repo.createPlan).not.toHaveBeenCalled();
+      expect(repo.createPlanWithMembers).not.toHaveBeenCalled();
+    });
+
+    it("validates and attaches memberPatientIds atomically via createPlanWithMembers", async () => {
+      repo.findProductById.mockResolvedValue(product);
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue(null);
+      repo.createPlanWithMembers.mockResolvedValue(planFixture());
+
+      await service.createPlan({ productId: "prod-1", startDate: "2026-01-01", memberPatientIds: ["pat-1"] } as never);
+
+      expect(repo.createPlanWithMembers).toHaveBeenCalledWith(expect.anything(), ["pat-1"]);
+    });
+
+    it("throws NotFoundException when a memberPatientIds entry doesn't exist", async () => {
+      repo.findProductById.mockResolvedValue(product);
+      repo.findPatientById.mockResolvedValue(null);
+
+      await expect(
+        service.createPlan({ productId: "prod-1", startDate: "2026-01-01", memberPatientIds: ["ghost"] } as never)
+      ).rejects.toThrow(NotFoundException);
+      expect(repo.createPlanWithMembers).not.toHaveBeenCalled();
+    });
+
+    it("throws ConflictException when a memberPatientIds entry is already actively covered elsewhere", async () => {
+      repo.findProductById.mockResolvedValue(product);
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue({ healthPlan: { planNumber: "OTHER-001" } });
+
+      await expect(
+        service.createPlan({ productId: "prod-1", startDate: "2026-01-01", memberPatientIds: ["pat-1"] } as never)
+      ).rejects.toThrow(ConflictException);
+      expect(repo.createPlanWithMembers).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestException when memberPatientIds exceeds the product's maxMembers", async () => {
+      repo.findProductById.mockResolvedValue({ ...product, maxMembers: 1 });
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue(null);
+
+      await expect(
+        service.createPlan({ productId: "prod-1", startDate: "2026-01-01", memberPatientIds: ["pat-1", "pat-2"] } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.createPlanWithMembers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("addMember / removeMember", () => {
+    it("adds a patient to an existing plan and writes an audit diff", async () => {
+      const { RequestContext } = await import("../../common/context/request-context");
+      const spy = jest.spyOn(RequestContext, "setAuditDiff");
+      const before = planFixture({ id: "plan-1", product: { name: "P", active: true, durationMonths: 1, maxMembers: null } });
+      const after = planFixture({
+        id: "plan-1",
+        product: { name: "P", active: true, durationMonths: 1, maxMembers: null },
+        members: [{ patientId: "pat-1", addedAt: new Date(), patient: { fullName: "Ana Silva" } }],
+      });
+      repo.findPlanById.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue(null);
+
+      const result = await service.addMember("plan-1", "pat-1");
+
+      expect(repo.addMember).toHaveBeenCalledWith("plan-1", "pat-1");
+      expect(result.members).toEqual([{ patientId: "pat-1", patientName: "Ana Silva", addedAt: expect.any(Date) }]);
+      expect(spy).toHaveBeenCalledWith({ members: [] }, { members: ["pat-1"] });
+      spy.mockRestore();
+    });
+
+    it("throws NotFoundException for a nonexistent plan", async () => {
+      repo.findPlanById.mockResolvedValue(null);
+      await expect(service.addMember("ghost", "pat-1")).rejects.toThrow(NotFoundException);
+    });
+
+    it("throws NotFoundException for a nonexistent patient", async () => {
+      repo.findPlanById.mockResolvedValue(planFixture());
+      repo.findPatientById.mockResolvedValue(null);
+      await expect(service.addMember("plan-1", "ghost")).rejects.toThrow(NotFoundException);
+    });
+
+    it("throws ConflictException when the patient is already a member of this same plan", async () => {
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1" }));
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue({ healthPlanId: "plan-1", healthPlan: { planNumber: "PLN-1" } });
+
+      await expect(service.addMember("plan-1", "pat-1")).rejects.toThrow(ConflictException);
+      expect(repo.addMember).not.toHaveBeenCalled();
+    });
+
+    it("throws ConflictException when the patient is already a member of a different plan", async () => {
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1" }));
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue({ healthPlanId: "plan-2", healthPlan: { planNumber: "PLN-2" } });
+
+      await expect(service.addMember("plan-1", "pat-1")).rejects.toThrow(ConflictException);
+      expect(repo.addMember).not.toHaveBeenCalled();
+    });
+
+    it("throws BadRequestException when adding would exceed the product's maxMembers", async () => {
+      repo.findPlanById.mockResolvedValue(
+        planFixture({ id: "plan-1", product: { name: "P", active: true, durationMonths: 1, maxMembers: 1 } })
+      );
+      repo.findPatientById.mockResolvedValue({ id: "pat-1" });
+      repo.findActiveMembership.mockResolvedValue(null);
+      repo.countActiveMembers.mockResolvedValue(1);
+
+      await expect(service.addMember("plan-1", "pat-1")).rejects.toThrow(BadRequestException);
+      expect(repo.addMember).not.toHaveBeenCalled();
+    });
+
+    it("removes a member (soft) and is idempotent for a non-member", async () => {
+      const before = planFixture({ id: "plan-1", members: [{ patientId: "pat-1", addedAt: new Date(), patient: { fullName: "Ana" } }] });
+      const after = planFixture({ id: "plan-1", members: [] });
+      repo.findPlanById.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+
+      const result = await service.removeMember("plan-1", "pat-1");
+
+      expect(repo.softRemoveMember).toHaveBeenCalledWith("plan-1", "pat-1");
+      expect(result.members).toEqual([]);
+    });
+
+    it("throws NotFoundException for a nonexistent plan on removal", async () => {
+      repo.findPlanById.mockResolvedValue(null);
+      await expect(service.removeMember("ghost", "pat-1")).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("recordSessionUsage", () => {
+    it("no-ops (returns null) when the patient has no active membership", async () => {
+      repo.findActiveMembership.mockResolvedValue(null);
+      await expect(service.recordSessionUsage("pat-1")).resolves.toBeNull();
+      expect(repo.incrementUsage).not.toHaveBeenCalled();
+      expect(repo.decrementSession).not.toHaveBeenCalled();
+    });
+
+    it("increments usageCount and decrements sessionsRemaining together for an active member", async () => {
+      repo.findActiveMembership.mockResolvedValue({ healthPlanId: "plan-1" });
+      repo.findPlanById.mockResolvedValue(planFixture({ id: "plan-1", sessionsRemaining: 6 }));
+
+      const result = await service.recordSessionUsage("pat-1");
+
+      expect(repo.incrementUsage).toHaveBeenCalledWith("plan-1");
+      expect(repo.decrementSession).toHaveBeenCalledWith("plan-1");
+      expect(result).toEqual({ healthPlanId: "plan-1", sessionsRemaining: 6 });
     });
   });
 
   describe("getActiveCoverage", () => {
-    const activePlan = (overrides: Record<string, unknown> = {}) => ({
+    const activePlan = (overrides: Record<string, unknown> = {}) => [{
       healthPlan: {
         id: "plan-1",
         active: true,
         endDate: null,
+        sessionsRemaining: null as number | null,
         product: {
           name: "Plano Familiar",
           active: true,
@@ -166,48 +339,41 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
         },
         ...overrides,
       },
-    });
+    }];
 
-    it("returns null when the patient has no health plan at all", async () => {
-      repo.findActiveHealthPlanForPatient.mockResolvedValue({ healthPlan: null });
-      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
-    });
-
-    it("returns null when the plan itself is inactive", async () => {
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(activePlan({ active: false }));
-      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
-    });
-
-    it("returns null when the plan's product is inactive", async () => {
-      const plan = activePlan();
-      plan.healthPlan.product = { ...plan.healthPlan.product, active: false };
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
-      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
-    });
-
-    it("returns null when the plan has expired", async () => {
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(
-        activePlan({ endDate: new Date("2020-01-01") })
-      );
+    it("returns null when the patient has no active plan membership at all", async () => {
+      repo.findActiveMembershipsForPatients.mockResolvedValue([]);
       await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
     });
 
     it("returns null when coverageRules has no coverage percentage set", async () => {
-      const plan = activePlan();
-      plan.healthPlan.product = { ...plan.healthPlan.product, coverageRules: { type: "familiar" } };
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      const [m] = activePlan();
+      m.healthPlan.product = { ...m.healthPlan.product, coverageRules: { type: "familiar" } };
+      repo.findActiveMembershipsForPatients.mockResolvedValue([m]);
       await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
     });
 
     it("returns null when coverage is explicitly 0", async () => {
-      const plan = activePlan();
-      plan.healthPlan.product = { ...plan.healthPlan.product, coverageRules: { coverage: 0 } };
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      const [m] = activePlan();
+      m.healthPlan.product = { ...m.healthPlan.product, coverageRules: { coverage: 0 } };
+      repo.findActiveMembershipsForPatients.mockResolvedValue([m]);
       await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
     });
 
-    it("returns the coverage percentage, plan id, and product name for a valid active plan", async () => {
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(activePlan());
+    it("returns null when the plan has run out of sessions", async () => {
+      repo.findActiveMembershipsForPatients.mockResolvedValue(activePlan({ sessionsRemaining: 0 }));
+      await expect(service.getActiveCoverage("patient-1")).resolves.toBeNull();
+    });
+
+    it("returns coverage when sessionsRemaining is null (unlimited)", async () => {
+      repo.findActiveMembershipsForPatients.mockResolvedValue(activePlan({ sessionsRemaining: null }));
+      await expect(service.getActiveCoverage("patient-1")).resolves.toEqual(
+        expect.objectContaining({ coveragePercent: 80 })
+      );
+    });
+
+    it("returns the coverage percentage, plan id, and product name for a valid active plan with sessions left", async () => {
+      repo.findActiveMembershipsForPatients.mockResolvedValue(activePlan({ sessionsRemaining: 3 }));
       await expect(service.getActiveCoverage("patient-1")).resolves.toEqual({
         healthPlanId: "plan-1",
         coveragePercent: 80,
@@ -215,79 +381,17 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
       });
     });
 
-    it("does not expire a plan with a future endDate", async () => {
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(
-        activePlan({ endDate: new Date("2099-01-01") })
-      );
-      await expect(service.getActiveCoverage("patient-1")).resolves.toEqual(
-        expect.objectContaining({ coveragePercent: 80 })
-      );
-    });
-
     it("caps coverage at 100% even if the stored value is higher", async () => {
-      const plan = activePlan();
-      plan.healthPlan.product = { ...plan.healthPlan.product, coverageRules: { coverage: 150 } };
-      repo.findActiveHealthPlanForPatient.mockResolvedValue(plan);
+      const [m] = activePlan();
+      m.healthPlan.product = { ...m.healthPlan.product, coverageRules: { coverage: 150 } };
+      repo.findActiveMembershipsForPatients.mockResolvedValue([m]);
       await expect(service.getActiveCoverage("patient-1")).resolves.toEqual(
         expect.objectContaining({ coveragePercent: 100 })
       );
     });
   });
 
-  describe("holder-name enrichment (findAllPlans / findPlanById)", () => {
-    it("attaches holderPatientName for plans that have a holder, in one batched lookup", async () => {
-      repo.findAllPlans.mockResolvedValue([
-        { id: "plan-1", holderPatientId: "pat-1", companyId: null },
-        { id: "plan-2", holderPatientId: "pat-2", companyId: null },
-        { id: "plan-3", holderPatientId: "pat-1", companyId: null }, // shares pat-1 — still one lookup
-      ]);
-      repo.findPatientNamesByIds.mockResolvedValue([
-        { id: "pat-1", fullName: "Ana Silva" },
-        { id: "pat-2", fullName: "Bruno Costa" },
-      ]);
-
-      const result = await service.findAllPlans(undefined, ADMIN);
-
-      expect(repo.findPatientNamesByIds).toHaveBeenCalledTimes(1);
-      expect(repo.findPatientNamesByIds).toHaveBeenCalledWith(["pat-1", "pat-2"]);
-      expect(result).toEqual([
-        { id: "plan-1", holderPatientId: "pat-1", companyId: null, holderPatientName: "Ana Silva" },
-        { id: "plan-2", holderPatientId: "pat-2", companyId: null, holderPatientName: "Bruno Costa" },
-        { id: "plan-3", holderPatientId: "pat-1", companyId: null, holderPatientName: "Ana Silva" },
-      ]);
-    });
-
-    it("does not call the patient lookup at all for company-only plans with no holder", async () => {
-      repo.findAllPlans.mockResolvedValue([{ id: "plan-1", holderPatientId: null, companyId: "co-1" }]);
-
-      const result = await service.findAllPlans(undefined, ADMIN);
-
-      expect(repo.findPatientNamesByIds).not.toHaveBeenCalled();
-      expect(result).toEqual([{ id: "plan-1", holderPatientId: null, companyId: "co-1" }]);
-    });
-
-    it("attaches holderPatientName on a single plan via findPlanById", async () => {
-      repo.findPlanById.mockResolvedValue({ id: "plan-1", holderPatientId: "pat-1", companyId: null });
-      repo.findPatientNamesByIds.mockResolvedValue([{ id: "pat-1", fullName: "Ana Silva" }]);
-
-      await expect(service.findPlanById("plan-1", ADMIN)).resolves.toEqual({
-        id: "plan-1",
-        holderPatientId: "pat-1",
-        companyId: null,
-        holderPatientName: "Ana Silva",
-      });
-    });
-  });
-
   describe("renew", () => {
-    const planFixture = (overrides: Record<string, unknown> = {}) => ({
-      id: "plan-1",
-      endDate: null as Date | null,
-      active: true,
-      product: { name: "Plano Familiar", active: true, durationMonths: 1 },
-      ...overrides,
-    });
-
     it("throws NotFoundException for a nonexistent plan", async () => {
       repo.findPlanById.mockResolvedValue(null);
       await expect(service.renew("ghost")).rejects.toThrow(NotFoundException);
@@ -295,16 +399,21 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
     });
 
     it("throws BadRequestException when the plan's product has been deactivated", async () => {
-      repo.findPlanById.mockResolvedValue(planFixture({ product: { name: "Plano X", active: false, durationMonths: 1 } }));
+      repo.findPlanById.mockResolvedValue(
+        planFixture({ product: { name: "Plano X", active: false, durationMonths: 1, sessionsPerCycle: null } })
+      );
       await expect(service.renew("plan-1")).rejects.toThrow(BadRequestException);
       expect(repo.updatePlan).not.toHaveBeenCalled();
     });
 
     it("extends from today (UTC) and reactivates a plan that already lapsed", async () => {
       repo.findPlanById.mockResolvedValue(
-        planFixture({ endDate: new Date("2020-01-01"), active: false, product: { name: "P", active: true, durationMonths: 1 } })
+        planFixture({
+          endDate: new Date("2020-01-01"), active: false,
+          product: { name: "P", active: true, durationMonths: 1, sessionsPerCycle: null },
+        })
       );
-      repo.updatePlan.mockResolvedValue({ id: "plan-1" });
+      repo.updatePlan.mockResolvedValue(planFixture());
 
       await service.renew("plan-1");
 
@@ -318,9 +427,12 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
 
     it("extends from the plan's own future endDate rather than today, for an early renewal", async () => {
       repo.findPlanById.mockResolvedValue(
-        planFixture({ endDate: new Date(Date.UTC(2027, 5, 15)), product: { name: "P", active: true, durationMonths: 12 } })
+        planFixture({
+          endDate: new Date(Date.UTC(2027, 5, 15)),
+          product: { name: "P", active: true, durationMonths: 12, sessionsPerCycle: null },
+        })
       );
-      repo.updatePlan.mockResolvedValue({ id: "plan-1" });
+      repo.updatePlan.mockResolvedValue(planFixture());
 
       await service.renew("plan-1");
 
@@ -328,17 +440,37 @@ describe("HealthPlansService — company scoping for corporate_hr", () => {
       expect(data.endDate).toEqual(new Date(Date.UTC(2028, 5, 15)));
     });
 
-    it("writes a before/after audit diff via RequestContext", async () => {
+    it("refills sessionsRemaining to the product's current sessionsPerCycle", async () => {
+      repo.findPlanById.mockResolvedValue(
+        planFixture({
+          sessionsRemaining: 1,
+          product: { name: "P", active: true, durationMonths: 1, sessionsPerCycle: 10 },
+        })
+      );
+      repo.updatePlan.mockResolvedValue(planFixture());
+
+      await service.renew("plan-1");
+
+      const [, data] = repo.updatePlan.mock.calls[0];
+      expect(data.sessionsRemaining).toBe(10);
+    });
+
+    it("writes a before/after audit diff via RequestContext, including sessionsRemaining", async () => {
       const { RequestContext } = await import("../../common/context/request-context");
       const spy = jest.spyOn(RequestContext, "setAuditDiff");
-      repo.findPlanById.mockResolvedValue(planFixture({ endDate: new Date(Date.UTC(2027, 0, 1)) }));
-      repo.updatePlan.mockResolvedValue({ id: "plan-1" });
+      repo.findPlanById.mockResolvedValue(
+        planFixture({
+          endDate: new Date(Date.UTC(2027, 0, 1)), sessionsRemaining: 2,
+          product: { name: "P", active: true, durationMonths: 1, sessionsPerCycle: 10 },
+        })
+      );
+      repo.updatePlan.mockResolvedValue(planFixture());
 
       await service.renew("plan-1");
 
       expect(spy).toHaveBeenCalledWith(
-        { endDate: new Date(Date.UTC(2027, 0, 1)), active: true },
-        expect.objectContaining({ active: true })
+        { endDate: new Date(Date.UTC(2027, 0, 1)), active: true, sessionsRemaining: 2 },
+        expect.objectContaining({ active: true, sessionsRemaining: 10 })
       );
       spy.mockRestore();
     });

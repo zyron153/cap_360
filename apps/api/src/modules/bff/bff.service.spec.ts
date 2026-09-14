@@ -3,6 +3,7 @@ import { NotFoundException } from "@nestjs/common";
 import { BffService } from "./bff.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
+import { HealthPlansService } from "../health-plans/health-plans.service";
 
 process.env.FIELD_ENCRYPTION_KEY = "b".repeat(64);
 
@@ -12,6 +13,7 @@ const prisma = {
   communicationLog: { findMany: jest.fn().mockResolvedValue([]) },
   invoice: { findMany: jest.fn().mockResolvedValue([]) },
 };
+const healthPlansMock = { findActivePlanSummaries: jest.fn() };
 
 describe("BffService — getPatientScreen", () => {
   let service: BffService;
@@ -23,6 +25,7 @@ describe("BffService — getPatientScreen", () => {
         BffService,
         EncryptionService,
         { provide: PrismaService, useValue: prisma },
+        { provide: HealthPlansService, useValue: healthPlansMock },
       ],
     }).compile();
     service = mod.get(BffService);
@@ -31,6 +34,7 @@ describe("BffService — getPatientScreen", () => {
     prisma.appointment.findMany.mockResolvedValue([]);
     prisma.communicationLog.findMany.mockResolvedValue([]);
     prisma.invoice.findMany.mockResolvedValue([]);
+    healthPlansMock.findActivePlanSummaries.mockResolvedValue(new Map());
   });
 
   it("decrypts dateOfBirth and nif before returning — this.prisma.patient.findFirst bypasses the repository's own decryption, unlike every other patient read path", async () => {

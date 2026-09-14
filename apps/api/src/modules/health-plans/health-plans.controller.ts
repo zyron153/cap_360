@@ -19,9 +19,11 @@ import {
   CreateHealthPlanProductSchema,
   UpdateHealthPlanProductSchema,
   CreateHealthPlanSchema,
+  AddHealthPlanMemberSchema,
   CreateHealthPlanProductDto,
   UpdateHealthPlanProductDto,
   CreateHealthPlanDto,
+  AddHealthPlanMemberDto,
 } from "@cap/types";
 
 @Controller("health-plans")
@@ -96,5 +98,24 @@ export class HealthPlansController {
   @Roles("admin", "receptionist")
   renewPlan(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.renew(id);
+  }
+
+  @Post(":id/members")
+  @Roles("admin", "receptionist")
+  addMember(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(AddHealthPlanMemberSchema)) dto: AddHealthPlanMemberDto
+  ) {
+    return this.service.addMember(id, dto.patientId);
+  }
+
+  @Delete(":id/members/:patientId")
+  @Roles("admin", "receptionist")
+  @HttpCode(HttpStatus.OK)
+  removeMember(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("patientId", ParseUUIDPipe) patientId: string
+  ) {
+    return this.service.removeMember(id, patientId);
   }
 }

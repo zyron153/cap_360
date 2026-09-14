@@ -12,11 +12,14 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 > **Implementation status:** invoice creation (auto-draft on Consulta completion + manual), payments
 > (idempotent, transactional, overpayment-guarded), cancellation, PDF receipts, and E-Fatura tax
 > submission are built and tested. ✅ **Health-plan co-pay is now computed** — a patient with an
-> active plan gets an automatic negative "Desconto Plano de Saúde" line on invoice creation (manual
-> and auto-draft alike), sized from the plan product's `coverageRules.coverage` %
-> (`HealthPlansService.getActiveCoverage`); plan **utilisation** (`HealthPlan.usageCount`) is
-> separately incremented on appointment completion regardless of how the resulting invoice gets
-> paid (`AppointmentsService`, unrelated to this discount). `health_plan` as a `PaymentMethod` value
+> active plan membership *with sessions remaining* gets an automatic negative "Desconto Plano de
+> Saúde" line on invoice creation (manual and auto-draft alike), sized from the plan product's
+> `coverageRules.coverage` % (`HealthPlansService.getActiveCoverage`) — the discount stops once the
+> plan's shared session pool (`HealthPlan.sessionsRemaining`) hits 0, even with time left before
+> `endDate`. Plan **utilisation** (`HealthPlan.usageCount`, a lifetime tally) is separately
+> incremented on appointment completion regardless of how the resulting invoice gets paid
+> (`AppointmentsService` → `HealthPlansService.recordSessionUsage`, unrelated to this discount),
+> which is also what drains `sessionsRemaining`. `health_plan` as a `PaymentMethod` value
 > is still just a label with no discount logic of its own — the discount is applied once, up front,
 > at invoice creation. ❌ No automatic
 > WhatsApp/email receipt delivery — a receipt is only ever generated on request via
