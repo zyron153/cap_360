@@ -139,13 +139,39 @@ Response 201: Waitlist entry
 ```
 Body: { "status": "confirmed | checked_in | completed | cancelled | no_show",
   "cancellationReason": "string (optional)", "durationMinutes": "1-600 (optional)" }
-Response 200: Updated appointment. Marking "completed" auto-creates a draft invoice for the service.
+Response 200: Updated appointment (plus "invoiceWarning": string, only present if the auto-draft
+              invoice below failed). Marking "completed" auto-creates a draft invoice for the service.
+Response 400: requested status isn't a valid transition from the appointment's current status
 ```
 `durationMinutes` is the actual time spent, confirmed when marking "completed" — it's written onto
 the appointment and, when the service has a known standard duration, scales the auto-created draft
 invoice's price: `unitPrice = (durationMinutes / service.durationMinutes) * service.price`. Omit it
 (or when the service has no standard duration) and the draft is priced at the flat catalogue price,
 as before this field existed.
+
+**Fixed (2026-09-16):** status transitions are now validated server-side (`pending → confirmed/
+cancelled`, `confirmed → checked_in/completed/no_show/cancelled`, `checked_in → completed/no_show/
+cancelled`; `completed`/`cancelled`/`no_show` are terminal). Previously any status could be set from
+any other status with no check, so a retried or duplicate "completed" request on an
+already-completed appointment silently re-ran the auto-invoice-draft and health-plan
+session-usage side effects every time. If the best-effort `createDraft()` call itself fails (DB
+error, etc.), the appointment still completes but the response carries `invoiceWarning` instead of
+silently logging the failure server-side only — use `POST /appointments/:id/invoice` (below) to
+retry it.
+
+### POST `/appointments/:id/invoice` *(not in the original design)*
+```
+Response 200: Newly created draft invoice
+Response 400: appointment is not "completed"; has no service; the service has no billable price;
+              or an invoice already exists for this appointment ("Já existe uma fatura para esta
+              consulta.")
+```
+Manual fallback for the auto-draft step in `PATCH /status` — for when that best-effort call failed
+(surfaced via `invoiceWarning`) or to retroactively bill an older completed appointment that never
+got one. Prices the same way as completion does (proportional to `Appointment.durationMinutes` when
+the service has a standard duration, else the flat catalogue price). Safe to click more than once:
+`invoices.appointmentId` is unique, so a second attempt after one already succeeded fails cleanly
+instead of creating a duplicate.
 
 ### PATCH `/appointments/:id/reschedule`
 ```
@@ -279,6 +305,13 @@ Response 400: invoice is already paid/cancelled, or this payment would push amou
 Insert + re-sum + status update run in one DB transaction — a concurrent payment on the same
 invoice can't read a stale running total between the steps.
 
+**Fixed (2026-09-16):** if the invoice was still `draft` (i.e. the appointment-completion
+auto-invoice, which — unlike `POST /invoices` — is never issued or E-Fatura-submitted at creation
+time), this first payment now also stamps `issuedAt` and creates+queues an `EFaturaSubmission`,
+same as a manually-created invoice gets at `POST /invoices` time. Before this fix, a
+completion-auto-invoice paid off immediately could go straight from `draft` to `paid` without ever
+being submitted to the tax authority, and its "Data" (issue date) stayed blank forever.
+
 #### PATCH `/invoices/:id/items/:itemId`
 ```
 Body: { "quantity": "positive int (optional)", "unitPrice": "positive number (optional)",
@@ -315,9 +348,11 @@ Response 404: no submission exists for this invoice
 Response 202: { "queued": true } — resets the submission to "pending" and re-enqueues it
 ```
 
-There is no `POST /invoices/:id/issue` and no `GET /invoices/:id/pdf` — a receipt PDF is generated
-lazily by `GET /invoices/:id/receipt` and uploaded to R2 (or a placeholder URL if R2 isn't
-configured), not issued as a separate workflow step.
+There is still no standalone `POST /invoices/:id/issue` and no `GET /invoices/:id/pdf` — a receipt
+PDF is generated lazily by `GET /invoices/:id/receipt` and uploaded to R2 (or a placeholder URL if
+R2 isn't configured), not issued as a separate workflow step. A `draft` invoice now gets issued
+implicitly, as a side effect of its first payment (see `POST /invoices/:id/payments` above) rather
+than through any dedicated issue action.
 
 ### Financeiro (Despesas/Entradas) — `/financeiro`, roles: admin, receptionist
 
@@ -491,6 +526,12 @@ Active staff list shaped for dropdowns.
 ```
 Response 200: { "issuedCount": number, "collectedAmount": number, "overdueCount": number }
 ```
+**Fixed (2026-09-16):** `collectedAmount` (this month) is now `sum(Payment.amount)` filtered by
+`Payment.paidAt`. It previously summed `Invoice.amountPaid` filtered by `status = 'paid' AND
+Invoice.createdAt` this month, which undercounted: it missed `partially_paid` invoices (money
+already collected, just not the full total yet) and any invoice created in an earlier month but
+paid this month — the common shape for the appointment-completion auto-invoice (`draft` created at
+completion, paid later).
 
 ---
 
@@ -639,4 +680,8 @@ above) — this replaced the original design's assumption that Keycloak/NGINX wo
 
 ---
 
-*CAP 360 · API Specification · regenerated from the actual controllers — 2026-09-12 (appointment-completion duration → proportional draft-invoice pricing, editable draft line items)*
+*CAP 360 · API Specification · regenerated from the actual controllers — 2026-09-16 (server-side
+status-transition validation on `PATCH /appointments/:id/status` closes a duplicate-draft-invoice
+bug; new `POST /appointments/:id/invoice` manual retry endpoint; a `draft` invoice's first payment
+now issues it and queues E-Fatura submission); previously 2026-09-12 (appointment-completion
+duration → proportional draft-invoice pricing, editable draft line items)*

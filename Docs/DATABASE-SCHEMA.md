@@ -451,7 +451,8 @@ CREATE TABLE invoices (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, xact-advisory-lock-guarded sequence
   "patientId"     UUID NOT NULL REFERENCES patients(id),
-  "appointmentId" UUID REFERENCES appointments(id),
+  "appointmentId" UUID UNIQUE REFERENCES appointments(id),  -- one invoice per appointment; NULLs
+                                                             -- (manual invoices) are unrestricted
   status          VARCHAR(20) NOT NULL DEFAULT 'draft',
   -- draft | issued | partially_paid | paid | overdue | cancelled
   subtotal        NUMERIC(10,2) NOT NULL,
@@ -478,6 +479,13 @@ against `amountPaid` exceeding `total`; `POST /invoices/:id/cancel` sets `status
 (rejecting an already-`paid` invoice) and triggers an E-Fatura cancel job if the invoice had
 already been accepted by the tax authority. No `health_plan_id` column — invoices aren't currently
 linked to a health plan.
+
+**Fixed (2026-09-16):** `"appointmentId"` is now `UNIQUE` — a retried/duplicate "mark completed"
+request on the same appointment can no longer create a second draft invoice; the second attempt's
+`createDraft()` call fails on the constraint instead (caught and surfaced as a 400 by
+`AppointmentsService.retryInvoice`, logged-and-swallowed by the original auto-draft best-effort
+path). A `draft` invoice's first payment now also stamps `issuedAt` and queues an E-Fatura
+submission — previously only invoices created via `POST /invoices` ever got either.
 
 ### 6.2 `invoice_items`
 

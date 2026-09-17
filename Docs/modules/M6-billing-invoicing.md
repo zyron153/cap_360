@@ -53,12 +53,32 @@ Invoices are created:
   best-effort (a billing failure is logged but does not block the completion itself)
 - ✅ **Manually** by receptionist/admin (`POST /invoices`) for walk-ins or additional services
 
+✅ **Fixed (2026-09-16) — duplicate drafts.** `invoices.appointmentId` is now unique, and
+`PATCH /appointments/:id/status` validates the requested transition server-side (see
+`Docs/modules/M1-smart-appointment-engine.md` §5). Previously, any status could be set from any
+other status with no check, so a retried/duplicate "completed" request on an already-completed
+appointment silently re-ran `createDraft()` every time, generating a second draft invoice for the
+same appointment (and separately double-bumping health-plan session usage). ✅ **Fixed — silent
+failure.** If the best-effort `createDraft()` call fails, the response now carries an
+`invoiceWarning` string instead of only logging the failure server-side, and a receptionist/doctor
+can retry it manually via the new `POST /appointments/:id/invoice` (not in the original design) —
+safe to call more than once, since the same unique constraint rejects it cleanly if an invoice
+already exists.
+
 ✅ **Duration-proportional pricing (not in the original design):** completing a Consulta prompts
 for the actual duration (defaulting to the appointment's scheduled duration); when the service has
 a known standard duration, the draft's price is `(actualDuration / service.durationMinutes) *
 service.price` instead of always the flat catalogue price — a 45-minute session on a 30-minute/1500
 CVE service drafts at 2250 CVE, not 1500. The confirmed duration is written back onto
 `Appointment.durationMinutes`; there's no separate duration field on the invoice/line-item itself.
+✅ **Fixed (2026-09-16) — E-Fatura issuance for auto-drafts.** Unlike `POST /invoices` (which
+issues and E-Fatura-submits immediately), `createDraft()` never issued the invoice or created an
+`EFaturaSubmission` — and since `POST /invoices/:id/payments` allows paying a `draft` invoice
+directly, a completion-auto-invoice paid off right away could go straight from `draft` to `paid`
+without ever being submitted to the tax authority, and its issue date stayed blank forever. Now,
+a `draft` invoice's **first** payment stamps `issuedAt` and creates+queues the `EFaturaSubmission`,
+same as a manually-created invoice gets at creation time.
+
 ✅ **Draft line items stay editable afterward, too:** while an invoice is still `draft`,
 `PATCH /invoices/:id/items/:itemId` lets quantity/price be adjusted on any item, and — on the item
 generated from the appointment specifically — lets duration be re-entered instead, recomputing the
@@ -221,7 +241,14 @@ design.
 
 ---
 
-*Module M6 · v1.6 · updated 2026-09-12 — completing a Consulta now confirms actual duration and
+*Module M6 · v1.7 · updated 2026-09-16 — closed a duplicate-draft-invoice bug (unvalidated
+appointment status transitions + a new `invoices.appointmentId` unique constraint); auto-draft
+creation failures now surface as `invoiceWarning` instead of only a server log, with a new manual
+`POST /appointments/:id/invoice` retry; a draft invoice's first payment now issues it and queues
+E-Fatura submission, closing a gap where a quickly-paid auto-invoice never got submitted to the tax
+authority; fixed the Faturas tab's "Receita Cobrada" KPI to sum `Payment.paidAt` instead of
+`Invoice.amountPaid`/`status`/`createdAt`, which undercounted partially-paid and cross-month-paid
+invoices; previously v1.6, 2026-09-12 (completing a Consulta now confirms actual duration and
 prices the auto-generated draft invoice proportionally to the service's standard duration instead
 of always the flat catalogue price; draft invoice line items are now editable in place
 (`PATCH /invoices/:id/items/:itemId`) instead of read-only; corrected this doc's long-standing

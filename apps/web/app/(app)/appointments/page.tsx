@@ -148,11 +148,30 @@ export default function AppointmentsPage() {
         if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
         return r.json();
       }),
-    onSuccess: () => {
+    onSuccess: (data: { invoiceWarning?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["appointment", selectedId] });
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       setCompletingOpen(false);
-      addMessage("Success", "Estado atualizado com sucesso!");
+      if (data?.invoiceWarning) {
+        addMessage("Warning", data.invoiceWarning);
+      } else {
+        addMessage("Success", "Estado atualizado com sucesso!");
+      }
+    },
+    onError: (err: Error) => addMessage("Error", err.message),
+  });
+
+  // Manual fallback for the best-effort auto-invoice step above — shown on a completed
+  // appointment so staff can retry generating the fatura if the automatic attempt failed.
+  const retryInvoiceMutation = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/appointments/${id}/invoice`, { method: "POST" }).then(async (r) => {
+        if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
+        return r.json();
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      addMessage("Success", "Fatura gerada com sucesso!");
     },
     onError: (err: Error) => addMessage("Error", err.message),
   });
@@ -911,6 +930,15 @@ export default function AppointmentsPage() {
                   </button>
                 ))}
               </div>
+            )}
+            {detail.status === "completed" && (
+              <button
+                disabled={retryInvoiceMutation.isPending}
+                onClick={() => retryInvoiceMutation.mutate(detail.id)}
+                className="text-[12px] font-semibold px-3 py-1.5 rounded-[8px] border border-brand-200 text-brand-700 hover:bg-brand-50 disabled:opacity-50 transition-colors"
+              >
+                {retryInvoiceMutation.isPending ? "…" : "Gerar Fatura"}
+              </button>
             )}
           </div>
 

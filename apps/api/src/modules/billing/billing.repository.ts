@@ -104,6 +104,7 @@ export class BillingRepository {
     invoiceId: string,
     payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string; recordedById?: string },
     invoiceTotal: number,
+    markIssued = false,
   ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
@@ -137,8 +138,10 @@ export class BillingRepository {
         // pdfR2Key: null invalidates any previously-cached receipt — getReceiptUrl only
         // regenerates when it's unset, so a stale receipt showing the pre-payment balance would
         // otherwise keep being served after this payment changes amountPaid/status.
-        data: { amountPaid: totalPaid, status, pdfR2Key: null },
-        select: { id: true, status: true, amountPaid: true },
+        // markIssued stamps issuedAt the first time a draft (appointment auto-invoice) receives
+        // money — draft invoices are never issued at creation time the way create() issues one.
+        data: { amountPaid: totalPaid, status, pdfR2Key: null, ...(markIssued ? { issuedAt: new Date() } : {}) },
+        select: { id: true, status: true, amountPaid: true, issuedAt: true },
       });
     });
   }

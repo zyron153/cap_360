@@ -84,7 +84,8 @@ describe("BillingService", () => {
       expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
         "inv-1",
         expect.objectContaining({ amount: 800, method: "bank_transfer" }),
-        2000
+        2000,
+        false
       );
     });
 
@@ -93,7 +94,8 @@ describe("BillingService", () => {
       expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
         "inv-1",
         expect.objectContaining({ recordedById: "staff-1" }),
-        2000
+        2000,
+        false
       );
     });
 
@@ -120,6 +122,48 @@ describe("BillingService", () => {
     });
   });
 
+  describe("recordPayment — draft invoices (appointment auto-invoice) catching up on issuance", () => {
+    beforeEach(() => {
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000" });
+    });
+
+    it("marks the payment as issuing when the invoice was still a draft, and submits it to e-Fatura", async () => {
+      repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "draft" });
+
+      await service.recordPayment("inv-1", { amount: 2000, method: "cash" });
+
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ amount: 2000, method: "cash" }),
+        2000,
+        true
+      );
+      expect(prisma.eFaturaSubmission.create).toHaveBeenCalledWith({
+        data: { invoiceId: "inv-1", status: "pending" },
+      });
+      expect(efaturaQueue.add).toHaveBeenCalledWith(
+        "submit",
+        { invoiceId: "inv-1" },
+        expect.objectContaining({ attempts: 3 })
+      );
+    });
+
+    it("does not re-submit to e-Fatura for an invoice that was already issued", async () => {
+      repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "partially_paid" });
+
+      await service.recordPayment("inv-1", { amount: 500, method: "cash" });
+
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
+        "inv-1",
+        expect.objectContaining({ amount: 500 }),
+        2000,
+        false
+      );
+      expect(prisma.eFaturaSubmission.create).not.toHaveBeenCalled();
+      expect(efaturaQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
   describe("recordPayment — idempotency key replay", () => {
     beforeEach(() => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
@@ -143,7 +187,8 @@ describe("BillingService", () => {
       expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
         "inv-1",
         expect.objectContaining({ idempotencyKey: "key-new" }),
-        2000
+        2000,
+        false
       );
     });
 

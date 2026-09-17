@@ -766,6 +766,92 @@ describe("AppointmentsService", () => {
         id: "appt-1", status: "completed",
       });
     });
+
+    it("returns an invoiceWarning instead of throwing when the auto-invoice draft fails", async () => {
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
+        patient: { id: "p1" },
+        service: { id: "s1", name: "Consulta Geral", price: "1500" },
+      });
+      billingMock.createDraft.mockRejectedValue(new Error("db down"));
+
+      const result = await service.updateStatus("appt-1", { status: "completed" });
+
+      expect(result).toEqual(
+        expect.objectContaining({ id: "appt-1", status: "completed", invoiceWarning: expect.any(String) })
+      );
+    });
+  });
+
+  describe("updateStatus — invalid transitions", () => {
+    it("rejects completing an appointment that is already completed", async () => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "completed", patientId: "p1", serviceId: "s1" });
+
+      await expect(service.updateStatus("appt-1", { status: "completed" })).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+      expect(billingMock.createDraft).not.toHaveBeenCalled();
+    });
+
+    it("rejects any status change on a cancelled appointment", async () => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "cancelled", patientId: "p1", serviceId: "s1" });
+
+      await expect(service.updateStatus("appt-1", { status: "confirmed" })).rejects.toThrow(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects skipping straight from pending to checked_in", async () => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "pending", patientId: "p1", serviceId: "s1" });
+
+      await expect(service.updateStatus("appt-1", { status: "checked_in" })).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe("retryInvoice", () => {
+    it("throws NotFoundException for a nonexistent appointment", async () => {
+      repo.findById.mockResolvedValue(null);
+      await expect(service.retryInvoice("appt-missing")).rejects.toThrow(NotFoundException);
+    });
+
+    it("throws BadRequestException when the appointment isn't completed", async () => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1" });
+      await expect(service.retryInvoice("appt-1")).rejects.toThrow(BadRequestException);
+    });
+
+    it("throws BadRequestException when the completed appointment has no service", async () => {
+      repo.findById.mockResolvedValue({ id: "appt-1", status: "completed", patientId: "p1", serviceId: null, service: null });
+      await expect(service.retryInvoice("appt-1")).rejects.toThrow(BadRequestException);
+    });
+
+    it("creates the draft invoice using the appointment's confirmed duration and service price", async () => {
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status: "completed", patientId: "p1", serviceId: "s1", durationMinutes: 45,
+        service: { id: "s1", name: "Consulta Geral", price: "1500", durationMinutes: 30 },
+      });
+      billingMock.createDraft.mockResolvedValue({ id: "inv-1" });
+
+      const result = await service.retryInvoice("appt-1");
+
+      expect(billingMock.createDraft).toHaveBeenCalledWith(
+        expect.objectContaining({ patientId: "p1", appointmentId: "appt-1", serviceId: "s1", unitPrice: 2250 })
+      );
+      expect(result).toEqual({ id: "inv-1" });
+    });
+
+    it("turns a duplicate-invoice DB error into a friendly BadRequestException", async () => {
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status: "completed", patientId: "p1", serviceId: "s1", durationMinutes: null,
+        service: { id: "s1", name: "Consulta Geral", price: "1500" },
+      });
+      billingMock.createDraft.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed on the fields: (`appointmentId`)", {
+          code: "P2002",
+          clientVersion: "6.19.3",
+          meta: { target: ["appointmentId"] },
+        })
+      );
+
+      await expect(service.retryInvoice("appt-1")).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe("updateWaitlistStatus", () => {

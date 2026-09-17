@@ -1,75 +1,54 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-14.
+> Snapshot overwritten each session. Última atualização: 2026-09-16.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
 
-- **M4 Health Plan Management — campo Seguradora nos produtos.** Pedido rápido de follow-up à
-  sessão anterior (via Sherlock me): ao criar um produto de plano, novo campo obrigatório
-  "Seguradora" (`<select>`), carregado do grupo de parametrização `TIPO_SEGURADORA` (mesmo padrão
-  do campo "Tipo" existente, que já lia `TIPO_PLANO_SAUDE`). Guardado dentro do JSON
-  `coverageRules` (`coverageRules.seguradora`), sem alteração de schema — mas com validação real no
-  backend (`HealthPlansService.createProduct` rejeita com `400` se faltar). Editável depois via o
-  modal "Gerir" do produto (antes só de leitura). Descoberta a meio da implementação: o grupo
-  `TIPO_SEGURADORA` **já existia** na BD de dev, criado manualmente pelo utilizador via
-  Parametrizações (GARANTIA/IMPAR/ALIANÇA) — o seed script foi ajustado para espelhar esses valores
-  reais em vez de um palpite genérico. Decisão explícita do utilizador: este novo campo
-  **substitui** a antiga etiqueta "Seguradora" do modal "Gerir" (que na verdade mostrava
-  `product.company.name`, a ligação real à empresa) — essa ligação `companyId`/`Company` continua a
-  existir no schema para o que já usava, só deixou de aparecer rotulada como "Seguradora" em
-  qualquer sítio da UI de produtos. Verificado ao vivo contra a API real (criar sem seguradora →
-  400; com ela → 201 e persistida; `PATCH` a editar → funciona).
-
-- **M4 Health Plan Management — modelo de membership real, quota de sessões partilhada, botão de
-  renovação consolidado.** Decisão de âmbito tomada com o utilizador antes de implementar (via
-  Sherlock me), em duas rondas de perguntas: membership via **nova tabela de junção**
-  (`health_plan_members`), substituindo por completo `HealthPlan.holderPatientId`; `Patient
-  .healthPlanId` **removido por completo** (sem ponteiro desnormalizado, tudo derivado da
-  membership); **uma pool de sessões partilhada** por plano (não por membro); decremento de sessão
-  **só em `completed`**; renovação **reabastece** as sessões ao total do produto; botão "Renovar"
-  fica **só** na página de detalhe do plano.
-  - Schema: novo modelo `HealthPlanMember` (`healthPlanId`, `patientId`, `addedAt`, `removedAt`
-    nullable para remoção suave); `HealthPlanProduct.sessionsPerCycle` (sessões por ciclo, `null` =
-    ilimitado); `HealthPlan.sessionsRemaining` (contagem regressiva do ciclo atual, semeada/
-    reabastecida a partir do produto). Migração em 3 passos respeitando a convenção `db push` do
-    repo: push aditivo → script de backfill (uniu os dois ponteiros antigos, incluindo um caso real
-    de desincronização nos dados seed) → push destrutivo a remover `holderPatientId`/
-    `Patient.healthPlanId` de vez, já com todo o código migrado a ler só a nova tabela.
-  - Regras de negócio novas em `HealthPlansService`: um paciente só pode ter uma membership ativa
-    de cada vez (409 caso contrário); `HealthPlanProduct.maxMembers` passa a ser realmente aplicado
-    (400 se excedido); remoção é sempre suave (`removedAt`), nunca hard-delete, e é idempotente;
-    `recordSessionUsage` substitui `incrementUsage` — incrementa `usageCount` (tally vitalício) e
-    decrementa `sessionsRemaining` (nunca abaixo de 0, via `updateMany` guardado) em conjunto,
-    chamado sem condição a partir de `AppointmentsService` (antes só disparava se
-    `patient.healthPlanId` estivesse definido). `getActiveCoverage` (usado pelo desconto de
-    faturação) passa a exigir também sessões restantes, não só plano/produto ativos e não expirados.
-  - Novas rotas: `POST /health-plans/:id/members` e `DELETE /health-plans/:id/members/:patientId`
-    (admin, receptionist). `POST /health-plans` deixa de aceitar `holderPatientId` e passa a aceitar
-    `memberPatientIds[]` opcional, criando o plano e associando membros na mesma transação.
-  - Estado "a expirar" no frontend passa de um limiar único de 30 dias para 5 dias **ou** ≤5
-    sessões restantes (o que vier primeiro) — separado da cadência de notificação 30/15/7 dias, que
-    fica inalterada.
-  - Frontend: página de detalhe do plano ganha um cartão **Membros** (listar/adicionar/remover,
-    pesquisa de pacientes com debounce) e um indicador de sessões; a tab Planos troca a coluna
-    "Titular" por "Membros" (+contagem) e ganha uma coluna "Sessões", perdendo a ação rápida
-    "Renovar"; o modal de plano na lista de pacientes perde o botão "Renovar" e ganha um link "Ver
-    Plano" para a página de detalhe; a tab Produtos ganha campos "Sessões por Ciclo"/"Máx. Membros".
-  - Consumidores de backend migrados para a membership: `patients.service.ts` (filtro de plano e
-    listagem), `bff.service.ts` (ecrã do paciente), `analytics.service.ts` (distribuição de plano),
-    `notifications.processor.ts` (lembretes de expiração agora mensageiam todos os membros ativos e,
-    independentemente, a empresa, em vez do modelo titular-XOR-empresa anterior).
-  - Testes: specs unitários de `health-plans.service`, `appointments.service`,
-    `notifications.processor`, `analytics.service` e `patients.service`/`repository` reescritos para
-    o novo modelo; novo `health-plan-members.integration-spec.ts` (add/remove, limite de membros,
-    plano duplicado, reativação após remoção, remoção idempotente, plano inexistente);
-    `health-plan-renewal.integration-spec.ts` estendido com o ciclo de vida completo de sessões
-    (completar consulta → pool esvazia → renovar → pool reabastece); novo
-    `health-plan-members.spec.ts` e2e e `health-plan-renewal.spec.ts` atualizado (sem botão
-    "Renovar" na lista, novo placeholder de pesquisa).
-  - Docs atualizados: `modules/M4-health-plan-management.md` (v1.3), `API-SPEC.md` §4,
-    `DATABASE-SCHEMA.md` §1.1/§4, `modules/M6-billing-invoicing.md` (nota sobre o gate de sessões no
-    desconto).
+- **M1/M6 — auditoria e correção do fluxo Consulta Concluída → Fatura → Pagamento →
+  Financeiro (entrada).** Pedido via Sherlock me: analisar o fluxo completo e corrigir bugs
+  encontrados. Quatro problemas reais identificados e corrigidos:
+  - **Faturas duplicadas.** `AppointmentsService.updateStatus` não validava a transição de
+    estado — qualquer estado podia mudar para qualquer outro, sem verificação nenhuma. Um pedido
+    `PATCH .../status` repetido/duplicado (retry de rede, duplo clique, múltiplos separadores) para
+    "completed" numa consulta já concluída voltava a correr `createDraft()` e
+    `recordSessionUsage()`, criando uma segunda fatura rascunho para a mesma consulta e a contar
+    utilização de plano de saúde a dobrar. Corrigido com uma máquina de estados real no backend
+    (`pending → confirmed/cancelled`, `confirmed → checked_in/completed/no_show/cancelled`,
+    `checked_in → completed/no_show/cancelled`; `completed`/`cancelled`/`no_show` terminais) e,
+    como rede de segurança ao nível da BD, `invoices.appointmentId` passou a `UNIQUE` (aplicado via
+    `prisma db push --accept-data-loss`, confirmado sem duplicados existentes antes de aplicar).
+  - **Falha silenciosa na fatura automática.** Se `createDraft()` falhasse (erro de BD, etc.), a
+    consulta ficava concluída na mesma e a UI mostrava um toast de sucesso genérico, sem indicar
+    que a fatura nunca foi criada. Agora a resposta do `PATCH .../status` inclui `invoiceWarning`
+    quando isso acontece, a UI mostra um toast de aviso em vez de sucesso, e foi adicionado um novo
+    endpoint `POST /appointments/:id/invoice` + botão "Gerar Fatura" na ficha da consulta para
+    gerar a fatura manualmente depois — seguro para clicar mais do que uma vez, graças à mesma
+    constraint `UNIQUE`.
+  - **Faturas automáticas nunca emitidas/submetidas à E-Fatura.** Ao contrário de `POST
+    /invoices` (que emite e submete à E-Fatura de imediato), `BillingService.createDraft()` nunca
+    criava um `EFaturaSubmission` nem definia `issuedAt` — e como `POST /invoices/:id/payments`
+    permite pagar uma fatura ainda em rascunho, uma fatura de conclusão de consulta paga
+    imediatamente passava de `draft` a `paid` sem nunca ser submetida à autoridade tributária, e a
+    coluna "Data" ficava sempre em branco. Corrigido: o primeiro pagamento de uma fatura `draft`
+    agora regista `issuedAt` e cria/enfileira o `EFaturaSubmission`, tal como uma fatura criada
+    manualmente.
+  - **KPI "Receita Cobrada" subcontava.** `GET /bff/billing-summary` somava
+    `Invoice.amountPaid` filtrado por `status = 'paid' AND createdAt` do mês — o que ignora faturas
+    `partially_paid` e faturas criadas num mês mas pagas noutro (o caso comum do fluxo de
+    auto-fatura de consultas). Corrigido para somar `Payment.amount` filtrado por `Payment.paidAt`.
+  - Verificação: 133 testes de backend (`appointments`, `billing`, `bff`) a passar, incluindo
+    testes novos para a máquina de estados e para `retryInvoice`; `tsc --noEmit` limpo em `api` e
+    `web`; fluxo confirmado ao vivo num browser real (Playwright) — consulta levada a Concluída →
+    fatura rascunho criada → segunda tentativa de conclusão rejeitada com 400 sem duplicar a fatura
+    → pagamento registado → fatura aparece em Financeiro → Entradas → Faturas Pagas → submissão
+    E-Fatura criada.
+  - Achado à parte, **não corrigido** (fora do âmbito pedido): o resumo do Financeiro filtra
+    intervalos de data por fronteiras UTC enquanto a UI escolhe "hoje" pelo relógio local do
+    browser — uma entrada registada na última hora local do dia em Cabo Verde pode ficar de fora
+    dos totais "este mês" até a data virar em UTC. Ver "Próximo" abaixo.
+  - Docs atualizados: `modules/M1-smart-appointment-engine.md` (v1.3), `modules/M6-billing-
+    invoicing.md` (v1.7), `API-SPEC.md`, `DATABASE-SCHEMA.md` §6.1.
 
 ## Em curso
 
@@ -82,6 +61,13 @@
 
 ## Próximo
 
+- **Financeiro — filtragem de datas por fronteira UTC vs. fuso horário local.** Achado nesta
+  sessão (ver acima): endpoints de intervalo de datas (`/financeiro/summary` e afins) comparam
+  `to`/`from` diretamente contra timestamps UTC guardados na BD, mas a UI deriva "hoje"/"este mês"
+  do relógio local do browser. Para Cabo Verde (UTC-1), a última hora local de cada dia cai já no
+  dia seguinte em UTC, pelo que entradas/pagamentos registados nessa janela podem ficar fora do
+  período esperado. Precisa de decidir se a correção é ao nível do fuso da clínica (config) ou
+  normalizar sempre para o fuso de Cabo Verde nos endpoints de relatório.
 - M4: self-service portal para `corporate_hr` gerir membros/relatórios de utilização (§4/§5 do
   módulo) — a membership existe, mas só é gerível via UI/API de admin/receptionist hoje. Renovação
   automática/agendada continua fora por decisão (ver `modules/M4-health-plan-management.md` §3.4).

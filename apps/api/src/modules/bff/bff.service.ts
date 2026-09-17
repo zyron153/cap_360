@@ -122,16 +122,21 @@ export class BffService {
       this.prisma.invoice.count({
         where: { status: "issued", createdAt: { gte: startOfMonth } },
       }),
-      this.prisma.invoice.aggregate({
-        where: { status: "paid", createdAt: { gte: startOfMonth } },
-        _sum: { amountPaid: true },
+      // Money actually collected this month — keyed off Payment.paidAt, not the invoice's
+      // status/createdAt. Filtering by invoice.status === "paid" undercounts: it misses
+      // partially_paid invoices (money already collected, just not the full total yet) and
+      // invoices created in an earlier month but paid this month, which is the common case
+      // for the appointment-completion auto-invoice flow (draft -> paid on first payment).
+      this.prisma.payment.aggregate({
+        where: { paidAt: { gte: startOfMonth } },
+        _sum: { amount: true },
       }),
       this.prisma.invoice.count({ where: { status: "overdue" } }),
     ]);
 
     return {
       issuedCount,
-      collectedAmount: Number(collected._sum.amountPaid ?? 0),
+      collectedAmount: Number(collected._sum.amount ?? 0),
       overdueCount,
     };
   }

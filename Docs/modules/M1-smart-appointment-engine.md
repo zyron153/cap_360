@@ -122,6 +122,14 @@ Key routes:
   "Concluída" prompts for the actual time spent (defaulting to the scheduled duration); this is
   written onto `Appointment.durationMinutes` and drives the price of the draft invoice
   auto-generated on completion — see `Docs/modules/M6-billing-invoicing.md` §2.2
+- ✅ **Fixed.** Status transitions are now validated server-side (`pending → confirmed/cancelled`,
+  `confirmed → checked_in/completed/no_show/cancelled`, `checked_in → completed/no_show/cancelled`;
+  `completed`/`cancelled`/`no_show` are terminal — `PATCH /appointments/:id/status` returns 400
+  otherwise). There was previously no check at all: a retried or duplicate "completed" request on
+  an already-completed appointment silently re-ran the auto-invoice-draft and health-plan
+  session-usage side effects (see `Docs/modules/M6-billing-invoicing.md` §2.2) every time it
+  replayed. A DB-level `invoices.appointmentId` unique constraint backs this up even if the
+  application check is ever bypassed.
 
 ---
 
@@ -153,5 +161,7 @@ Key routes:
 
 ---
 
-*Module M1 · v1.2 · updated 2026-09-12 — completing a Consulta now confirms actual duration, which
-drives the auto-generated draft invoice's price (see M6 §2.2)*
+*Module M1 · v1.3 · updated 2026-09-16 — appointment status changes are now validated against a
+real state machine server-side, closing a duplicate-draft-invoice bug where a replayed "completed"
+request re-ran completion side effects; previously v1.2, 2026-09-12 (completing a Consulta now
+confirms actual duration, which drives the auto-generated draft invoice's price — see M6 §2.2)*

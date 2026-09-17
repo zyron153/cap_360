@@ -32,6 +32,19 @@ import {
 const SLOT_MINUTES = 30;
 const SLOT_LOCK_TTL_MS = 30_000;
 
+// Which statuses a PATCH .../status may move an appointment into, keyed by its current status.
+// completed/cancelled/no_show are terminal — without this, a retried or duplicate "completed"
+// PATCH on an already-completed appointment would re-run the auto-invoice + health-plan-usage
+// side effects below every time, generating a second draft invoice per replay.
+const VALID_STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ["confirmed", "cancelled"],
+  confirmed: ["checked_in", "completed", "no_show", "cancelled"],
+  checked_in: ["completed", "no_show", "cancelled"],
+  completed: [],
+  cancelled: [],
+  no_show: [],
+};
+
 // JS Date#getDay() is 0=Sunday..6=Saturday — matches the day order in ClinicSettings.hours
 const DAY_NAMES = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
 
@@ -439,6 +452,13 @@ export class AppointmentsService {
     const appointment = await this.repo.findById(id);
     if (!appointment) throw new NotFoundException(`Appointment ${id} not found`);
 
+    const allowedNext = VALID_STATUS_TRANSITIONS[appointment.status] ?? [];
+    if (!allowedNext.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot change status from "${appointment.status}" to "${dto.status}"`
+      );
+    }
+
     const data: Record<string, unknown> = { status: dto.status };
     if (dto.cancellationReason)
       data.cancellationReason = dto.cancellationReason;
@@ -457,6 +477,10 @@ export class AppointmentsService {
       await this.cancelPendingReminders(id);
       await this.notifService.notifyCancel(id);
     }
+
+    // Surfaced to the caller (not just logged) so the UI can warn staff that the appointment
+    // completed but no fatura exists yet, instead of silently showing a plain success toast.
+    let invoiceWarning: string | undefined;
 
     if (dto.status === "completed" && appointment.service) {
       // Price is proportional to the confirmed duration only when both the caller supplied one
@@ -479,6 +503,7 @@ export class AppointmentsService {
           unitPrice,
         }).catch((err: unknown) => {
           this.logger.error(`[billing] auto-invoice failed for appointment ${id}`, err instanceof Error ? err.stack : String(err));
+          invoiceWarning = "Consulta concluída, mas a fatura não pôde ser gerada automaticamente. Tente gerar manualmente.";
         });
       }
 
@@ -487,7 +512,51 @@ export class AppointmentsService {
       });
     }
 
-    return updated;
+    return invoiceWarning ? { ...updated, invoiceWarning } : updated;
+  }
+
+  /**
+   * Manual fallback for the auto-invoice step in updateStatus() — used when that best-effort
+   * createDraft() call failed (or to double-check an older completed appointment that predates
+   * this fallback). Relies on Invoice.appointmentId's unique constraint to safely no-op-turned-
+   * error if an invoice already exists, rather than trusting client-side state alone.
+   */
+  async retryInvoice(id: string) {
+    const appointment = await this.repo.findById(id);
+    if (!appointment) throw new NotFoundException(`Appointment ${id} not found`);
+    if (appointment.status !== "completed") {
+      throw new BadRequestException("Only completed appointments can have a fatura generated");
+    }
+    if (!appointment.service) {
+      throw new BadRequestException("This appointment has no service to bill");
+    }
+
+    const unitPrice =
+      appointment.durationMinutes && appointment.service.durationMinutes
+        ? Math.round(
+            (appointment.durationMinutes / appointment.service.durationMinutes) *
+              Number(appointment.service.price) *
+              100
+          ) / 100
+        : Number(appointment.service.price);
+    if (unitPrice <= 0) {
+      throw new BadRequestException("This service has no billable price");
+    }
+
+    try {
+      return await this.billingService.createDraft({
+        patientId: appointment.patientId,
+        appointmentId: id,
+        serviceId: appointment.serviceId,
+        serviceName: appointment.service.name,
+        unitPrice,
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        throw new BadRequestException("Já existe uma fatura para esta consulta.");
+      }
+      throw err;
+    }
   }
 
   async reschedule(id: string, dto: RescheduleAppointmentDto) {

@@ -684,6 +684,8 @@ model Invoice {
   payments          Payment[]
   efaturaSubmission EFaturaSubmission?
 
+  @@unique([appointmentId]) // one invoice per appointment — Postgres allows multiple NULLs, so
+                            // manually-created invoices with no appointment link are unaffected
   @@index([patientId])
   @@index([status])
   @@index([issuedAt])

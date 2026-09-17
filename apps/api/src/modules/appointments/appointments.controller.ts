@@ -100,6 +100,11 @@ export class AppointmentsController {
     return this.service.updateStatus(id, dto);
   }
 
+  @Post(":id/invoice")
+  retryInvoice(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.retryInvoice(id);
+  }
+
   @Patch(":id/reschedule")
   reschedule(
     @Param("id", ParseUUIDPipe) id: string,

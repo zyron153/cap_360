@@ -276,9 +276,14 @@ export class BillingService {
       );
     }
 
+    // A draft invoice (the appointment-completion auto-invoice) was never issued or submitted to
+    // e-Fatura the way create() issues a manual one — its first payment is what makes it real,
+    // so that's the point at which it needs to catch up on both, same as any other invoice.
+    const wasDraft = invoice.status === "draft";
+
     // Insert + re-sum + status update all happen inside one transaction (BillingRepository) —
     // a concurrent payment on this invoice can't read a stale sum between the two steps.
-    return this.repo.recordPaymentAtomic(
+    const result = await this.repo.recordPaymentAtomic(
       invoiceId,
       {
         amount: dto.amount,
@@ -288,8 +293,22 @@ export class BillingService {
         idempotencyKey: dto.idempotencyKey,
         recordedById,
       },
-      Number(invoice.total)
+      Number(invoice.total),
+      wasDraft
     );
+
+    if (wasDraft) {
+      await this.prisma.eFaturaSubmission.create({
+        data: { invoiceId, status: "pending" },
+      });
+      await this.efaturaQueue.add(
+        "submit",
+        { invoiceId },
+        { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
+      );
+    }
+
+    return result;
   }
 
   async createDraft(data: {
