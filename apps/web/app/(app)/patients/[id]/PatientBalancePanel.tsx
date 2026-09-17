@@ -10,6 +10,7 @@ import type { PatientOutstandingBalance } from "@cap/types";
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
 
 const STATUS_LABEL: Record<string, string> = {
+  draft: "Rascunho",
   issued: "Emitida",
   partially_paid: "Pag. Parcial",
   overdue: "Vencida",

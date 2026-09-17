@@ -382,11 +382,14 @@ GET    /financeiro/summary?from&to              → { totalEntradas, totalDespes
                                                  // not scoped to from/to — the rest of the shape is period-scoped
 
 GET    /financeiro/saldos                       query: page,limit — patients with an outstanding
-                                                 balance (issued/partially_paid/overdue invoices),
-                                                 grouped per patient and sorted by amount owed
-                                                 descending: patientId, patientName, invoiceCount,
-                                                 overdueCount, totalDue, oldestDueDate. A current
-                                                 snapshot, same reasoning as `receivables` above.
+                                                 balance (draft/issued/partially_paid/overdue
+                                                 invoices — fixed 2026-09-17 to include draft, so a
+                                                 freshly auto-generated fatura shows as owed right
+                                                 away instead of only once issued), grouped per
+                                                 patient and sorted by amount owed descending:
+                                                 patientId, patientName, invoiceCount, overdueCount,
+                                                 totalDue, oldestDueDate. A current snapshot, same
+                                                 reasoning as `receivables` above.
 GET    /financeiro/saldos/:patientId            → one patient's outstanding balance + the actual
                                                  invoices behind it: { patientId, totalDue,
                                                  invoiceCount, overdueCount, invoices: [{ id,

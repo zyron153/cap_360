@@ -473,6 +473,10 @@ CREATE INDEX ON invoices(status, "createdAt");   -- BFF billing-summary
 CREATE INDEX ON invoices("patientId", status);   -- patient invoice timeline
 ```
 
+`draft`, `issued`, `partially_paid`, and `overdue` invoices all count as outstanding/receivable
+(`FinanceiroRepository.outstandingInvoices*`) — fixed 2026-09-17 to include `draft`, since a
+freshly auto-generated fatura already represents money owed, not just once formally issued.
+
 A weekly job marks `issued`/`partially_paid` invoices past their `dueDate` as `overdue` and emails
 admins a digest; `recordPayment` runs insert+resum+status-update in one transaction with a guard
 against `amountPaid` exceeding `total`; `POST /invoices/:id/cancel` sets `status = 'cancelled'`

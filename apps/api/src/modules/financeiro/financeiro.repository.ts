@@ -105,11 +105,14 @@ export class FinanceiroRepository {
   }
 
   // ── Receivables — a current snapshot, not date-range scoped (see FinanceiroSummary) ──
+  // "draft" counts as outstanding too: a fatura (incl. the appointment-completion auto-draft,
+  // which isn't issued until its first payment — see billing.service.ts) already represents money
+  // owed by the patient, whether or not it's been formally issued/E-Fatura-submitted yet.
   outstandingInvoices() {
     return this.prisma.invoice.findMany({
       // "overdue" is a real, distinct status the scheduled job sets once dueDate passes (see
       // billing.service.ts) — it must count as outstanding too, not just issued/partially_paid.
-      where: { status: { in: ["issued", "partially_paid", "overdue"] } },
+      where: { status: { in: ["draft", "issued", "partially_paid", "overdue"] } },
       select: { total: true, amountPaid: true, dueDate: true },
     });
   }
@@ -118,7 +121,7 @@ export class FinanceiroRepository {
   // grouped/sorted in the service layer (dataset is clinic-scale, not worth a raw-SQL groupBy).
   outstandingInvoicesDetailed() {
     return this.prisma.invoice.findMany({
-      where: { status: { in: ["issued", "partially_paid", "overdue"] } },
+      where: { status: { in: ["draft", "issued", "partially_paid", "overdue"] } },
       select: {
         id: true,
         invoiceNumber: true,
@@ -135,7 +138,7 @@ export class FinanceiroRepository {
 
   outstandingInvoicesForPatient(patientId: string) {
     return this.prisma.invoice.findMany({
-      where: { patientId, status: { in: ["issued", "partially_paid", "overdue"] } },
+      where: { patientId, status: { in: ["draft", "issued", "partially_paid", "overdue"] } },
       select: { id: true, invoiceNumber: true, total: true, amountPaid: true, status: true, dueDate: true },
       orderBy: { dueDate: "asc" },
     });

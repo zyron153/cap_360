@@ -133,17 +133,23 @@ detail page's payment history.
 ### 2.5 Outstanding Balances
 
 - ✅ **Contas a Receber**, on the Financeiro Overview tab: total outstanding (sum of `total −
-  amountPaid` across every `issued`/`partially_paid`/`overdue` invoice), total overdue, and a count
-  of overdue invoices — `FinanceiroService.getSummary()`'s `receivables` field, computed directly
-  from `dueDate` rather than trusting the scheduled job below to have run. It's a live snapshot
-  ("owed right now"), deliberately not scoped to whatever date range the rest of the Overview is
-  showing. **Found and fixed while seeding real demo data (empty tables never exercised this
-  path):** the underlying query originally checked only `issued`/`partially_paid`, silently
+  amountPaid` across every `draft`/`issued`/`partially_paid`/`overdue` invoice), total overdue, and
+  a count of overdue invoices — `FinanceiroService.getSummary()`'s `receivables` field, computed
+  directly from `dueDate` rather than trusting the scheduled job below to have run. It's a live
+  snapshot ("owed right now"), deliberately not scoped to whatever date range the rest of the
+  Overview is showing. **Found and fixed while seeding real demo data (empty tables never exercised
+  this path):** the underlying query originally checked only `issued`/`partially_paid`, silently
   excluding any invoice the scheduled job below had already flipped to `overdue` — exactly the
   invoices this card most needs to surface.
-- ❌ Still no dedicated invoice-level "outstanding balances" list/drill-down — the Overview card
-  above is a clinic-wide total, not a per-invoice or per-patient breakdown; `GET
-  /invoices?status=...` can be filtered manually for that, but there's no purpose-built view
+- ✅ **Saldos em Aberto** — a dedicated per-patient drill-down does exist (`GET /financeiro/saldos`,
+  `GET /financeiro/saldos/:patientId`), a whole Financeiro tab, not just the Overview card; correcting
+  this doc's previous "no dedicated list" claim.
+- ✅ **Fixed (2026-09-17).** Both the Overview card and the Saldos em Aberto tab/patient panel now
+  count `draft` invoices as outstanding too, alongside `issued`/`partially_paid`/`overdue` — a
+  freshly auto-generated fatura (from a completed appointment, or a manual one not yet issued)
+  represents money already owed by the patient, and previously didn't show up anywhere as owed
+  until it was issued (which, per the earlier E-Fatura fix, now only happens on first payment —
+  i.e. it would have gone straight from invisible to paid with no "pending" state in between).
 - ✅ Overdue marking is real: a scheduled job runs `UPDATE invoices SET status='overdue' WHERE
   status IN ('issued','partially_paid') AND dueDate < now()`, independent of whether email is
   configured; the existing overdue-invoices digest email then reads from that corrected status
@@ -241,7 +247,11 @@ design.
 
 ---
 
-*Module M6 · v1.7 · updated 2026-09-16 — closed a duplicate-draft-invoice bug (unvalidated
+*Module M6 · v1.8 · updated 2026-09-17 — Saldos em Aberto (both the Overview "Contas a Receber"
+card and the per-patient drill-down) now counts `draft` invoices as outstanding too, so a freshly
+auto-generated fatura shows as owed immediately instead of staying invisible until issued;
+corrected this doc's stale "no dedicated outstanding-balances list" claim — Saldos em Aberto is
+that list; previously v1.7, 2026-09-16 — closed a duplicate-draft-invoice bug (unvalidated
 appointment status transitions + a new `invoices.appointmentId` unique constraint); auto-draft
 creation failures now surface as `invoiceWarning` instead of only a server log, with a new manual
 `POST /appointments/:id/invoice` retry; a draft invoice's first payment now issues it and queues
