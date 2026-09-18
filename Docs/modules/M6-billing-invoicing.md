@@ -150,6 +150,10 @@ detail page's payment history.
   represents money already owed by the patient, and previously didn't show up anywhere as owed
   until it was issued (which, per the earlier E-Fatura fix, now only happens on first payment —
   i.e. it would have gone straight from invisible to paid with no "pending" state in between).
+- ✅ **Fixed (2026-09-18).** The Saldos em Aberto tab's "Em dívida desde" column now uses the
+  outstanding invoice's linked appointment date (`scheduledAt`), not the invoice's `dueDate` — the
+  column means "since when has this patient owed money," which is the day service was rendered,
+  not an arbitrary payment deadline.
 - ✅ Overdue marking is real: a scheduled job runs `UPDATE invoices SET status='overdue' WHERE
   status IN ('issued','partially_paid') AND dueDate < now()`, independent of whether email is
   configured; the existing overdue-invoices digest email then reads from that corrected status
@@ -247,7 +251,9 @@ design.
 
 ---
 
-*Module M6 · v1.8 · updated 2026-09-17 — Saldos em Aberto (both the Overview "Contas a Receber"
+*Module M6 · v1.9 · updated 2026-09-18 — Saldos em Aberto's "Em dívida desde" column now sourced
+from the outstanding invoice's linked appointment date instead of the invoice's `dueDate`;
+previously v1.8, 2026-09-17 — Saldos em Aberto (both the Overview "Contas a Receber"
 card and the per-patient drill-down) now counts `draft` invoices as outstanding too, so a freshly
 auto-generated fatura shows as owed immediately instead of staying invisible until issued;
 corrected this doc's stale "no dedicated outstanding-balances list" claim — Saldos em Aberto is

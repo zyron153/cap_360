@@ -131,6 +131,7 @@ export class FinanceiroRepository {
         status: true,
         dueDate: true,
         patient: { select: { fullName: true } },
+        appointment: { select: { scheduledAt: true } },
       },
       orderBy: { dueDate: "asc" },
     });

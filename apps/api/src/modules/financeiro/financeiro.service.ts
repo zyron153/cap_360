@@ -205,8 +205,8 @@ export class FinanceiroService {
       entry.invoiceCount += 1;
       entry.totalDue += amountDue;
       if (inv.status === "overdue") entry.overdueCount += 1;
-      if (inv.dueDate) {
-        const iso = inv.dueDate.toISOString().slice(0, 10);
+      if (inv.appointment?.scheduledAt) {
+        const iso = inv.appointment.scheduledAt.toISOString().slice(0, 10);
         if (!entry.oldestDueDate || iso < entry.oldestDueDate) entry.oldestDueDate = iso;
       }
       byPatient.set(inv.patientId, entry);

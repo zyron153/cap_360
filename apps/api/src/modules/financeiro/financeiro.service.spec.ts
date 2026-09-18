@@ -265,7 +265,7 @@ describe("FinanceiroService", () => {
       repo.outstandingInvoicesDetailed.mockResolvedValue([
         { id: "inv-1", patientId: "pat-1", total: "2000", amountPaid: "0", status: "issued", dueDate: null, patient: { fullName: "Maria Silva" } },
         { id: "inv-2", patientId: "pat-1", total: "1000", amountPaid: "500", status: "partially_paid", dueDate: null, patient: { fullName: "Maria Silva" } },
-        { id: "inv-3", patientId: "pat-2", total: "3000", amountPaid: "0", status: "overdue", dueDate: new Date("2026-01-01"), patient: { fullName: "João Duarte" } },
+        { id: "inv-3", patientId: "pat-2", total: "3000", amountPaid: "0", status: "overdue", dueDate: new Date("2026-01-01"), patient: { fullName: "João Duarte" }, appointment: { scheduledAt: new Date("2026-01-01") } },
       ]);
 
       const result = await service.listOutstandingBalances({ page: 1, limit: 20 });

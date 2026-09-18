@@ -388,8 +388,11 @@ GET    /financeiro/saldos                       query: page,limit — patients w
                                                  away instead of only once issued), grouped per
                                                  patient and sorted by amount owed descending:
                                                  patientId, patientName, invoiceCount, overdueCount,
-                                                 totalDue, oldestDueDate. A current snapshot, same
-                                                 reasoning as `receivables` above.
+                                                 totalDue, oldestDueDate (despite the name, sourced
+                                                 from the oldest linked appointment's date, not the
+                                                 invoice's dueDate — reflects when the debt was
+                                                 incurred). A current snapshot, same reasoning as
+                                                 `receivables` above.
 GET    /financeiro/saldos/:patientId            → one patient's outstanding balance + the actual
                                                  invoices behind it: { patientId, totalDue,
                                                  invoiceCount, overdueCount, invoices: [{ id,
