@@ -144,7 +144,7 @@ PATCH  /referrals/:id/status                    — referrer, target, or admin
 | Screen | Where | Description |
 |---|---|---|
 | Clinical Records section | `patients/[id]/page.tsx` | Tabbed (Notas Clínicas / Prescrições / Referenciações) section below the patient's timeline. "Nova Nota" opens the full structured form; clicking an existing note opens a read-only detail view. Only rendered for admin/doctor — other roles never see it. |
-| Registos Clínicos worklist | `records/page.tsx` | A flat "my recent notes across every patient" list (admin: everyone's), linking into each patient's page. Replaced the page's previous 100%-fake mock table. |
+| Registos Clínicos worklist | `records/page.tsx` | Tabbed: "Notas Recentes" (flat "my recent notes across every patient" list, admin: everyone's, linking into each patient's page — replaced the page's previous 100%-fake mock table) and "Check-in Feito" (admin/doctor with appointments access only) — today's `checked_in` appointments with an inline "Concluir" that confirms duration and reuses the Appointment Detail completion flow (`PATCH /appointments/:id/status`, draft invoice auto-generated), toasting success/warning without navigating away. See `Docs/modules/M1-smart-appointment-engine.md` §6. |
 
 ---
 
@@ -161,4 +161,4 @@ PATCH  /referrals/:id/status                    — referrer, target, or admin
 
 ---
 
-*Module M7 · v2.1 · updated 2026-09-04 — v2.0 rewrite plus field-level encryption*
+*Module M7 · v2.2 · updated 2026-09-18 — added "Check-in Feito" completion tab to the Registos Clínicos worklist*

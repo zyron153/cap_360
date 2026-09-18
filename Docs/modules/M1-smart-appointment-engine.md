@@ -143,6 +143,7 @@ Key routes:
 | My Schedule | Doctor | Own upcoming appointments only |
 | Appointment Detail | All | Patient info, service, notes, status actions — completing prompts for actual duration before generating the draft invoice |
 | Waitlist Manager | Receptionist/Admin | Active waitlist entries with notify button |
+| Registos Clínicos — "Check-in Feito" tab | Admin/Doctor | Second entry point for the same completion flow: today's `checked_in` appointments, with an inline "Concluir" that confirms duration and calls the same `PATCH /appointments/:id/status` used by Appointment Detail. See `Docs/modules/M7-clinical-records-emr.md` §6. |
 
 ---
 
