@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
+import { cvDayStart, cvDayEnd } from "../../common/cabo-verde-time";
 import type { AnalyticsSummary } from "@cap/types";
 
 const ACTIVE_PATIENT_WINDOW_MONTHS = 12;
@@ -13,8 +14,8 @@ export class AnalyticsService {
   ) {}
 
   async getSummary(from?: string, to?: string): Promise<AnalyticsSummary> {
-    const fromDate = from ? new Date(from) : new Date(new Date().getFullYear(), 0, 1);
-    const toDate = to ? new Date(`${to}T23:59:59Z`) : new Date();
+    const fromDate = from ? cvDayStart(from) : cvDayStart(`${new Date().getFullYear()}-01-01`);
+    const toDate = to ? cvDayEnd(to) : new Date();
 
     const now = new Date();
     const activeSince = new Date(now);

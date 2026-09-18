@@ -3,6 +3,7 @@ import { FinanceiroRepository } from "./financeiro.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { StaffService } from "../staff/staff.service";
 import { RequestContext } from "../../common/context/request-context";
+import { cvDayStart, cvDayEnd } from "../../common/cabo-verde-time";
 import {
   CreateExpenseDto, UpdateExpenseDto, ExpenseDecisionDto,
   CreateIncomeDto, UpdateIncomeDto,
@@ -18,8 +19,8 @@ interface UploadedReceipt {
 
 function dateRange(from?: string, to?: string) {
   return {
-    ...(from ? { gte: new Date(from) } : {}),
-    ...(to ? { lte: new Date(`${to}T23:59:59Z`) } : {}),
+    ...(from ? { gte: cvDayStart(from) } : {}),
+    ...(to ? { lte: cvDayEnd(to) } : {}),
   };
 }
 
@@ -251,8 +252,8 @@ export class FinanceiroService {
 
   // ── Resumo (dashboard) ──────────────────────────────────
   async getSummary(from?: string, to?: string): Promise<FinanceiroSummary> {
-    const fromDate = from ? new Date(from) : new Date(new Date().getFullYear(), 0, 1);
-    const toDate = to ? new Date(`${to}T23:59:59Z`) : new Date();
+    const fromDate = from ? cvDayStart(from) : cvDayStart(`${new Date().getFullYear()}-01-01`);
+    const toDate = to ? cvDayEnd(to) : new Date();
 
     const [
       paymentsSum, incomeSum, expensesSum, payments, income, expenses, expensesByCategory,

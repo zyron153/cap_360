@@ -17,6 +17,7 @@ import { AppointmentsGateway } from "./appointments.gateway";
 import { BillingService } from "../billing/billing.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
+import { cvDayStart, cvDayEnd } from "../../common/cabo-verde-time";
 import {
   CreateAppointmentDto,
   CreateAppointmentSeriesDto,
@@ -433,8 +434,8 @@ export class AppointmentsService {
       where: {
         deletedAt: null,
         scheduledAt: {
-          gte: new Date(query.from),
-          lte: new Date(`${query.to}T23:59:59Z`),
+          gte: cvDayStart(query.from),
+          lte: cvDayEnd(query.to),
         },
         ...(query.staffId ? { staffId: query.staffId } : {}),
         ...(query.patientId ? { patientId: query.patientId } : {}),

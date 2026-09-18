@@ -11,6 +11,7 @@ import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
+import { cvDayStart, cvDayEnd } from "../../common/cabo-verde-time";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cap/database";
 import { RequestContext } from "../../common/context/request-context";
@@ -174,8 +175,8 @@ export class BillingService {
       ...(from || to
         ? {
             createdAt: {
-              ...(from ? { gte: new Date(from) } : {}),
-              ...(to ? { lte: new Date(`${to}T23:59:59Z`) } : {}),
+              ...(from ? { gte: cvDayStart(from) } : {}),
+              ...(to ? { lte: cvDayEnd(to) } : {}),
             },
           }
         : {}),
