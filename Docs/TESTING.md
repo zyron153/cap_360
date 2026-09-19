@@ -112,7 +112,10 @@ describe('FinanceiroService', () => {
 ```
 
 #### Bot FSM — ❌ doesn't exist
-No WhatsApp bot, no FSM, no such test suite — M3 has no backend at all.
+No WhatsApp bot FSM, so no such test suite. The Phase 1 inbox is covered though:
+`whatsapp-api.spec.ts` (signature verification), `whatsapp.service.spec.ts` (dedupe, patient linking,
+reminder-reply routing, 24h window, idempotency, delivery-status ordering) and
+`whatsapp-webhook.integration-spec.ts` (below).
 
 ### 3.3 Coverage Target
 
@@ -139,6 +142,10 @@ coverage:
   the row itself survives (not hard-deleted) for audit history.
 - **`invoice-payment.integration-spec.ts`** — invoice creation at catalogue price, partial payment
   → `partially_paid`, remaining balance → `paid`, a further payment on a paid invoice rejected.
+- **`whatsapp-webhook.integration-spec.ts`** — Meta verify handshake (right/wrong token), unsigned and
+  forged POSTs rejected with nothing stored, a signed message stored as ciphertext and a retry
+  deduplicated, thread served decrypted via the inbox API, resolve then reopen on the next inbound.
+  Temporarily swaps in test credentials for the `integration_whatsapp` setting and restores it after.
 - **`staff-invitation.integration-spec.ts`** — the one spec that deliberately skips `AUTH_BYPASS`:
   real admin login → invite → activation (token read straight from the DB row, the same way a real
   invitee would read it from their inbox — the API never returns it) → the new hire's own real
@@ -339,7 +346,7 @@ Use fictional Cabo Verde numbers for testing:
 - Test patient 1: `+238 900 1001`
 - Test patient 2: `+238 900 1002`
 
-WhatsApp integration tests use mock webhook handler (no real messages sent).
+WhatsApp tests never call Meta: unit tests mock `sendWhatsAppText`, and the integration spec only exercises inbound webhooks.
 
 ---
 

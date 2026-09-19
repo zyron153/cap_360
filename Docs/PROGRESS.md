@@ -1,9 +1,30 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-18.
+> Snapshot overwritten each session. Última atualização: 2026-09-19.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **M3 — WhatsApp Hub, Phase 1 (inbox) construído.** Antes: mockup sem backend. Agora:
+  `apps/api/src/modules/whatsapp/` com webhook assinado (`GET` verify + `POST` com HMAC
+  `X-Hub-Signature-256`, falha fechada sem `appSecret`), dedupe por id da Meta, callbacks de estado de
+  entrega (sem regressão read→delivered), tabelas `whatsapp_conversations`/`whatsapp_messages` (corpos
+  cifrados AES-256-GCM; uma conversa por número, reaberta em mensagem nova), ligação ao paciente por
+  telefone normalizado (`+238…`), API do inbox (listar/thread/responder/atribuir/resolver/associar
+  paciente) e a página `/whatsapp` real (Socket.io só com o id da conversa, nunca conteúdo). Resposta
+  livre bloqueada fora da janela de 24h da Meta; envio idempotente. Resposta "1"/"SIM" a um lembrete
+  confirma a única consulta pendente do paciente; "NÃO"/outras ficam para uma pessoa (nunca cancela
+  sozinho). Apagar um paciente (direito ao apagamento) elimina as suas conversas. Envio da Graph API
+  extraído para `whatsapp-api.ts` e reutilizado pelo `NotificationsProcessor`. `appSecret` adicionado
+  ao mascaramento de segredos e ao formulário de Definições. Selo "Beta" removido da sidebar.
+  - Verificação: `tsc`/lint limpos (api + web); 490 testes unitários (31 suites, +25 novos:
+    `whatsapp-api.spec`, `whatsapp.service.spec`, erasure); nova `whatsapp-webhook.integration-spec`
+    (4 testes, BD real: handshake, assinatura inválida, cifra em repouso, retry deduplicado, resolver/reabrir).
+    **UI não verificada no browser** — só typecheck/lint; e2e Playwright por fazer.
+  - Por fazer (ver `WHATSAPP_CHECKLIST.md`): pré-requisitos Meta (WABA, templates aprovados, URL público),
+    lembretes como templates (texto livre só entrega dentro das 24h), bot FSM, SLA, respostas rápidas.
+  - Docs: `M3-whatsapp-integration.md` (v1.2), `API-SPEC.md` §12b, `DATABASE-SCHEMA.md` §10, `TODO.md`,
+    `FRONTEND-ROUTES.md`.
 
 - **Financeiro/Analytics/Billing/Appointments — filtragem de datas por fronteira UTC vs. fuso
   horário local.** Endpoints de intervalo de datas (`from`/`to` como `"YYYY-MM-DD"`, derivados do
@@ -46,10 +67,11 @@
 
 ## Próximo
 
+- M3 (resto): ver `WHATSAPP_CHECKLIST.md` — configurar Meta, templates, e2e, depois bot FSM.
 - M4: self-service portal para `corporate_hr` gerir membros/relatórios de utilização (§4/§5 do
   módulo) — a membership existe, mas só é gerível via UI/API de admin/receptionist hoje. Renovação
   automática/agendada continua fora por decisão (ver `modules/M4-health-plan-management.md` §3.4).
 - REVIEW.md Secção 6 (sugestões de redesign) — exercício de design, **não** é tarefa de
   implementação.
-- Trabalho de feature/infra em `TODO.md`: M3 WhatsApp, M5 Exames, M9 Visitas, Fase 4, k8s,
+- Trabalho de feature/infra em `TODO.md`: M5 Exames, M9 Visitas, Fase 4, k8s,
   backups, testes k6/ZAP — cada um precisa da sua própria conversa de scoping.

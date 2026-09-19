@@ -37,7 +37,7 @@ const NAV = [
       // isMock: true — no backend behind these yet (hardcoded mock arrays, zero real fetch calls).
       // Flagged rather than left indistinguishable from the working modules around them (the
       // highest-weighted UX finding in REVIEW.md §5.4) — remove the flag the day each one is real.
-      { href: "/whatsapp",     label: "WhatsApp Hub",          icon: MessageCircle, isMock: true },
+      { href: "/whatsapp",     label: "WhatsApp Hub",          icon: MessageCircle },
       { href: "/health-plans", label: "Planos de Saúde",       icon: Shield },
       { href: "/exams",        label: "Exames & Resultados",   icon: FileSearch },
       { href: "/billing",      label: "Financeiro",            icon: Receipt,       badge: "3",  badgeVariant: "danger"  },

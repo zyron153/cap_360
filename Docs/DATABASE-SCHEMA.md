@@ -691,12 +691,28 @@ written for a general medical clinic.
 
 ---
 
-## 10. WhatsApp Integration Module (M3) — not implemented
+## 10. WhatsApp Integration Module (M3) — Phase 1 built
 
-**No `whatsapp_conversations`, `whatsapp_messages`, or `whatsapp_templates` table exists**, and no
-`apps/api/src/modules/whatsapp` directory exists. The `ReminderChannel` enum and
-`appointment_reminders` table from M1 are the one piece of groundwork already laid — they're ready
-to be pointed at a real send service once one exists.
+Two tables (canonical: `schema.prisma`); `whatsapp_templates` is deliberately not modelled — templates
+live in Meta.
+
+```sql
+whatsapp_conversations (
+  id UUID PK, phone VARCHAR(30) UNIQUE,        -- one conversation per number, reopened on inbound
+  patient_id UUID NULL FK patients, status ENUM('open','resolved'),
+  assigned_to_id UUID NULL FK staff, unread_count INT, last_message_at TIMESTAMPTZ,
+  window_expires_at TIMESTAMPTZ NULL,          -- Meta's 24h free-text window
+  created_at, updated_at )
+whatsapp_messages (
+  id UUID PK, conversation_id UUID FK ON DELETE CASCADE,
+  direction VARCHAR(10), body TEXT,            -- AES-256-GCM ciphertext
+  status VARCHAR(20),                          -- received | sending | sent | delivered | read | failed
+  external_id VARCHAR(200) UNIQUE NULL,        -- Meta wamid — dedupes webhook retries
+  sent_by_id UUID NULL FK staff, idempotency_key VARCHAR(64) UNIQUE NULL, created_at )
+```
+
+Patient soft-delete (right to erasure) deletes the patient's conversations, which cascades to their
+messages. The `ReminderChannel` enum and `appointment_reminders` table from M1 are unchanged.
 
 ---
 

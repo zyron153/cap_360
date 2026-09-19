@@ -139,7 +139,7 @@ handled until a real secrets manager is in place.
 | Everything (global default) | 300 req/min per IP | `@nestjs/throttler`, in-memory storage | ✅ Enforced |
 | Public (booking widget) | 60 req/min per IP | Same, `@Throttle` override | ✅ Enforced |
 | Auth endpoints (`/auth/login`, `/auth/forgot-password`) | 5 req/min per IP | `@Throttle` override | ✅ Enforced, plus a separate per-account Redis lockout independent of IP — see §2.1 |
-| WhatsApp webhook | 1000 req/min | No IP limit (Meta IPs whitelisted) | ❌ Not applicable — no WhatsApp webhook exists (M3 is a UI mockup) |
+| WhatsApp webhook | 1000 req/min | No IP limit (Meta IPs whitelisted) | ⚠️ Webhook exists (`POST /whatsapp/webhook`), throttled at 600 req/min; no IP allowlist — the HMAC signature is the authentication |
 
 Rate limiting is per-IP, in-memory, and per-process — it resets on restart and doesn't share state
 across multiple API instances. Fine for a single dev/staging instance; revisit (Redis-backed
@@ -232,11 +232,20 @@ Audit logs are:
 
 ## 8. WhatsApp Security
 
-❌ **Entirely not applicable today.** M3 (WhatsApp Integration Hub) has no backend at all — no
-webhook handler, no bot, no agent inbox (see `DATABASE-SCHEMA.md` §10). Outbound WhatsApp sending
-exists only for appointment reminders/confirmations (`NotificationsProcessor.sendWhatsApp`),
-which calls the Meta Cloud API directly with plain text bodies — no template management, no 24h-
-window handling.
+✅ **Phase 1 inbox (2026-09-19)** — see `modules/M3-whatsapp-integration.md`:
+- Inbound webhook is `@Public()`, authenticated only by Meta's `X-Hub-Signature-256` HMAC of the raw
+  body (constant-time compare, **fails closed** when the app secret isn't configured). The GET verify
+  handshake checks the verify token the same way. Secrets live in the `integration_whatsapp`
+  setting and are masked in `GET /settings`.
+- Message bodies are AES-256-GCM encrypted at rest; `communication_log` gets only "a message was
+  received", never the text. Thread reads are audited (`@AuditView`).
+- The Socket.io `/whatsapp` namespace is unauthenticated (same as the calendar one), so it only ever
+  emits a conversation id; content is fetched through the authenticated REST API.
+- Right to erasure: soft-deleting a patient deletes their conversations and messages.
+- Free-text replies are refused outside Meta's 24h window.
+
+⚠️ Still open: reminders and confirmations (`NotificationsProcessor`) send plain text, not
+Meta-approved templates, so they only deliver inside the 24h window; no bot, no SLA tracking.
 
 ---
 

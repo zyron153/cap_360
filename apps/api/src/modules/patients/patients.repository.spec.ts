@@ -13,6 +13,7 @@ const prisma = {
     findMany: jest.fn(),
     count: jest.fn(),
   },
+  whatsappConversation: { deleteMany: jest.fn() },
 };
 
 describe("PatientsRepository — NIF field encryption", () => {
@@ -192,6 +193,14 @@ describe("PatientsRepository — right to erasure (softDelete)", () => {
       emergencyContactName: null,
       emergencyContactPhone: null,
     });
+  });
+
+  it("deletes the patient's WhatsApp conversations (messages cascade)", async () => {
+    prisma.patient.update.mockResolvedValue({ id: "p1" });
+
+    await repo.softDelete("p1");
+
+    expect(prisma.whatsappConversation.deleteMany).toHaveBeenCalledWith({ where: { patientId: "p1" } });
   });
 
   it("keeps gender untouched — not direct PII, useful for anonymous reporting", async () => {

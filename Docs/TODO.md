@@ -158,11 +158,17 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 
 ## Phase 2 — Communication
 
-### M3 — WhatsApp Integration — 🎭 not started
-UI mockup only (`whatsapp/page.tsx`, hardcoded `CONVERSATIONS` array, zero `fetch` calls). No
-`apps/api/src/modules/whatsapp` directory, no webhook handler, no bot FSM, no agent inbox
-persistence. The `ReminderChannel` enum and `appointment_reminders` table from M1 are the one
-piece of groundwork already laid — ready to be pointed at a real send service.
+### M3 — WhatsApp Integration — 🟢 Phase 1 inbox built (2026-09-19), bot FSM not started
+Working checklist: [WHATSAPP_CHECKLIST.md](WHATSAPP_CHECKLIST.md).
+- [x] Signed webhook (`GET` verify handshake, `POST` with `X-Hub-Signature-256` HMAC check), inbound dedupe on Meta message id, delivery-status callbacks
+- [x] `whatsapp_conversations` / `whatsapp_messages` (bodies AES-256-GCM encrypted), patient linked by normalized phone
+- [x] Inbox API + real `/whatsapp` page: list, thread, reply (24h-window enforced, idempotent), assign, resolve, manual patient link, live updates
+- [x] "1"/"SIM" reminder reply auto-confirms the single pending appointment; everything else goes to a human
+- [x] Patient erasure deletes their WhatsApp conversations
+- [ ] Meta prerequisites (verified WABA, approved templates, public webhook URL) — not code
+- [ ] Reminders as approved templates (plain text only delivers inside the 24h window)
+- [ ] Bot FSM (booking, exam results, plan query), SLA timers, quick replies, closure message on Resolve
+- [ ] Playwright e2e for the inbox
 
 ### M4 — Health Plan Management
 

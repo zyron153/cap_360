@@ -20,7 +20,7 @@ export async function createTestApp({ authBypass = true }: { authBypass?: boolea
     imports: [AppModule],
   }).compile();
 
-  const app = moduleRef.createNestApplication({ logger: false as unknown as Logger });
+  const app = moduleRef.createNestApplication({ logger: false as unknown as Logger, rawBody: true });
   app.use(cookieParser());
   app.setGlobalPrefix("v1");
   // No global ZodValidationPipe — same as main.ts, validation is per-route (see that file's

@@ -29,7 +29,7 @@ aspirational designs, several written for the pre-rebrand client.
 | Next.js route map | [FRONTEND-ROUTES.md](FRONTEND-ROUTES.md) |
 | Performance instrumentation + optimization passes | [PERFORMANCE_UPGRADES.md](PERFORMANCE_UPGRADES.md) |
 | Visual design system | [DESIGN-PHILOSOPHY.md](DESIGN-PHILOSOPHY.md) |
-| WhatsApp bot conversation design (M3 — not built) | [WHATSAPP-BOT-FLOWS.md](WHATSAPP-BOT-FLOWS.md) |
+| WhatsApp bot conversation design (M3 bot FSM — not built; the inbox is) | [WHATSAPP-BOT-FLOWS.md](WHATSAPP-BOT-FLOWS.md) |
 | Early gap analysis (historical snapshot) | [CODING-READINESS.md](CODING-READINESS.md) |
 
 ## Per-module detail
@@ -37,9 +37,8 @@ aspirational designs, several written for the pre-rebrand client.
 `modules/M1`…`M10` — one file per module, each with an "Implementation status" note at the top.
 Built: M1 Appointments, M2 Patient CRM, M4 Health Plans (subscribe/renew/coverage/expiry — no
 membership roster or automatic renewal, both explicit scope decisions), M6 Billing/Financeiro, M7
-Clinical Records, M8 Staff. Partial backend: M10 Analytics (appointment/attendance/plan-mix metrics
-real, exports and materialised views not). UI mockup only, no backend: M3 WhatsApp, M5 Exams, M9
-Home Visits.
+Clinical Records, M8 Staff, M3 WhatsApp inbox (Phase 1 — signed webhook, encrypted threads, reply/assign/resolve; bot FSM not built, see [WHATSAPP_CHECKLIST.md](WHATSAPP_CHECKLIST.md)). Partial backend: M10 Analytics (appointment/attendance/plan-mix metrics
+real, exports and materialised views not). UI mockup only, no backend: M5 Exams, M9 Home Visits.
 
 ## Working notes
 

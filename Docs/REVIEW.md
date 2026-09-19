@@ -177,6 +177,8 @@ Status legend: ✅ built and wired · 🟡 partial/stubbed · ❌ not started ·
 ### Phase 2 — Communication
 
 #### M3 — WhatsApp Integration Hub
+> **Update 2026-09-19:** the mockup described below has been replaced by a real Phase 1 inbox (`apps/api/src/modules/whatsapp/`, `/whatsapp` page). The bot FSM is still not built. Kept below as the original audit finding.
+
 - 🎭 **Entirely a UI mockup.** `whatsapp/page.tsx` has zero `fetch`/`useQuery` calls; `CONVERSATIONS` is a hardcoded const array. No `apps/api/src/modules/whatsapp` directory exists. No bot FSM, no webhook handler, no agent inbox persistence, no Meta Cloud API integration anywhere.
 - The `ReminderChannel` enum and `AppointmentReminder` scheduling infrastructure from M1 *do* exist and are ready to be pointed at a real send service — that's the one piece of groundwork already laid for this module.
 
@@ -335,7 +337,7 @@ In the interest of an honest scope statement: I did not run the app end-to-end f
 - [x] Phase 1 — M1 Appointments: core booking loop works and is well-engineered; business-hours/holiday/leave gaps in availability calc **fixed** (still open: room/equipment conflict detection, recurring appointments, reminder-channel hardcoding — deferred, needs new SMS infra)
 - [x] Phase 1 — M2 Patients: solid CRUD; consent-path gap **fixed** (§2); phone country-code validation and NIF/phone race-condition error handling **fixed** (§3)
 - [x] Phase 1 — M6 Billing/Financeiro: strongest module in the app; overpayment guard, overdue-invoice detection job, invoice cancel endpoint (+reason, +audit diff, +frontend UI that was missing entirely), and payment-to-staff attribution all **fixed**
-- [ ] Phase 2 — M3 WhatsApp: mockup only, no backend
+- [~] Phase 2 — M3 WhatsApp: Phase 1 inbox **built 2026-09-19** (signed webhook, encrypted message storage, inbox API + page, reminder-reply confirm); bot FSM, SLA timers and template-based reminders not built — see `WHATSAPP_CHECKLIST.md`
 - [x] Phase 2 — M4 Health Plans: functional; plan-number race and no utilization tracking
 - [ ] Phase 2 — M5 Exams: stub model, no result storage, mostly mock UI
 - [x] Phase 3 — M7 Clinical Records: **built** — structured session notes, risk flagging, prescriptions, referrals, author-scoped access; rewritten for CAP rather than the original medical-clinic spec (`Docs/modules/M7-clinical-records-emr.md` v2.0)

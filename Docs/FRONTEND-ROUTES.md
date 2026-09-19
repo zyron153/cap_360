@@ -51,13 +51,13 @@ Guard section below).
 | `/parametrizacoes` | `(app)/parametrizacoes/page.tsx` | admin — service pricing, business hours, clinic info; not in the original doc |
 | `/access` | `(app)/access/page.tsx` | admin — not in the original doc; role/permission-related |
 | `/records` | `(app)/records/page.tsx` | admin, doctor, nurse — M7 Clinical Records, real backend (see below, this table previously had it as a mockup) |
+| `/whatsapp` | `(app)/whatsapp/page.tsx` | admin, receptionist — M3 WhatsApp inbox (real since 2026-09-19: conversation list, thread, reply, assign, resolve, link patient, live via Socket.io) |
 | `/analytics` | `(app)/analytics/page.tsx` | admin, doctor, nurse — M10 Analytics; appointment/attendance/plan-mix metrics real since 2026-09-12 (see `API-SPEC.md` §12), revenue KPIs real since an earlier session — exports and per-doctor/staff-productivity views from the original design remain unbuilt |
 
 🎭 **Mockup shells with no real backend** (see each module's doc for what's actually built, if anything):
 
 | Path | File | Stands in for |
 |---|---|---|
-| `/whatsapp` | `(app)/whatsapp/page.tsx` | M3 — WhatsApp Integration |
 | `/exams` | `(app)/exams/page.tsx` | M5 — Exam Results |
 | `/visits` | `(app)/visits/page.tsx` | M9 — Home Visits |
 

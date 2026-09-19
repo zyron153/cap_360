@@ -3,8 +3,8 @@ import { Process, Processor } from "@nestjs/bull";
 import { Job } from "bull";
 import * as nodemailer from "nodemailer";
 import { PrismaService } from "../../prisma/prisma.service";
+import { WaConfig, sendWhatsAppText } from "../whatsapp/whatsapp-api";
 
-interface WaConfig  { phoneNumberId: string; accessToken: string }
 interface SmtpConfig { host: string; port: string; username: string; password: string; fromName: string }
 
 @Processor("notifications")
@@ -21,25 +21,9 @@ export class NotificationsProcessor {
   }
 
   private async sendWhatsApp(cfg: WaConfig, to: string, body: string) {
-    const phone = to.replace(/\D/g, "");
-    const res = await fetch(
-      `https://graph.facebook.com/v19.0/${cfg.phoneNumberId}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${cfg.accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: phone,
-          type: "text",
-          text: { body },
-        }),
-      },
-    );
-    if (!res.ok) {
-      const err = await res.text();
+    try {
+      await sendWhatsAppText(cfg, to, body);
+    } catch (err) {
       this.logger.error(`[WhatsApp] send failed: ${err}`);
     }
   }

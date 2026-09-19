@@ -5,7 +5,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 // Field names used across integration settings (E-Factura, Keycloak, WhatsApp, R2, SMTP, ...)
 // that hold credentials and must never be sent back to the client in plaintext.
 const MASK = "••••••••";
-const SECRET_FIELDS = ["apiKey", "clientSecret", "accessToken", "webhookToken", "secretKey", "password"];
+const SECRET_FIELDS = ["apiKey", "clientSecret", "accessToken", "webhookToken", "appSecret", "secretKey", "password"];
 
 function maskSecrets(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;

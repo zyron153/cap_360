@@ -139,6 +139,7 @@ model Patient {
   documents         PatientDocument[]
   notes             PatientNote[]
   communicationLogs CommunicationLog[]
+  whatsappConversations WhatsappConversation[]
   invoices          Invoice[]
   waitlistEntries   Waitlist[]
   clinicalNotes     ClinicalNote[]
@@ -187,6 +188,8 @@ model Staff {
   prescriptions     Prescription[]
   referralsSent     Referral[]          @relation("ReferralReferredBy")
   referralsReceived Referral[]          @relation("ReferralTarget")
+  whatsappAssigned  WhatsappConversation[] @relation("WhatsappAssignee")
+  whatsappSent      WhatsappMessage[]   @relation("WhatsappSender")
 
   @@index([role])
   @@index([deletedAt])
@@ -547,6 +550,60 @@ model CommunicationLog {
   @@index([patientId])
   @@index([channel])
   @@map("communication_log")
+}
+
+// ─── WhatsApp inbox (M3) ─────────────────────────────────────────────────────
+
+enum WhatsappConversationStatus {
+  open
+  resolved
+}
+
+/// One conversation per phone number (unique) — an inbound message on a resolved one reopens it.
+model WhatsappConversation {
+  id              String                     @id @default(uuid())
+  /// Normalized "+238…" for Cabo Verde numbers, "+<digits>" otherwise.
+  phone           String                     @unique @db.VarChar(30)
+  patientId       String?
+  status          WhatsappConversationStatus @default(open)
+  assignedToId    String?
+  unreadCount     Int                        @default(0)
+  lastMessageAt   DateTime                   @default(now())
+  /// Meta's 24h customer-service window: free-text replies are only allowed until this instant.
+  windowExpiresAt DateTime?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  patient    Patient?          @relation(fields: [patientId], references: [id])
+  assignedTo Staff?            @relation("WhatsappAssignee", fields: [assignedToId], references: [id])
+  messages   WhatsappMessage[]
+
+  @@index([status, lastMessageAt])
+  @@index([patientId])
+  @@index([assignedToId])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsappMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  /// "inbound" | "outbound"
+  direction      String   @db.VarChar(10)
+  /// AES-256-GCM encrypted (EncryptionService) — message content can be session-sensitive.
+  body           String   @db.Text
+  /// Outbound: "sent" | "delivered" | "read" | "failed". Inbound: "received".
+  status         String   @db.VarChar(20)
+  /// Meta's message id (wamid…) — unique so a retried webhook delivery is deduped.
+  externalId     String?  @unique @db.VarChar(200)
+  sentById       String?
+  idempotencyKey String?  @unique @db.VarChar(64)
+  createdAt      DateTime @default(now())
+
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sentBy       Staff?               @relation("WhatsappSender", fields: [sentById], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("whatsapp_messages")
 }
 
 // ─── Companies ───────────────────────────────────────────────────────────────

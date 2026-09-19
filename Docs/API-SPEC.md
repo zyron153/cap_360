@@ -638,14 +638,42 @@ Response 200: {
 
 ---
 
+## 12b. WhatsApp Inbox (M3, Phase 1)
+
+Webhook (public — authenticated by Meta's HMAC signature, not a session):
+
+```
+GET  /whatsapp/webhook   ?hub.mode=subscribe&hub.verify_token=…&hub.challenge=…   → echoes the challenge; 403 on a wrong token
+POST /whatsapp/webhook   header X-Hub-Signature-256: sha256=<HMAC of raw body>     → 200 {received:true}; 403 on a missing/invalid signature
+```
+
+Both secrets live in the `integration_whatsapp` setting (`webhookToken` = verify token, `appSecret`
+= Meta app secret; both masked in `GET /settings`). Throttled at 600 req/min for Meta bursts.
+
+Inbox (roles: admin, receptionist):
+
+```
+GET   /whatsapp/conversations              ?status=open|resolved &assignee=me|unassigned|<staffId> &page &limit
+GET   /whatsapp/conversations/:id          thread (last 200 messages, decrypted); marks it read; @AuditView
+POST  /whatsapp/conversations/:id/messages { body, idempotencyKey? }   400 if the 24h window is closed
+PATCH /whatsapp/conversations/:id/assign   { staffId | null }
+PATCH /whatsapp/conversations/:id/resolve
+PATCH /whatsapp/conversations/:id/link-patient { patientId }
+```
+
+Message bodies are AES-256-GCM encrypted at rest. Socket.io namespace `/whatsapp` emits
+`whatsapp:updated {conversationId}` (id only — no content over the unauthenticated socket).
+
+---
+
 ## 13. Not implemented
 
 The following modules from the original design have **no backend at all** — no controller, no
-service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail):
+service, no database table (see `DATABASE-SCHEMA.md` §§8–11 for detail). (M3 WhatsApp is no
+longer in this list — its Phase 1 inbox is built, see §12b below.)
 
 | Module | State |
 |---|---|
-| M3 — WhatsApp Integration | 🎭 UI mockup only. No `/whatsapp/*` routes, no webhook handler, no bot |
 | M5 — Exam Results | Only `exam_requests` exists as a schema stub, no controller/service at all; no result field, no `/exam-requests/:id/results`, no token-based download |
 | M9 — Home Visits | 🎭 UI mockup only. No `/home-visits/*` routes |
 
@@ -679,8 +707,8 @@ globally, so every route gets a default limit unless overridden per-route.
 | Public (`/public/*`) | 60 req/min per IP | ✅ Enforced (`@Throttle` override, stricter than the default) |
 | `POST /auth/login`, `POST /auth/forgot-password` | 5 req/min per IP | ✅ Enforced — plus a separate, per-account Redis lockout (5 failed logins / 15min → 15min lock) that isn't IP-based at all |
 
-The original design's "1000 req/min WhatsApp webhook" row described infrastructure that doesn't
-exist (no WhatsApp webhook — M3 is a UI mockup). The "10 req/min auth endpoints" row is now real,
+The WhatsApp webhook (`POST /whatsapp/webhook`) is throttled at 600 req/min — sized for Meta delivery
+bursts, not the original design's 1000. The "10 req/min auth endpoints" row is now real,
 at a stricter 5 req/min, since real `/auth/*` endpoints exist (see the **Authentication** section
 above) — this replaced the original design's assumption that Keycloak/NGINX would handle it.
 

@@ -5,13 +5,15 @@
 > **Architecture:** Finite State Machine (FSM) stored in Redis per phone number
 > **Handoff:** Any flow can escalate to the shared agent inbox at any point
 
-> **Implementation status: 🎭 none of this exists.** There is no bot, no FSM, no agent inbox, no
-> `/whatsapp/webhook` — see `modules/M3-whatsapp-integration.md` for the full picture. This
+> **Implementation status (2026-09-19): the bot FSM in this document is still not built.** The
+> agent inbox and `/whatsapp/webhook` now exist (Phase 1) — see `modules/M3-whatsapp-integration.md`
+> and `WHATSAPP_CHECKLIST.md`. The only bot-like behaviour today is the "1"/"SIM" reply that
+> confirms a pending appointment. This
 > document is kept as a conversation-design reference for if/when M3 is built. The one factual
-> correction worth making now: of the templates in §1, only the four appointment-reminder rows are
-> actually sent today (by the Appointments module directly, not by anything described in this
-> file) — `appointment_cancelled`, `exam_result_ready`, `invoice_receipt`, `health_plan_expiring`,
-> and `welcome_new_patient` are never sent by anything in the codebase.
+> correction worth making now: of the templates in §1, the appointment confirmation/reminder/
+> cancellation rows and `health_plan_expiring` are sent today (by the Notifications processor, as
+> plain text rather than Meta-approved templates) — `exam_result_ready`, `invoice_receipt`, and
+> `welcome_new_patient` are never sent by anything in the codebase.
 
 ---
 

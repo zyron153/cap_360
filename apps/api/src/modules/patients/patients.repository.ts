@@ -82,7 +82,10 @@ export class PatientsRepository {
   // Right to erasure: clears direct PII, not just deletedAt. gender and every related record
   // (appointments, invoices, notes, documents, health plan memberships) are kept — they're not
   // the identity itself, and billing/clinical history is retained for legal reasons (SECURITY.md).
+  // WhatsApp threads are the exception: message content is not something the billing/clinical
+  // retention rule covers, so it's deleted outright (messages cascade from the conversation).
   async softDelete(id: string) {
+    await this.prisma.whatsappConversation.deleteMany({ where: { patientId: id } });
     const patient = await this.prisma.patient.update({
       where: { id },
       data: {

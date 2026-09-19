@@ -33,6 +33,8 @@ const logger = new Logger("Bootstrap");
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ["log", "warn", "error"],
+    // The WhatsApp webhook's HMAC signature is computed over the exact raw bytes.
+    rawBody: true,
   });
 
   app.use(helmet());

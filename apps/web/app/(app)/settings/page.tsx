@@ -252,6 +252,7 @@ const INTEGRATIONS_DEF = [
       { key: "phoneNumberId", label: "Phone Number ID",       placeholder: "123456789012345"                                      },
       { key: "accessToken",   label: "Access Token",          placeholder: "EAAxxxxx…",             type: "password"               },
       { key: "webhookToken",  label: "Webhook Verify Token",  placeholder: "token_secreto",         type: "password"               },
+      { key: "appSecret",     label: "App Secret",            placeholder: "Meta App Secret",       type: "password", hint: "Usado para validar a assinatura dos webhooks recebidos" },
       { key: "webhookUrl",    label: "Webhook URL (receber)", placeholder: "https://api.cap.cv/v1/whatsapp/webhook", hint: "Configure este URL no Meta Business Manager" },
     ] as FieldDef[],
   },

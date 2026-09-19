@@ -21,6 +21,7 @@ import { EFaturaModule } from "./modules/efatura/efatura.module";
 import { FinanceiroModule } from "./modules/financeiro/financeiro.module";
 import { ClinicalRecordsModule } from "./modules/clinical-records/clinical-records.module";
 import { AnalyticsModule } from "./modules/analytics/analytics.module";
+import { WhatsappModule } from "./modules/whatsapp/whatsapp.module";
 import { SessionAuthGuard } from "./common/guards/session-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
@@ -58,6 +59,7 @@ import { RedisModule } from "./common/redis/redis.module";
     FinanceiroModule,
     ClinicalRecordsModule,
     AnalyticsModule,
+    WhatsappModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

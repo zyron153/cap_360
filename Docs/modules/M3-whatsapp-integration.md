@@ -12,12 +12,19 @@ The WhatsApp Integration Hub preserves the clinic's existing WhatsApp-first pati
 
 For detailed bot conversation flows, see `WHATSAPP-BOT-FLOWS.md`.
 
-> **Implementation status: 🎭 UI mockup only — no backend exists.** There is no `/whatsapp/*`
-> webhook route, no `whatsapp_conversations`/`whatsapp_messages` table, no bot FSM, and no agent
-> inbox. The **one real thing** this module's design overlaps with: outbound WhatsApp messages for
-> appointment confirmation and the 48h/24h/2h reminders are genuinely sent, but that logic lives
-> entirely inside the Appointments module (M1) via a simple send function — not through any of the
-> architecture described below (§2–§4, §6). See the corrected §5 table.
+> **Implementation status (2026-09-19): Phase 1 inbox built; bot FSM (§3) not built.**
+> `apps/api/src/modules/whatsapp/` — signed webhook (`GET`/`POST /whatsapp/webhook`), 
+> `whatsapp_conversations`/`whatsapp_messages` (bodies AES-256-GCM encrypted), the inbox API
+> (list / thread / reply / assign / resolve / link patient) and a real `/whatsapp` page. Replies
+> "1"/"SIM" to a reminder auto-confirm the patient's single pending appointment; anything else lands
+> in the inbox for a human (a "NÃO" never auto-cancels). Free-text replies are refused once Meta's 24h
+> window closes. Not built: the bot FSM (§3), SLA timers (§4.3), quick-reply templates, template
+> messages for outbound reminders (they still send plain text — they only deliver inside the 24h
+> window until templates are approved and wired), and the closure message on Resolve.
+> Setup lives in the `integration_whatsapp` setting: `phoneNumberId`, `accessToken`, `webhookToken`
+> (Meta verify token) and `appSecret` (signs webhooks). Outbound reminders/confirmations/cancellations
+> are still sent by the Notifications processor, now through the shared `whatsapp-api.ts` helper.
+> See `WHATSAPP_CHECKLIST.md` for what remains.
 
 ---
 
@@ -101,10 +108,10 @@ When a new conversation enters the inbox (or is assigned), the assigned staff me
 | 48h before appointment | `appointment_reminder_48h` | ✅ Real (BullMQ job) |
 | 24h before appointment | `appointment_reminder_24h` | ✅ Real (BullMQ job) |
 | 2h before appointment | `appointment_reminder_2h` | ✅ Real (BullMQ job) |
-| Appointment cancelled | `appointment_cancelled` | ❌ Not sent — and the underlying reminder jobs aren't even cancelled (`M1-smart-appointment-engine.md` §2.4) |
+| Appointment cancelled | `appointment_cancelled` | ✅ Real (`send-cancel` job, plain text) — and pending reminder jobs are cancelled |
 | Exam result uploaded | `exam_result_ready` | ❌ Not sent — M5 has no result field to upload in the first place |
 | Invoice issued | `invoice_receipt` | ❌ Not sent — receipts are pulled on demand, never pushed (`M6-billing-invoicing.md` §2.4) |
-| Health plan expiring | `health_plan_expiring` | ❌ Not sent — no expiry job exists (`M4-health-plan-management.md` §3.4) |
+| Health plan expiring | `health_plan_expiring` | ✅ Real — daily 08:00 job in `NotificationsProcessor` (`M4-health-plan-management.md` §3.4) |
 
 ---
 
@@ -154,4 +161,4 @@ See `API-SPEC.md` → Section 4 (WhatsApp Integration)
 
 ---
 
-*Module M3 · v1.1 · updated 2026-08-30 against the current implementation*
+*Module M3 · v1.2 · updated 2026-09-19 — Phase 1 inbox built*

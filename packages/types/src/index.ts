@@ -11,3 +11,4 @@ export * from "./service";
 export * from "./financeiro";
 export * from "./clinical-records";
 export * from "./analytics";
+export * from "./whatsapp";
