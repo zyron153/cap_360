@@ -34,7 +34,7 @@
     "cookie-parser": "^1.4.7",
     "helmet": "^8.2.0",
     "ioredis": "^5.4.2",
-    "nodemailer": "^9.0.1",
+    "nodemailer": "^9.1.1",
     "pdfkit": "^0.19.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

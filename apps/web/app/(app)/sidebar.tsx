@@ -5,8 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, CalendarDays, Users, MessageCircle,
-  Shield, FileSearch, Receipt, ClipboardList,
-  Users2, Home, BarChart2, Settings, SlidersHorizontal,
+  Shield, Receipt, ClipboardList,
+  Users2, BarChart2, Settings, SlidersHorizontal,
   ShieldCheck, ChevronDown, LogOut,
 } from "lucide-react";
 import { usePermissions } from "./hooks/use-permissions";
@@ -32,19 +32,15 @@ const NAV = [
   {
     section: "Módulos",
     items: [
-      { href: "/appointments", label: "Agendamentos",          icon: CalendarDays,  badge: "24", badgeVariant: "default" },
+      { href: "/appointments", label: "Agendamentos",          icon: CalendarDays },
       { href: "/patients",     label: "Pacientes CRM",         icon: Users },
-      // isMock: true — no backend behind these yet (hardcoded mock arrays, zero real fetch calls).
-      // Flagged rather than left indistinguishable from the working modules around them (the
-      // highest-weighted UX finding in REVIEW.md §5.4) — remove the flag the day each one is real.
       { href: "/whatsapp",     label: "WhatsApp Hub",          icon: MessageCircle },
       { href: "/health-plans", label: "Planos de Saúde",       icon: Shield },
-      { href: "/exams",        label: "Exames & Resultados",   icon: FileSearch },
-      { href: "/billing",      label: "Financeiro",            icon: Receipt,       badge: "3",  badgeVariant: "danger"  },
+      // /exams and /visits hidden (mock-only, no backend) — see middleware.ts HIDDEN_PATHS
+      { href: "/billing",      label: "Financeiro",            icon: Receipt },
       { href: "/records",      label: "Registos Clínicos",     icon: ClipboardList },
       { href: "/staff",        label: "Equipa & Turnos",       icon: Users2 },
-      { href: "/visits",       label: "Visitas Domiciliárias", icon: Home,          isMock: true },
-      { href: "/analytics",    label: "Analytics",             icon: BarChart2,     isMock: true },
+      { href: "/analytics",    label: "Analytics",             icon: BarChart2 },
     ],
   },
   {
@@ -152,23 +148,6 @@ export function Sidebar() {
                     )}
                     <Icon className="w-[15px] h-[15px] shrink-0" />
                     {item.label}
-                    {"badge" in item && item.badge && (
-                      <span className={`ml-auto text-[10px] font-semibold font-mono px-1.5 rounded-full ${
-                        item.badgeVariant === "danger"
-                          ? "bg-red-500/[0.15] text-red-400"
-                          : "bg-brand-700 text-brand-200"
-                      }`}>
-                        {item.badge}
-                      </span>
-                    )}
-                    {"isMock" in item && item.isMock && (
-                      <span
-                        title="Ainda sem dados reais — em desenvolvimento"
-                        className="ml-auto text-[9px] font-bold uppercase tracking-[0.04em] px-1.5 py-0.5 rounded-full bg-dim-700/60 text-dim-300"
-                      >
-                        Beta
-                      </span>
-                    )}
                   </Link>
                 );
               })}

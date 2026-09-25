@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/activate", "/forgot-password", "/reset-password"];
 const SESSION_COOKIE = "cap_session";
+// ponytail: mock-only modules (no backend) hidden until built — remove the entry to re-enable.
+const HIDDEN_PATHS = ["/exams", "/visits"];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -10,6 +12,10 @@ export function middleware(req: NextRequest) {
   // travels with the request automatically (same browser-facing origin), and SessionAuthGuard
   // enforces auth server-side. Nothing for this middleware to add here.
   if (pathname.startsWith("/api/")) return NextResponse.next();
+
+  if (HIDDEN_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
 
   const hasSession = Boolean(req.cookies.get(SESSION_COOKIE)?.value);
 

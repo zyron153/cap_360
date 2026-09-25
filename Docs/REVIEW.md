@@ -74,6 +74,8 @@ Three separate gaps stacked on top of each other:
 - If the audit write fails, the `.catch(() => {})` swallows it with no log line anywhere. A DB hiccup during a sensitive action means that action is now unaccountable, and nobody will ever know it happened.
 
 ### 1.5 — MFA is specified, nowhere configured
+> **Update 2026-09-25:** the fix below relied on Keycloak, which was removed 2026-08-31. The self-hosted auth has no TOTP, so MFA is currently **not implemented for any role**. Launching without it by explicit decision.
+
 **Status: ✅ Fixed for new accounts.** `KeycloakAdminService.createUser()` now sets `requiredActions: ["CONFIGURE_TOTP"]` for admin/doctor/corporate_hr specifically (the roles SECURITY.md marks mandatory, not the recommended-only ones) — new staff in those roles are forced through TOTP enrollment on first login. TDD: `keycloak-admin.service.spec.ts` (6 tests, one per role).
 **Not actionable right now:** retroactive enforcement for accounts that already exist in a live realm — that needs a one-time realm-admin action against a real, persistent Keycloak instance. The only one currently running is local dev (H2 in-memory, wiped on restart, seeded test accounts) — nothing real to retrofit yet. Relevant again once a staging/production realm exists.
 **Files:** `Docs/SECURITY.md` §2.3 (admin/doctor/corporate_hr: mandatory TOTP), `infra/keycloak/cap-realm.json`
@@ -299,6 +301,8 @@ Badge components (invoice status, expense status, e-fatura status) pair color wi
 Every list page reviewed (patients, faturas, despesas, entradas) has a real skeleton loading state, a distinct error state, and a distinct "nothing found" empty state with contextual copy (different message when a search filter is active vs. truly empty). This is a genuinely consistent, well-executed pattern across the whole app — worth naming as a strength, not just an absence of complaints.
 
 ### 5.4 — The sidebar makes no distinction between real and mock features
+> **Update 2026-09-25:** Exams and Home Visits are now hidden entirely (sidebar + `middleware.ts` redirect); WhatsApp and Analytics are real and unbadged; fake nav counters removed.
+
 **Fixed.** "Visitas Domiciliárias," "Analytics," and "WhatsApp Hub" now carry a "Beta" badge (`isMock: true` in `sidebar.tsx`'s nav config) with a tooltip explaining why — "Registos Clínicos" turned out to be genuinely real (M7 Clinical Records, built since this finding was written) and was correctly left unbadged. A staff member can now tell at a glance which of these don't save anything they type, instead of finding out by testing.
 
 ### 5.5 — Design consistency

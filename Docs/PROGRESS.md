@@ -1,9 +1,31 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-19.
+> Snapshot overwritten each session. Última atualização: 2026-09-25.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **Auditoria pré-deploy (2026-09-25) e correções.** Dois agentes: auditoria de código + testes/build.
+  - Lembretes de consultas **nunca eram enviados** (o processor da fila `reminders` era um stub que só
+    registava log). Removido; `AppointmentsService` enfileira agora na fila `notifications`, cujo
+    `handleReminder` envia via WhatsApp (com verificação de `consentGiven`, ignora consultas
+    canceladas/eliminadas, texto conforme o offset 48h/24h/2h).
+  - `secretAccessKey` (R2) adicionado ao mascaramento de segredos — `GET /settings` devolvia-o em claro.
+  - `trust proxy` = 1 no `main.ts` (o throttle de login por IP via todos os clientes como o IP do proxy).
+  - `next` → ≥15.5.24 e `nodemailer` → ≥9.1.0; `pnpm audit --prod`: 0 críticas (25 altas
+    transitivas restantes, ex. multer via `@nestjs/platform-express` — exigem upgrade major).
+  - Sidebar: removidos badges fictícios ("24", "3") e o selo "Beta" de Analytics.
+  - **`/exams` e `/visits` (mockups sem backend) escondidos**: removidos da sidebar e redirecionados para
+    `/dashboard` em `middleware.ts` (`HIDDEN_PATHS`). Reativar = apagar a entrada.
+  - Teste de integração `health-plan-renewal` corrigido (confirmar antes de concluir a consulta).
+  - Verificação: typecheck/lint/build limpos; 490 testes unitários.
+  - **Decisões:** arrancar sem MFA (SECURITY.md §2.3 ainda o exige — não implementado no auth
+    self-hosted); não iniciar o processo WABA/templates da Meta por agora → lembretes/confirmações só
+    entregam dentro da janela de 24h.
+  - **Ainda bloqueia o deploy:** `docker-compose.prod.yml`/deploy real no CI, Dockerfile da API
+    (`apps/api/node_modules`, Prisma CLI), `NEXT_PUBLIC_API_URL` no build do web, aplicação do SQL do
+    trigger do `audit_log`, bootstrap de admin real (seed usa `Teste@1234`, sem guarda de produção),
+    backups, validação de env no arranque, e `db:push --accept-data-loss` no CI.
 
 - **M3 — WhatsApp Hub, Phase 1 (inbox) construído.** Antes: mockup sem backend. Agora:
   `apps/api/src/modules/whatsapp/` com webhook assinado (`GET` verify + `POST` com HMAC

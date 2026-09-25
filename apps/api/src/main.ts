@@ -37,6 +37,8 @@ async function bootstrap() {
     rawBody: true,
   });
 
+  // Behind nginx/Next proxy every client shares the proxy IP unless this is set (per-IP login throttle)
+  app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.use(helmet());
   app.use(cookieParser());
   app.setGlobalPrefix("v1");

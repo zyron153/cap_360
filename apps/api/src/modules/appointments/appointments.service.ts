@@ -81,7 +81,7 @@ export class AppointmentsService {
     private readonly notifService: NotificationsService,
     private readonly healthPlansService: HealthPlansService,
     private readonly prisma: PrismaService,
-    @InjectQueue("reminders") private readonly remindersQueue: Queue,
+    @InjectQueue("notifications") private readonly remindersQueue: Queue,
     @Inject(REDIS_CLIENT) private readonly redis: Redis
   ) {}
 

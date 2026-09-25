@@ -63,6 +63,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Idempotency keys end-to-end for booking (client-generated, replay-safe)
 - [x] Extensive unit test suite (`appointments.service.spec.ts`, `appointments.repository.spec.ts` — availability, conflicts, holidays/leave, rooms, series)
 - [x] ~~Leave request submission/approval endpoints — nothing can create or approve one via the API~~ — corrected: `POST /staff/me/leave-requests`, `GET /staff/leave-requests`, `PATCH /staff/leave-requests/:id` all exist and work; this line was stale
+- [x] Reminders now actually send (2026-09-25): the `reminders` queue consumer was a log-only stub; jobs now go to the `notifications` queue's `handleReminder` (consent-checked, skips cancelled). Still plain text → only delivers inside Meta's 24h window until templates are approved
 - [ ] Reminder channel is hardcoded to WhatsApp regardless of the `ReminderChannel` enum having SMS/email options — needs real SMS-sending infrastructure (none exists) before this can be fixed
 
 **Frontend**
@@ -277,7 +278,7 @@ deadlock, not a theoretical one. Fixed same day: lock/query/unlock now run insid
 commit/rollback), which pins a single physical connection for the whole critical section. Same fix
 applied to `billing.repository.ts`'s invoice numbering, which had the identical bug.~~
 
-### M5 — Exam Results Portal — 🟡 stub only
+### M5 — Exam Results Portal — 🟡 stub only (`/exams` hidden from the UI 2026-09-25)
 `ExamRequest` exists as a schema stub (self-labelled "Phase 1 stub"), no controller/service at
 all. No result field on the model — no `resultR2Key`, no `resultedAt`, no `exam_results` table.
 Nothing to time-limit or download.
@@ -326,7 +327,7 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   byte-for-byte copy of the same Perfis logic) is deleted outright.
 - [ ] Shift-planner calendar UI (drag-to-assign)
 
-### M9 — Home Visit Manager — 🎭 not started
+### M9 — Home Visit Manager — 🎭 not started (`/visits` hidden from the UI 2026-09-25)
 UI mockup only (`visits/page.tsx`). **No `home_visits` table** — corrected from this file's
 previous claim that it was "already in schema." No geo/address validation, no persisted status
 tracking, no assignment logic.
@@ -382,7 +383,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 ### Security
 - [x] Field-level encryption for `nif`/`dateOfBirth` (AES-256-GCM, `EncryptionService`) — clinical notes don't exist yet to encrypt
 - [x] Rate limiting — global 300/min + public 60/min (see above; the original "1000/min WhatsApp webhook" line doesn't apply — no webhook exists)
-- [x] MFA required (`CONFIGURE_TOTP`) for new admin/doctor/corporate_hr accounts
+- [ ] MFA — the old Keycloak `CONFIGURE_TOTP` enforcement died with Keycloak (2026-08-31); the self-hosted auth has **no TOTP at all**. Launching without it by explicit decision (2026-09-25); SECURITY.md §2.3 still mandates it for admin/doctor
 - [x] `audit_log` genuinely append-only via a DB trigger (not just app convention)
 - [x] ~~Helmet headers in `main.ts`~~ — corrected: `app.use(helmet())` is already the second line of `bootstrap()`; this line was stale
 - [ ] OWASP ZAP scan in CI
@@ -430,6 +431,7 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [x] §5.4 — sidebar "Beta" badges on mock modules (done earlier)
 
 ### DevOps
+- [ ] Pre-deploy blockers found 2026-09-25 (see PROGRESS.md): prod compose + real CI deploy, API Dockerfile fixes, `NEXT_PUBLIC_API_URL` build arg, audit-log trigger SQL step, real admin bootstrap + seed production guard, boot-time env validation, drop `--accept-data-loss` from CI `db:push`
 - [ ] Staging/production environments — not live
 - [ ] Sentry, Grafana/Prometheus, Loki — not set up
 - [ ] Automated PostgreSQL backups

@@ -175,10 +175,13 @@ describe("Health Plans — renewal (integration)", () => {
         .expect(201);
       appointmentIds.push(appt.body.id);
 
-      await request(app.getHttpServer())
-        .patch(`/v1/appointments/${appt.body.id}/status`)
-        .send({ status: "completed" })
-        .expect(200);
+      // pending → completed isn't a valid transition; confirm first
+      for (const status of ["confirmed", "completed"]) {
+        await request(app.getHttpServer())
+          .patch(`/v1/appointments/${appt.body.id}/status`)
+          .send({ status })
+          .expect(200);
+      }
 
       const afterCompletion = await request(app.getHttpServer())
         .get(`/v1/health-plans/${plan.body.id}`)

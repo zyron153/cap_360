@@ -58,7 +58,7 @@ describe("AppointmentsService", () => {
         { provide: NotificationsService, useValue: notifMock },
         { provide: HealthPlansService, useValue: healthPlansMock },
         { provide: PrismaService, useValue: prisma },
-        { provide: getQueueToken("reminders"), useValue: queue },
+        { provide: getQueueToken("notifications"), useValue: queue },
         { provide: REDIS_CLIENT, useValue: redis },
       ],
     }).compile();

@@ -85,7 +85,7 @@ export class NotificationsProcessor {
   }
 
   @Process("send-reminder")
-  async handleReminder(job: Job<{ appointmentId: string }>) {
+  async handleReminder(job: Job<{ appointmentId: string; offsetMin?: number }>) {
     const wa = await this.cfg<WaConfig>("integration_whatsapp");
     if (!wa?.phoneNumberId || !wa?.accessToken) return;
 
@@ -93,14 +93,20 @@ export class NotificationsProcessor {
       where: { id: job.data.appointmentId },
       include: { patient: true, service: true },
     });
-    if (!appt?.patient.phone) return;
+    if (!appt?.patient.phone || !appt.patient.consentGiven) return;
+    if (appt.deletedAt || !["pending", "confirmed"].includes(appt.status)) return;
 
     const time = appt.scheduledAt.toLocaleTimeString("pt-CV", { hour: "2-digit", minute: "2-digit" });
+    const when = (job.data.offsetMin ?? 24 * 60) <= 180
+      ? `hoje às ${time}`
+      : (job.data.offsetMin ?? 0) >= 36 * 60
+        ? `no dia ${appt.scheduledAt.toLocaleDateString("pt-CV", { day: "2-digit", month: "long" })} às ${time}`
+        : `amanhã às ${time}`;
 
     await this.sendWhatsApp(
       wa,
       appt.patient.phone,
-      `Lembrete: tem uma consulta de ${appt.service.name} amanhã às ${time} na CAP. Por favor confirme a sua presença respondendo SIM.`,
+      `Lembrete: tem uma consulta de ${appt.service.name} ${when} na CAP. Por favor confirme a sua presença respondendo SIM.`,
     );
   }
 
