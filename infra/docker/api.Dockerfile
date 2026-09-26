@@ -1,12 +1,13 @@
 FROM node:20-alpine AS base
-
-RUN npm install -g pnpm
-
-# Build stage
-FROM base AS builder
+RUN npm install -g pnpm@9
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml turbo.json ./
+# ponytail: the runner ships the whole built workspace (not a pruned prod install) — @cap/types
+# resolves from its dist/, and the Prisma CLI (db push / db execute) must exist for the migrate
+# step. Slim with `pnpm deploy` if image size matters.
+FROM base AS builder
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
 COPY packages/config/package.json ./packages/config/
 COPY packages/types/package.json ./packages/types/
 COPY packages/database/package.json ./packages/database/
@@ -17,21 +18,15 @@ RUN pnpm install --frozen-lockfile
 COPY packages/ ./packages/
 COPY apps/api/ ./apps/api/
 
-WORKDIR /app/packages/database
-RUN pnpm run db:generate
+# @cap/database's "main" is raw TS (fine for dev/jest, not for plain `node`). Build the API against
+# the TS source first, then compile the package to dist/ and repoint ONLY "main" (not "types") in
+# the image, leaving the workspace package.json untouched for dev.
+RUN pnpm --filter @cap/database run db:generate  && pnpm --filter @cap/types run build  && pnpm --filter @cap/api run build  && cd packages/database  && npx tsc src/index.ts --outDir dist --module commonjs --target es2021 --esModuleInterop --skipLibCheck --typeRoots ../../apps/api/node_modules/@types --types node  && sed -i 's#"main": "./src/index.ts"#"main": "./dist/index.js"#' package.json
 
-WORKDIR /app
-RUN pnpm turbo run build --filter=@cms/api
-
-# Production stage
-FROM node:20-alpine AS runner
-WORKDIR /app
-
+FROM base AS runner
 ENV NODE_ENV=production
-
-COPY --from=builder /app/apps/api/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/database/node_modules/.prisma ./node_modules/.prisma
-
+COPY --from=builder /app ./
+WORKDIR /app/apps/api
+USER node
 EXPOSE 3001
 CMD ["node", "dist/main.js"]

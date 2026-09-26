@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/*.log
+**/playwright-report
+**/test-results
+.git
+# Secrets: dev .env files exist at the root AND in apps/api, apps/web, packages/database —
+# `**/` is required, a bare `.env` only matches the root.
+**/.env
+**/.env.*
+!**/.env.example
+Docs

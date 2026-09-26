@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, develop]
   pull_request:
-    branches: [main, develop]
+    branches: [master, develop]
 
 env:
   NODE_VERSION: "20"
@@ -100,7 +100,7 @@ jobs:
     name: Build & Push Images
     needs: [quality, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     permissions:
       contents: read
       packages: write
@@ -133,42 +133,34 @@ jobs:
         with:
           context: .
           file: infra/docker/web.Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_APP_URL }}
           push: true
           tags: ${{ env.IMAGE_PREFIX }}-web:${{ github.sha }},${{ env.IMAGE_PREFIX }}-web:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ─── Deploy to Staging ────────────────────────────────────────────────────
-  deploy-staging:
-    name: Deploy to Staging
-    needs: build
-    runs-on: ubuntu-latest
-    environment: staging
-
-    steps:
-      - name: Deploy API to staging
-        run: |
-          echo "kubectl set image deployment/api api=${{ env.IMAGE_PREFIX }}-api:${{ github.sha }} -n maissaude-staging"
-
-      - name: Smoke test staging
-        run: |
-          sleep 20
-          curl -f https://staging-api.maissaudecv.com/v1/health || exit 1
-
-  # ─── Deploy to Production (manual gate) ──────────────────────────────────
+  # ─── Deploy to Production (manual approval via the `production` environment) ──────
+  # Assumes a single Docker host with this repo checked out at $DEPLOY_PATH and an untracked
+  # .env.prod next to docker-compose.prod.yml. Secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY,
+  # DEPLOY_PATH; vars: PUBLIC_APP_URL. The `migrate` service runs `db push` (no data-loss flag) and
+  # the audit_log trigger before the API starts, so a destructive schema change fails the deploy.
   deploy-production:
     name: Deploy to Production
-    needs: deploy-staging
+    needs: build
     runs-on: ubuntu-latest
     environment: production
 
     steps:
-      - name: Deploy to production
-        run: |
-          echo "kubectl set image deployment/api api=${{ env.IMAGE_PREFIX }}-api:${{ github.sha }} -n maissaude-prod"
-          echo "kubectl set image deployment/web web=${{ env.IMAGE_PREFIX }}-web:${{ github.sha }} -n maissaude-prod"
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
 
-      - name: Production smoke test
+      - name: Deploy
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}             "cd ${{ secrets.DEPLOY_PATH }} && git pull --ff-only &&              sed -i '/^IMAGE_TAG=/d' .env.prod && echo IMAGE_TAG=${{ github.sha }} >> .env.prod &&              docker compose --env-file .env.prod -f docker-compose.prod.yml pull &&              docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --remove-orphans"
+
+      - name: Smoke test
         run: |
           sleep 30
-          curl -f https://api.maissaudecv.com/v1/health || exit 1
+          curl -fsS "${{ vars.PUBLIC_APP_URL }}/v1/health" || exit 1

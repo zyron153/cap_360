@@ -32,7 +32,25 @@ const COMPANY_IDS = {
   garantia: "c0000000-0000-0000-0000-000000000003",
 };
 
+// Production must never get the demo dataset or the shared dev password: only the first admin,
+// from env, is created. Idempotent — re-running does not overwrite an existing admin's password.
+async function bootstrapProductionAdmin() {
+  const email = process.env.ADMIN_EMAIL;
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password || password.length < 12) {
+    throw new Error("Production seed requires ADMIN_EMAIL and ADMIN_PASSWORD (min 12 chars)");
+  }
+  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+  await prisma.staff.upsert({
+    where: { email },
+    update: {},
+    create: { passwordHash, fullName: "Administrador", email, role: "admin" },
+  });
+  console.warn(`Production seed: admin ${email} ensured. Demo data skipped.`);
+}
+
 async function main() {
+  if (process.env.NODE_ENV === "production") return bootstrapProductionAdmin();
   console.warn("Seeding database...");
   const passwordHash = await argon2.hash(SEED_PASSWORD, { type: argon2.argon2id });
 

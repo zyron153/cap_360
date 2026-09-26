@@ -16,6 +16,60 @@
 
 ---
 
+## 0. Production runbook — single VPS (Docker Compose)
+
+> **Status 2026-09-26:** structure and configs are prepared; **no VPS and no domain exist yet**.
+> Nothing below has been run against a real server. The Kubernetes material further down is
+> superseded by this for the first launch.
+
+**Pieces (all in the repo):** `infra/docker/{api,web}.Dockerfile`, `docker-compose.prod.yml`,
+`infra/nginx/{nginx.conf,conf.d/app.conf,tls.conf.example}`, `.env.prod.example`, and the
+`deploy-production` job in `.github/workflows/ci.yml` (push to `master` → build/push images to GHCR
+→ SSH deploy → `/v1/health` smoke test; the `production` GitHub environment is the manual gate).
+
+**Stack:** postgres, redis, `migrate` (one-shot), `api`, `web`, `nginx`, plus `seed` (profile
+`tools`). `migrate` runs `prisma db push` **without** `--accept-data-loss` (a destructive schema
+change aborts the deploy) and applies `prisma/manual-sql/audit-log-immutable.sql` (the append-only
+trigger) on every deploy — the SQL is idempotent.
+
+### When the VPS exists
+1. Install Docker + Compose plugin; create a deploy user; clone the repo to `$DEPLOY_PATH`.
+2. `cp .env.prod.example .env.prod` and fill it in (generate `POSTGRES_PASSWORD` and
+   `FIELD_ENCRYPTION_KEY`; **back the encryption key up off-server** — losing it makes patient NIF/DOB
+   and clinical notes unrecoverable). Until a domain exists use `http://<vps-ip>` for `WEB_URL` and
+   `ALLOWED_ORIGINS`.
+3. GitHub → repo secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`; repo variable
+   `PUBLIC_APP_URL` (used as the web build's `NEXT_PUBLIC_API_URL` and the smoke-test URL);
+   environment `production` with required reviewers.
+4. Make the GHCR packages readable from the server (`docker login ghcr.io` with a read-only PAT).
+5. First deploy: push to `master`, or on the server
+   `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d`, then create the first admin:
+   `docker compose --env-file .env.prod -f docker-compose.prod.yml --profile tools run --rm seed`.
+   Afterwards remove `ADMIN_PASSWORD` from `.env.prod`.
+
+### When the domain exists (enable HTTPS)
+1. Point DNS at the VPS; obtain certs (e.g. certbot) into `infra/nginx/certs/` as `fullchain.pem` +
+   `privkey.pem`.
+2. `cp infra/nginx/tls.conf.example infra/nginx/conf.d/tls.conf`, replace `YOUR_DOMAIN`, and turn
+   `conf.d/app.conf`'s server body into `return 301 https://$host$request_uri;`.
+3. Update `.env.prod` (`WEB_URL`, `ALLOWED_ORIGINS` → `https://<domain>`) and the `PUBLIC_APP_URL`
+   variable, redeploy (the web image bakes the URL at build time, so it must be rebuilt).
+
+### Known gaps
+- **Backups:** none configured. Needs a nightly `pg_dump` (off-server) and a restore drill before real
+  patient data goes in.
+- **WhatsApp:** Meta needs a public HTTPS webhook URL — blocked on the domain.
+- **MFA:** not implemented for any role (launching without it was an explicit decision).
+- Verified locally: both images build; the API image loads all modules and `assertProdEnv` runs;
+  compose syntax (`config -q`) and nginx syntax (`nginx -t`) pass. **Never executed:** the compose
+  stack end-to-end, the `migrate`/`seed` services, and the CI deploy job.
+- **Lesson (image hygiene):** dev `.env` files exist in `apps/api`, `apps/web` and `packages/database`,
+  not just the root — `.dockerignore` must use `**/.env`. A first build leaked them into both images
+  (never pushed). After any Dockerfile/.dockerignore change, scan the image:
+  `docker run --rm --entrypoint sh <img> -c 'find /app -name ".env*" -not -path "*/node_modules/*"'`.
+
+---
+
 ## 1. Prerequisites
 
 | Tool | Version | Purpose |

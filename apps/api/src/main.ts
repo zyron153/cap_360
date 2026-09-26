@@ -5,6 +5,7 @@ import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import { createServer } from "net";
 import { AppModule } from "./app.module";
+import { assertProdEnv } from "./common/assert-prod-env";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 
 /** Binds a throwaway probe socket to find the first free port at or after `start` — a stray
@@ -31,6 +32,7 @@ if (process.env.SENTRY_DSN) {
 const logger = new Logger("Bootstrap");
 
 async function bootstrap() {
+  assertProdEnv();
   const app = await NestFactory.create(AppModule, {
     logger: ["log", "warn", "error"],
     // The WhatsApp webhook's HMAC signature is computed over the exact raw bytes.

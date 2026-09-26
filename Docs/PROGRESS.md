@@ -22,10 +22,27 @@
   - **Decisões:** arrancar sem MFA (SECURITY.md §2.3 ainda o exige — não implementado no auth
     self-hosted); não iniciar o processo WABA/templates da Meta por agora → lembretes/confirmações só
     entregam dentro da janela de 24h.
-  - **Ainda bloqueia o deploy:** `docker-compose.prod.yml`/deploy real no CI, Dockerfile da API
-    (`apps/api/node_modules`, Prisma CLI), `NEXT_PUBLIC_API_URL` no build do web, aplicação do SQL do
-    trigger do `audit_log`, bootstrap de admin real (seed usa `Teste@1234`, sem guarda de produção),
-    backups, validação de env no arranque, e `db:push --accept-data-loss` no CI.
+  - **Feito depois:** validação de env no arranque (`common/assert-prod-env.ts`, só em produção:
+    exige DATABASE_URL/FIELD_ENCRYPTION_KEY/REDIS_HOST/ALLOWED_ORIGINS/WEB_URL, recusa
+    `AUTH_BYPASS=true` e origens localhost; 4 testes) e bootstrap de admin real (`seed.ts` com
+    `NODE_ENV=production` só cria o admin de `ADMIN_EMAIL`/`ADMIN_PASSWORD` ≥12 chars — sem dados demo
+    nem `Teste@1234`; idempotente, não sobrescreve a password).
+  - **Infra de deploy (2026-09-26), por verificar por completo:** Dockerfiles reescritos (filtros
+    `@cms/*` estavam errados; API compila `@cap/database` para JS só na imagem; web em `standalone`
+    com build-args `API_INTERNAL_URL`/`NEXT_PUBLIC_API_URL`), `.dockerignore` (o `.env` ia para a
+    imagem), `docker-compose.prod.yml` (serviço `migrate`: `db push` sem `--accept-data-loss` + SQL do
+    trigger `audit_log`; serviço `seed` no profile `tools`), CI corrigido (`master` em vez de `main`;
+    deploy fictício por `echo` → SSH + smoke test). Imagem da API construída (falta re-testar após o
+    fix do `@cap/database`); imagem web ainda por confirmar; compose/CI nunca executados.
+  - **Sem VPS nem domínio ainda (decisão 2026-09-26):** só a estrutura/configs ficam prontas.
+    nginx agnóstico ao domínio (`nginx.conf` + `conf.d/app.conf` HTTP em qualquer host;
+    `tls.conf.example` para ativar HTTPS depois), `.env.prod.example`, `.gitignore` para
+    `.env.prod`/certs, e runbook completo em `DEPLOYMENT.md` §0 (o que fazer quando existir a VPS e
+    quando existir o domínio). Imagens API e web construídas localmente.
+  - **Pressupostos:** deploy num único host Docker via SSH (secrets `DEPLOY_HOST/USER/SSH_KEY/PATH`,
+    var `PUBLIC_APP_URL`, `.env.prod` no servidor).
+  - **Ainda bloqueia o deploy:** VPS, domínio + certs, backups (`pg_dump` off-server + teste de
+    restauro), e a primeira execução real do compose/CI. WhatsApp precisa do domínio (webhook HTTPS).
 
 - **M3 — WhatsApp Hub, Phase 1 (inbox) construído.** Antes: mockup sem backend. Agora:
   `apps/api/src/modules/whatsapp/` com webhook assinado (`GET` verify + `POST` com HMAC

@@ -44,3 +44,6 @@ prisma/migrations/
 
 # Docker volumes
 pgdata/
+.env.prod
+infra/nginx/certs/
+infra/nginx/conf.d/tls.conf

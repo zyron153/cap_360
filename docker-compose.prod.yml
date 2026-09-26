@@ -1,0 +1,106 @@
+# Production stack. Secrets come from the server's environment / an untracked .env.prod:
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+# Required in .env.prod: POSTGRES_PASSWORD, FIELD_ENCRYPTION_KEY, ALLOWED_ORIGINS, WEB_URL,
+# IMAGE_TAG, GHCR_OWNER; first deploy also ADMIN_EMAIL + ADMIN_PASSWORD (then `run --rm seed`).
+x-api-env: &api-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://cap:${POSTGRES_PASSWORD:?}@postgres:5432/cap
+  REDIS_HOST: redis
+  FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?}
+  WEB_URL: ${WEB_URL:?}
+  SENTRY_DSN: ${SENTRY_DSN:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: cap
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cap"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Schema sync + audit_log trigger. `db push` WITHOUT --accept-data-loss: a destructive schema
+  # change aborts the deploy instead of silently dropping data.
+  migrate:
+    image: ghcr.io/${GHCR_OWNER:?}/cms-api:${IMAGE_TAG:-latest}
+    working_dir: /app/packages/database
+    command: >
+      sh -c "npx prisma db push --skip-generate &&
+             npx prisma db execute --file prisma/manual-sql/audit-log-immutable.sql"
+    environment:
+      DATABASE_URL: postgresql://cap:${POSTGRES_PASSWORD:?}@postgres:5432/cap
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  # One-off: `docker compose ... run --rm seed` creates the first admin (NODE_ENV=production seed).
+  seed:
+    image: ghcr.io/${GHCR_OWNER:?}/cms-api:${IMAGE_TAG:-latest}
+    working_dir: /app/packages/database
+    command: ["npx", "ts-node", "src/seed.ts"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://cap:${POSTGRES_PASSWORD:?}@postgres:5432/cap
+      FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    profiles: ["tools"]
+
+  api:
+    image: ghcr.io/${GHCR_OWNER:?}/cms-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment: *api-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    image: ghcr.io/${GHCR_OWNER:?}/cms-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro # empty until TLS is enabled (see Docs/DEPLOYMENT.md)
+    depends_on:
+      - web
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
