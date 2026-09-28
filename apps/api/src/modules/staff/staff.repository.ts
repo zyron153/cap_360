@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { StaffRole } from "@cap/database";
 import { PrismaService } from "../../prisma/prisma.service";
-import { CreateStaffDto, UpdateStaffDto, InviteStaffDto } from "@cap/types";
+import { CreateStaffDto, UpdateStaffDto, InviteStaffDto, UpsertStaffShiftDto } from "@cap/types";
 
 const INVITATION_SELECT = {
   id: true, email: true, fullName: true, role: true,
@@ -237,5 +237,33 @@ export class StaffRepository {
 
   deleteLeaveRequest(id: string) {
     return this.prisma.leaveRequest.delete({ where: { id } });
+  }
+
+  // ─── Shift overrides ───────────────────────────────────────────────────────
+
+  findShiftsForStaffInRange(staffId: string, from: Date, to: Date) {
+    return this.prisma.staffShift.findMany({
+      where: { staffId, shiftDate: { gte: from, lte: to } },
+      orderBy: { shiftDate: "asc" },
+    });
+  }
+
+  findShiftById(id: string) {
+    return this.prisma.staffShift.findUnique({ where: { id } });
+  }
+
+  /** One row per staff per date (`@@unique([staffId, shiftDate])`) — assigning a shift on a date
+   * that already has one replaces it rather than erroring, matching the "drag to reassign" UI. */
+  upsertShift(staffId: string, dto: UpsertStaffShiftDto) {
+    const shiftDate = new Date(dto.shiftDate);
+    return this.prisma.staffShift.upsert({
+      where: { staffId_shiftDate: { staffId, shiftDate } },
+      create: { staffId, shiftDate, startTime: dto.startTime, endTime: dto.endTime, notes: dto.notes ?? null },
+      update: { startTime: dto.startTime, endTime: dto.endTime, notes: dto.notes ?? null },
+    });
+  }
+
+  deleteShift(id: string) {
+    return this.prisma.staffShift.delete({ where: { id } });
   }
 }

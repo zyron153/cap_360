@@ -11,6 +11,8 @@ import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
+import { ServicesService } from "../services/services.service";
+import { ParametrizacaoService } from "../parametrizacao/parametrizacao.service";
 import { cvDayStart, cvDayEnd } from "../../common/cabo-verde-time";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cap/database";
@@ -20,6 +22,7 @@ import {
   RecordPaymentDto,
   InvoiceListQuery,
   UpdateInvoiceItemDto,
+  CreateDraftServiceDto,
 } from "@cap/types";
 
 @Injectable()
@@ -31,8 +34,20 @@ export class BillingService {
     private readonly r2: R2Service,
     private readonly prisma: PrismaService,
     private readonly healthPlansService: HealthPlansService,
+    private readonly servicesService: ServicesService,
+    private readonly parametrizacaoService: ParametrizacaoService,
     @InjectQueue("efatura") private readonly efaturaQueue: Queue,
   ) {}
+
+  /** Nova Fatura's "sem preço definido" flow: creates the missing Service and links it back to
+   * the TIPO_SERVICO Parametrizacao entry that triggered it, as one step — see CreateDraftServiceSchema. */
+  async createDraftService(dto: CreateDraftServiceDto) {
+    // durationMinutes isn't collected in the Nova Fatura flow this serves — 30 matches
+    // CreateServiceSchema's own default for the same field on the admin-facing endpoint.
+    const service = await this.servicesService.create({ name: dto.name, code: dto.code, price: dto.price, durationMinutes: 30 });
+    await this.parametrizacaoService.update(dto.parametrizacaoId, { codigo: service.id });
+    return service;
+  }
 
   /** Appends a negative "Desconto Plano de Saúde" line to `itemsData` when the patient has an
    * active health plan with a coverage % configured, keeping catalogue-price items untouched for

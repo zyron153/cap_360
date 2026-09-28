@@ -6,6 +6,8 @@ import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
+import { ServicesService } from "../services/services.service";
+import { ParametrizacaoService } from "../parametrizacao/parametrizacao.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { RequestContext } from "../../common/context/request-context";
 
@@ -37,6 +39,8 @@ const prisma = {
 };
 const efaturaQueue = { add: jest.fn() };
 const healthPlansService = { getActiveCoverage: jest.fn() };
+const servicesService = { create: jest.fn() };
+const parametrizacaoService = { update: jest.fn() };
 const generateReceiptPdfMock = generateReceiptPdf as jest.Mock;
 
 const INVOICE = {
@@ -57,6 +61,8 @@ describe("BillingService", () => {
         { provide: R2Service, useValue: r2 },
         { provide: PrismaService, useValue: prisma },
         { provide: HealthPlansService, useValue: healthPlansService },
+        { provide: ServicesService, useValue: servicesService },
+        { provide: ParametrizacaoService, useValue: parametrizacaoService },
         { provide: getQueueToken("efatura"), useValue: efaturaQueue },
       ],
     }).compile();
@@ -763,6 +769,35 @@ describe("BillingService", () => {
       expect(generateReceiptPdfMock).toHaveBeenCalledWith(
         expect.objectContaining({ patient: expect.objectContaining({ nif: null }) })
       );
+    });
+  });
+
+  describe("createDraftService — Nova Fatura's inline service-creation flow", () => {
+    it("creates the service with a 30-minute default duration and links it back to the parametrizacao entry", async () => {
+      servicesService.create.mockResolvedValue({ id: "svc-1", name: "Consulta Nova", code: "CONSULTA-NOVA" });
+      parametrizacaoService.update.mockResolvedValue({});
+
+      const result = await service.createDraftService({
+        parametrizacaoId: 42,
+        name: "Consulta Nova",
+        code: "CONSULTA-NOVA",
+        price: 2500,
+      });
+
+      expect(servicesService.create).toHaveBeenCalledWith({
+        name: "Consulta Nova", code: "CONSULTA-NOVA", price: 2500, durationMinutes: 30,
+      });
+      expect(parametrizacaoService.update).toHaveBeenCalledWith(42, { codigo: "svc-1" });
+      expect(result).toEqual({ id: "svc-1", name: "Consulta Nova", code: "CONSULTA-NOVA" });
+    });
+
+    it("does not link the parametrizacao entry when service creation fails", async () => {
+      servicesService.create.mockRejectedValue(new Error("duplicate code"));
+
+      await expect(service.createDraftService({
+        parametrizacaoId: 42, name: "X", code: "X", price: 100,
+      })).rejects.toThrow("duplicate code");
+      expect(parametrizacaoService.update).not.toHaveBeenCalled();
     });
   });
 });

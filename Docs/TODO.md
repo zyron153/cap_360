@@ -89,13 +89,26 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] ~~`POST /patients/:id/documents` (upload) — only a download-URL endpoint exists~~ — corrected: `POST`/`GET /patients/:id/documents` both exist (`patients.controller.ts`), wired to `DocumentsService.upload()`/`listByPatient()`; this line was stale. Frontend panel still didn't exist — added this pass.
 - [x] `GET /patients/:id/notes` (list) — added, with `staffAuthor` included; frontend panel added (see below)
 - [ ] Patient-initiated consent management (view/download own consent record) — consent is currently staff-managed only
-- [ ] Tagging system (VIP, Chronic, etc.) — no field for it in the schema
+- [x] Tagging system — `Patient.tags` (`String[]`, Postgres native array, `@default([])`), storing
+  codes from a new "TAG_PACIENTE" Parametrizacao group (VIP/Crónico/Novo seeded), not free text —
+  reuses the existing Parametrizações admin UI for managing the catalogue, no new admin screen. Not
+  cleared on right-to-erasure (like `gender`, not identifying on its own).
 
 **Frontend**
 - [x] Patient list page, profile page (via BFF), new patient form, **edit patient form** (`/patients/[id]/edit`)
 - [x] Document upload panel on patient profile — `PatientRecordsPanel.tsx`, type-select + upload + download-URL round-trip, live-verified
 - [x] Notes panel with add-note form on the patient profile page — same component, live-verified with real author attribution
-- [ ] Patient search as autocomplete in the booking form (currently a plain dropdown)
+- [x] Patient tag editor + display — `TagPicker`/`TagBadges` (`components/ui/tag-picker.tsx`), a
+  chip-toggle multi-select against the "TAG_PACIENTE" Parametrizacao group. Wired into all 3 patient
+  create/edit forms (`/patients/new`, the list page's "Novo Paciente" modal, `/patients/[id]/edit`)
+  and displayed as pills on the patient list row and the profile header. Live-verified end-to-end
+  against the running API: PATCHed a real patient's tags, confirmed the round trip, reverted.
+- [x] Patient search as autocomplete in the booking form — the "Nova Marcação" modal's patient
+  `<select>` only ever loaded the first 100 patients (`/api/patients?limit=100`, no query), so any
+  patient outside that page was silently unbookable from this, the primary booking entry point
+  with no `patientId` prefill. Replaced with a debounced (`useDebouncedValue`, 300ms) search-as-you-
+  type combobox against the existing `/api/patients?q=` endpoint, mirroring the pattern already
+  proven in `HealthPlanDetailBody.tsx`'s "Adicionar Membro" search. No backend change.
 
 ---
 
@@ -125,6 +138,18 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
   sorted by amount owed) and `GET /financeiro/saldos/:patientId` (one patient's balance + the
   invoices behind it), grouping the same issued/partially_paid/overdue invoices `receivables`
   above already summed clinic-wide, just per patient instead.
+- [x] **Fixed (2026-09-27).** Receptionist got a `403` completing the exact invoice Nova Fatura
+  invites them to create: billing an uncatalogued service auto-creates a `Service` and links a
+  `TIPO_SERVICO` Parametrizacao entry to it, but both `POST /services` and `PATCH
+  /parametrizacao/:id` are admin-only — a receptionist (who has full `Create invoice` permission
+  per `ROLES-PERMISSIONS.md` §3.4) hit a dead end with no way to self-recover. Rather than
+  loosening the general admin-only catalog/parametrização endpoints (too broad a grant — a
+  receptionist shouldn't get blanket rights to edit any Parametrizacao group), added a narrow,
+  billing-scoped `POST /invoices/draft-service` (`BillingService.createDraftService`, gated by the
+  controller's own `@Roles("admin", "receptionist")`) that does both steps as one atomic action.
+  TDD: 2 new tests. Live-verified against the running API: created a real Parametrizacao entry
+  with no linked service, called the new endpoint, confirmed the Service was created *and* the
+  entry's `codigo` was linked back — cleaned up after.
 
 **Frontend**
 - [x] Invoice list with status filters + KPI cards, invoice detail with payment recording
@@ -136,6 +161,30 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Payment history now shows who recorded each payment ("registado por …") when `recordedBy` is present
 - [x] "Saldos em Aberto" tab (per-patient outstanding balance, sorted by amount owed) + a matching
   panel on the patient profile page (that patient's own balance, linking to each unpaid invoice)
+- [x] **Fixed (2026-09-27).** Patient picker in both invoice-creation flows (Nova Fatura's modal
+  and `/billing/new`) was a `<select>` fed by `/api/patients?limit=100` — the same silently-capped
+  pattern already fixed for appointment booking (M2 above). Extracted that fix's `PatientPicker`
+  into a shared `components/ui/patient-picker.tsx` (debounced search-as-you-type,
+  `/api/patients?q=`) and reused it in both places, and in the appointments booking modal it
+  originated from — one component instead of three near-identical copies.
+- [x] **Fixed (2026-09-27).** Payment-amount field on the invoice detail page went blank after
+  recording a partial payment instead of re-filling with the new (reduced) balance — its
+  `defaultValue` only ever applied on first mount. Now a `useEffect` re-syncs the field to the
+  invoice's current balance whenever it changes, so the next payment's amount is always pre-filled
+  correctly instead of risking a mistyped figure on money.
+- [x] **Fixed (2026-09-27).** A doctor completing a consulta from **Records** (their normal
+  workflow, not Appointments) whose auto-draft-invoice step failed had no way to retry — the
+  warning was a transient toast, and the appointment left the "Check-in Feito" list the moment it
+  was completed either way, making the missing invoice invisible. Added a persistent banner
+  (visible across both Records tabs) listing any invoice that failed this session, each with a
+  "Gerar Fatura" retry button hitting the same `/api/appointments/:id/invoice` endpoint the
+  Appointments page's own retry button already used.
+- [x] **Fixed.** `/billing/new` (multi-line-item manual invoice form) was real and working but
+  unreachable — no `<Link>` anywhere pointed at it, only an e2e spec did. Functionally distinct
+  from Nova Fatura's modal (multiple catalogue line items vs. one parametrização-driven item), so
+  kept as a second, explicit option rather than replacing the modal: a "Fatura com Vários Itens"
+  link next to the "Nova Fatura" button on the Faturas tab. Its 100-patient cap and a `pt-PT` vs.
+  the rest of the app's `pt-CV` locale mismatch were also fixed.
 
 ---
 
@@ -325,7 +374,25 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   **Utilizadores** (the consolidated lifecycle above, plus pending-invitation visibility/cancel).
   Settings' own duplicate "Gestão de Acesso" tab (`components/settings/AccessTab.tsx`, a
   byte-for-byte copy of the same Perfis logic) is deleted outright.
-- [ ] Shift-planner calendar UI (drag-to-assign)
+- [x] Shift overrides — `StaffShift` was previously dead code: no CRUD endpoints anywhere, and its
+  one read method (`findStaffShift`) was never called by the booking engine, so creating a row had
+  zero effect. Fixed both halves:
+  - **Backend:** `POST/GET /staff/:id/shifts`, `DELETE /staff/shifts/:id` (admin-only writes,
+    upsert semantics — assigning a shift on an already-shifted date replaces it). Wired into the
+    availability engine via a new `resolveDayWindows()` in `appointments.service.ts`: a `StaffShift`
+    row for the exact date now *replaces* the weekly `StaffAvailability` template for that one day
+    (not merged with it), in both `getAvailability()` and `create()`. TDD: 4 new tests in
+    `appointments.service.spec.ts` (slot generation + booking accept/reject against the override).
+  - **Frontend:** new "Turnos" tab on the Staff page (`_ShiftPlanner.tsx`, mirrors
+    `_AvailabilityCalendar.tsx`'s per-doctor calendar pattern) — genuine drag-to-assign: click-and-
+    drag a time range on the grid to define a shift, drag an existing shift to a different day,
+    resize its edge to change hours, or click to edit/remove. `_CalendarView.tsx` gained optional
+    `selectable`/`onSelect`/`durationEditable`/`onEventResize` props for this (all off by default,
+    the appointments calendar's own behavior is unchanged).
+  - Live-verified end-to-end against the running API: created a shift override for a real doctor,
+    confirmed `getAvailability` switched from the weekly 08:00–13:00 window to the shift's
+    15:00–17:00, confirmed `create()` rejects the old weekly-template time and accepts the new one,
+    then deleted the shift and confirmed availability reverted — all test data cleaned up after.
 
 ### M9 — Home Visit Manager — 🎭 not started (`/visits` hidden from the UI 2026-09-25)
 UI mockup only (`visits/page.tsx`). **No `home_visits` table** — corrected from this file's

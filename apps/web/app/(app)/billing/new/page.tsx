@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { Plus, Trash2, ArrowLeft } from "lucide-react";
+import { PatientPicker } from "../../../../components/ui/patient-picker";
 
 // price arrives as a string — it's a Prisma Decimal, serialized to JSON as text to avoid float rounding.
 type ServiceOption = { id: string; name: string; price: string };
@@ -28,11 +29,6 @@ export default function BillingNewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: patients } = useQuery<{ data: { id: string; fullName: string }[] }>({
-    queryKey: ["patients-list"],
-    queryFn: () => fetch("/api/patients?limit=100").then((r) => r.json()),
-    staleTime: 60_000,
-  });
   const { data: services } = useQuery<ServiceOption[]>({
     queryKey: ["services-list"],
     queryFn: () => fetch("/api/services").then((r) => r.json()),
@@ -101,12 +97,7 @@ export default function BillingNewPage() {
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">
               Paciente <span className="text-red-500">*</span>
             </label>
-            <select value={patientId} onChange={(e) => setPatientId(e.target.value)} className={inputCls}>
-              <option value="">Selecionar paciente…</option>
-              {patients?.data?.map((p) => (
-                <option key={p.id} value={p.id}>{p.fullName}</option>
-              ))}
-            </select>
+            <PatientPicker value={patientId} onSelect={(id) => setPatientId(id)} className={inputCls} />
           </div>
 
           {/* Line items */}
@@ -170,7 +161,7 @@ export default function BillingNewPage() {
                         />
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-[12px] font-semibold text-dim-900 whitespace-nowrap">
-                        {(item.quantity * item.unitPrice).toLocaleString("pt-PT")} CVE
+                        {(item.quantity * item.unitPrice).toLocaleString("pt-CV")} CVE
                       </td>
                       <td className="px-2 py-2">
                         {items.length > 1 && (
@@ -191,7 +182,7 @@ export default function BillingNewPage() {
                       Total
                     </td>
                     <td className="px-3 py-2.5 text-right font-mono text-[14px] font-bold text-dim-900 whitespace-nowrap">
-                      {total.toLocaleString("pt-PT")} CVE
+                      {total.toLocaleString("pt-CV")} CVE
                     </td>
                     <td />
                   </tr>

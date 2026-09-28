@@ -295,10 +295,18 @@ export function InvoiceDetailBody({ id }: { id: string }) {
     staleTime: 60_000,
   });
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<RecordPaymentDto>({
+  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<RecordPaymentDto>({
     resolver: zodResolver(RecordPaymentSchema),
     defaultValues: { method: "cash" },
   });
+
+  // The amount field's `defaultValue` only applies on first mount (it's an uncontrolled input) —
+  // without this, it stayed blank after a partial payment instead of re-filling with the new,
+  // reduced balance, risking a mistyped amount on the next payment. Re-syncs whenever the
+  // invoice's own balance changes (after this payment, or any other update to it).
+  useEffect(() => {
+    if (invoice) setValue("amount", Number(invoice.total) - Number(invoice.amountPaid));
+  }, [invoice, setValue]);
 
   // One key per payment attempt — stable across retries of the same submit (double-click, a
   // client timeout retry), regenerated once the form resets for the next, separate payment.
@@ -568,7 +576,6 @@ export function InvoiceDetailBody({ id }: { id: string }) {
                   type="number"
                   step="0.01"
                   {...register("amount", { valueAsNumber: true })}
-                  defaultValue={amountDue}
                   className={inputCls}
                 />
                 {errors.amount && <p className="text-[11px] text-red-600 mt-1">{errors.amount.message}</p>}

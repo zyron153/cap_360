@@ -10,8 +10,9 @@
 Manages doctor and staff shifts, room/equipment calendars, and leave requests. Feeds availability data to the appointment booking engine (M1) so patients only see slots when a doctor and room are both free.
 
 > **Implementation status:** staff profiles/invitations and per-staff **weekly availability
-> templates** are real and drive the booking engine. ❌ Date-specific **shift overrides** have a
-> table and a repository method but are never read by the availability logic — dead code. ❌
+> templates** are real and drive the booking engine. ✅ **2026-09-27:** date-specific **shift
+> overrides** are now wired up end to end — CRUD endpoints, a per-date override of the weekly
+> template in both `getAvailability()`/`create()`, and a drag-to-assign calendar UI (see §2.3). ❌
 > **Leave requests** have a schema and are checked once approved, but nothing in the app can ever
 > submit or approve one — only a direct DB write could populate a row. ❌ There is **no Rooms
 > management API at all** — rooms can only be seeded directly in the database. ❌ **Equipment**
@@ -47,19 +48,22 @@ these directly to compute bookable slots.
 
 ### 2.3 Shift Scheduling
 
-❌ **Not actually wired up.** A `StaffShift` table and a `findStaffShift()` repository method exist
-for date-specific overrides (e.g., a shorter Saturday shift, an extra Sunday shift), but nothing in
-the booking engine ever calls that method — creating a `StaffShift` row today has **zero effect**
-on availability. There is also no endpoint to create one. Treat this as schema-only.
+✅ **Wired up (2026-09-27).** A `StaffShift` row for a given staff/date now *replaces* that day's
+`StaffAvailability` template entirely (not merged with it) — `AppointmentsService.resolveDayWindows()`
+checks for a shift override first, in both `getAvailability()` and `create()`. Endpoints:
+`GET /staff/:id/shifts?from=&to=` (any authenticated staff can view), `POST /staff/:id/shifts`
+(admin-only, upsert — a second POST for the same staff+date replaces the first), `DELETE
+/staff/shifts/:id` (admin-only). Frontend: a "Turnos" tab on the Staff page with a real drag-to-
+assign calendar (click-drag a time range to create a shift, drag an existing one to a different
+day, resize to change hours, click to edit/remove).
 
 The availability engine for slot calculation actually uses:
 ```
-Available = StaffAvailability template (per day of week)
+Available = Date-specific shift override, if one exists — else StaffAvailability template ✅
           - Confirmed appointments                         ✅
           - Approved leave                                 ✅ (see §2.4 caveat)
           - Public holidays (configurable calendar)         ✅
           - Buffer time between appointments                ❌ not implemented
-          - Date-specific shift overrides                   ❌ dead code, see above
 ```
 
 ### 2.4 Leave Management
@@ -124,7 +128,7 @@ See `API-SPEC.md` → Section 7 (Staff & Invitations)
 | Screen | Role | Description |
 |---|---|---|
 | Staff List | Admin | ✅ All staff with role, status, invitation actions |
-| Shift Planner | Admin | ❌ No backend — `StaffShift` isn't wired to anything (§2.3) |
+| Shift Planner | Admin | ✅ "Turnos" tab on the Staff page, drag-to-assign calendar (§2.3) |
 | My Schedule | Doctor / Nurse | ✅ Personal appointment view; no shift data to show (§2.3) |
 | Leave Requests | Admin | ❌ No backend — nothing can create or approve a leave request (§2.4) |
 | Room Calendar | Admin / Receptionist | 🟡 Rooms appear on the appointments calendar as booked resources; no dedicated room-management screen (§3.1) |
@@ -134,9 +138,9 @@ See `API-SPEC.md` → Section 7 (Staff & Invitations)
 
 ## 7. Business Rules
 
-- 🟡 A doctor needs `StaffAvailability` rows to appear in the booking widget — this falls out
-  naturally from the availability query, it isn't a separately enforced rule; "shift" doesn't
-  factor in at all (§2.3)
+- 🟡 A doctor needs `StaffAvailability` rows (or a `StaffShift` override for that specific date) to
+  appear in the booking widget — this falls out naturally from the availability query, it isn't a
+  separately enforced rule (§2.3)
 - ❌ Leave-request notice period / emergency admin-granted leave: moot — leave requests can't be
   submitted or approved through the app at all (§2.4)
 - 🟡 Room assignment is optional on any appointment (`roomId` is nullable) — but there's no
@@ -146,4 +150,4 @@ See `API-SPEC.md` → Section 7 (Staff & Invitations)
 
 ---
 
-*Module M8 · v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
+*Module M8 · v1.3 · updated 2026-09-27 — shift overrides wired up end to end (backend + drag-to-assign UI)*

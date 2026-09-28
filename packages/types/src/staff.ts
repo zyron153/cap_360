@@ -81,3 +81,24 @@ export interface LeaveRequestEntry {
   status: string;
   createdAt: string;
 }
+
+// ─── Shift Overrides ────────────────────────────────────────────────────────
+// A date-specific override of that staff member's weekly StaffAvailability template (e.g. a
+// shorter Saturday, an extra one-off shift) — one row per staff per date (@@unique in the schema).
+
+export const UpsertStaffShiftSchema = z.object({
+  shiftDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  notes: z.string().max(200).optional(),
+}).refine((d) => d.endTime > d.startTime, { message: "endTime must be after startTime", path: ["endTime"] });
+export type UpsertStaffShiftDto = z.infer<typeof UpsertStaffShiftSchema>;
+
+export interface StaffShiftEntry {
+  id: string;
+  staffId: string;
+  shiftDate: string;
+  startTime: string;
+  endTime: string;
+  notes: string | null;
+}

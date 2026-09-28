@@ -13,6 +13,7 @@ export const CreatePatientSchema = z.object({
   emergencyContactName: z.string().max(150).optional(),
   emergencyContactPhone: z.string().max(30).optional(),
   consentGiven: z.boolean(),
+  tags: z.array(z.string()).optional(),
 });
 export type CreatePatientDto = z.infer<typeof CreatePatientSchema>;
 
@@ -33,6 +34,7 @@ export interface Patient {
   emergencyContactName?: string | null;
   emergencyContactPhone?: string | null;
   consentGiven: boolean;
+  tags: string[];
   // Replaces the old healthPlanId FK — a patient's plan comes from HealthPlanMember now, and can
   // legitimately have no single "the" plan pointer (a plan is looked up, not stored on Patient).
   activeHealthPlan?: ActiveHealthPlanSummary | null;

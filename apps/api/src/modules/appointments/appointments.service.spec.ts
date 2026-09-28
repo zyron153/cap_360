@@ -18,6 +18,7 @@ const prisma = {
 };
 const repo = {
   findStaffAvailability: jest.fn(),
+  findStaffShift: jest.fn(),
   findConfirmedInRange: jest.fn(),
   findById: jest.fn(),
   findByIdempotencyKey: jest.fn(),
@@ -76,6 +77,8 @@ describe("AppointmentsService", () => {
     // specialty enforcement — every describe block below this one books through create() without
     // caring about either, so only the two blocks that actually test them override these.
     repo.findStaffAvailability.mockResolvedValue([{ startTime: "00:00", endTime: "23:59", active: true }]);
+    // No date-specific shift override by default — only the dedicated describe block below tests it.
+    repo.findStaffShift.mockResolvedValue(null);
     prisma.staff.findUnique.mockResolvedValue({ specialtyCode: null });
     prisma.service.findUnique.mockResolvedValue({ specialtyCode: null });
   });
@@ -114,6 +117,17 @@ describe("AppointmentsService", () => {
       const slots = await service.getAvailability({ staffId: STAFF_ID, serviceId: "service-1", date: TEST_DATE });
       expect(slots[0].available).toBe(false); // 09:00 blocked
       expect(slots[1].available).toBe(true);  // 09:30 free
+    });
+
+    it("generates slots from a date-specific shift override instead of the weekly template", async () => {
+      repo.findStaffAvailability.mockResolvedValue([{ staffId: STAFF_ID, startTime: "09:00", endTime: "10:00" }]);
+      repo.findStaffShift.mockResolvedValue({ startTime: "13:00", endTime: "14:00" });
+      repo.findConfirmedInRange.mockResolvedValue([]);
+
+      const slots = await service.getAvailability({ staffId: STAFF_ID, serviceId: "service-1", date: TEST_DATE });
+      expect(slots).toHaveLength(2); // 13:00 and 13:30, not the weekly 09:00 window
+      expect(new Date(slots[0].start).getHours()).toBe(13);
+      expect(repo.findStaffAvailability).not.toHaveBeenCalled();
     });
   });
 
@@ -456,6 +470,21 @@ describe("AppointmentsService", () => {
       repo.findStaffAvailability.mockResolvedValue([]);
       await expect(service.create(BASE_DTO)).rejects.toThrow(BadRequestException);
       expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    // A StaffShift row for the exact date stands in for the weekly template that day, not merged
+    // with it — see resolveDayWindows.
+    it("uses a date-specific shift override instead of the weekly template when one exists", async () => {
+      repo.findStaffAvailability.mockResolvedValue([{ startTime: "14:00", endTime: "18:00" }]); // would reject 10AM
+      repo.findStaffShift.mockResolvedValue({ startTime: "08:00", endTime: "12:00" }); // permits 10AM
+      await expect(service.create(BASE_DTO)).resolves.toBeDefined();
+      expect(repo.findStaffAvailability).not.toHaveBeenCalled();
+    });
+
+    it("rejects a time outside the shift override window even though the weekly template would allow it", async () => {
+      repo.findStaffAvailability.mockResolvedValue([{ startTime: "08:00", endTime: "18:00" }]); // would permit 10AM
+      repo.findStaffShift.mockResolvedValue({ startTime: "14:00", endTime: "18:00" }); // excludes 10AM
+      await expect(service.create(BASE_DTO)).rejects.toThrow(BadRequestException);
     });
   });
 

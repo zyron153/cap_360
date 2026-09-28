@@ -25,6 +25,8 @@ import {
   CancelInvoiceDto,
   InvoiceListQuery,
   UpdateInvoiceItemDto,
+  CreateDraftServiceSchema,
+  CreateDraftServiceDto,
 } from "@cap/types";
 
 @Controller("invoices")
@@ -47,6 +49,16 @@ export class BillingController {
   @Get(":id/receipt")
   getReceipt(@Param("id", ParseUUIDPipe) id: string) {
     return this.service.getReceiptUrl(id);
+  }
+
+  // Nova Fatura's "sem preço definido" flow — see CreateDraftServiceSchema. Deliberately not a
+  // generic /services or /parametrizacao write: those stay admin-only, this is scoped to the
+  // one thing a receptionist billing an uncatalogued item actually needs.
+  @Post("draft-service")
+  createDraftService(
+    @Body(new ZodValidationPipe(CreateDraftServiceSchema)) dto: CreateDraftServiceDto,
+  ) {
+    return this.service.createDraftService(dto);
   }
 
   @Post()

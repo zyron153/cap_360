@@ -251,7 +251,16 @@ design.
 
 ---
 
-*Module M6 · v1.9 · updated 2026-09-18 — Saldos em Aberto's "Em dívida desde" column now sourced
+*Module M6 · v1.10 · updated 2026-09-27 — general polish pass: receptionist could hit a `403`
+completing Nova Fatura's own "sem preço definido" flow (inline service creation was admin-only),
+fixed with a narrow billing-scoped `POST /invoices/draft-service`; the invoice-creation patient
+picker was a `<select>` silently capped at 100 (same class of bug already fixed for appointment
+booking) in both Nova Fatura and `/billing/new`, now a shared searchable `PatientPicker`; the
+payment-amount field went blank instead of re-filling after a partial payment; a doctor completing
+a consulta from Records (not Appointments) had no way to retry a failed auto-draft-invoice;
+`/billing/new` (a real, working multi-line-item form) was unreachable from navigation, now linked
+from the Faturas tab as "Fatura com Vários Itens" alongside Nova Fatura's modal — see `TODO.md`'s
+M6 section for the full detail on each; previously v1.9, 2026-09-18 — Saldos em Aberto's "Em dívida desde" column now sourced
 from the outstanding invoice's linked appointment date instead of the invoice's `dueDate`;
 previously v1.8, 2026-09-17 — Saldos em Aberto (both the Overview "Contas a Receber"
 card and the per-patient drill-down) now counts `draft` invoices as outstanding too, so a freshly

@@ -130,6 +130,9 @@ model Patient {
   emergencyContactPhone String?   @db.VarChar(30)
   consentGiven          Boolean   @default(false)
   consentGivenAt        DateTime?
+  /// Codes from the "TAG_PACIENTE" Parametrizacao group (e.g. "vip", "cronico"), not display
+  /// labels — so relabeling a tag in Parametrizações doesn't orphan already-tagged patients.
+  tags                  String[]  @default([])
   deletedAt             DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt

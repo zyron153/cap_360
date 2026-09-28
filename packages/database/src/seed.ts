@@ -644,6 +644,11 @@ async function main() {
       { valor: "Corporativo", codigo: "corp"       },
       { valor: "Particular",  codigo: "particular" },
     ]),
+    seedGroup("TAG_PACIENTE", [
+      { valor: "VIP",       codigo: "vip"     },
+      { valor: "Crónico",   codigo: "cronico" },
+      { valor: "Novo",      codigo: "novo"    },
+    ]),
     // Matches the real values already configured by clinic staff in Parametrizações on this dev DB
     // (this group already existed before this field was wired up) — kept in sync so a fresh
     // database seeds the same reference data, not a guessed placeholder set.

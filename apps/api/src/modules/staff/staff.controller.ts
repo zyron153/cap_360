@@ -1,8 +1,8 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Req, HttpCode, HttpStatus } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query, Req, HttpCode, HttpStatus } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto } from "@cap/types";
+import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")
@@ -104,6 +104,34 @@ export class StaffController {
     @Req() req: { user: { sub: string; roles: string[] } },
   ) {
     return this.service.removeBlock(id, req.user.sub, req.user.roles);
+  }
+
+  // ─── Shift overrides ─────────────────────────────────────────────────────
+  // Admin-only, unlike the leave/block endpoints above — assigning shifts is a scheduling
+  // action performed on staff, not something staff do for their own calendar.
+
+  @Get(":id/shifts")
+  listShifts(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Query("from") from: string,
+    @Query("to") to: string,
+  ) {
+    return this.service.listShiftsForStaff(id, from, to);
+  }
+
+  @Post(":id/shifts")
+  @Roles("admin")
+  upsertShift(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body(new ZodValidationPipe(UpsertStaffShiftSchema)) dto: UpsertStaffShiftDto,
+  ) {
+    return this.service.upsertShift(id, dto);
+  }
+
+  @Delete("shifts/:id")
+  @Roles("admin")
+  deleteShift(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.deleteShift(id);
   }
 
   @Get(":id")

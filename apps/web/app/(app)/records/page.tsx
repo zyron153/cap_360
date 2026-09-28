@@ -6,7 +6,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import Link from "next/link";
-import { ClipboardList, ChevronRight, CheckCircle2 } from "lucide-react";
+import { ClipboardList, ChevronRight, CheckCircle2, AlertTriangle } from "lucide-react";
 import type { ClinicalNoteEntry } from "@cap/types";
 import { usePermissions } from "../hooks/use-permissions";
 import { useMessage } from "../../../components/ui/message-handler";
@@ -59,6 +59,14 @@ export default function RecordsPage() {
   const [tab, setTab] = useState<"notes" | "toconclude">("notes");
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [completeDuration, setCompleteDuration] = useState("");
+  // The appointment-completion endpoint's auto-draft-invoice step is best-effort — a failure only
+  // ever surfaced as a transient toast here, with no way back to it: the appointment leaves the
+  // "Check-in Feito" list the moment it's completed regardless of invoice outcome, so a doctor
+  // working from Records (their normal completion path) had no in-UI way to retry, unlike the
+  // equivalent flow on the Appointments page. Kept as local state (not persisted) — it's a
+  // same-session nudge, not a system of record; the invoice itself can always be generated later
+  // from Faturas by anyone who notices it's missing.
+  const [failedInvoices, setFailedInvoices] = useState<{ id: string; patientName: string }[]>([]);
 
   const { data: notes, isLoading } = useQuery({
     queryKey: ["clinical-notes", "mine"],
@@ -74,7 +82,7 @@ export default function RecordsPage() {
   const toConclude = (todayAppointments ?? []).filter((a) => a.status === "checked_in");
 
   const completeMutation = useMutation({
-    mutationFn: ({ id, durationMinutes }: { id: string; durationMinutes: number }) =>
+    mutationFn: ({ id, durationMinutes }: { id: string; durationMinutes: number; patientName: string }) =>
       fetch(`/api/appointments/${id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -83,10 +91,26 @@ export default function RecordsPage() {
         if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
         return r.json();
       }),
-    onSuccess: (data: { invoiceWarning?: string }) => {
+    onSuccess: (data: { invoiceWarning?: string }, variables) => {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
       setCompletingId(null);
+      if (data?.invoiceWarning) {
+        setFailedInvoices((prev) => [...prev, { id: variables.id, patientName: variables.patientName }]);
+      }
       addMessage(data?.invoiceWarning ? "Warning" : "Success", data?.invoiceWarning ?? "Consulta concluída e fatura gerada com sucesso!");
+    },
+    onError: (err: Error) => addMessage("Error", err.message),
+  });
+
+  const retryInvoiceMutation = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/appointments/${id}/invoice`, { method: "POST" }).then(async (r) => {
+        if (!r.ok) { const e = await r.json(); throw new Error(e.message ?? "Erro"); }
+        return r.json();
+      }),
+    onSuccess: (_data, id) => {
+      setFailedInvoices((prev) => prev.filter((f) => f.id !== id));
+      addMessage("Success", "Fatura gerada com sucesso!");
     },
     onError: (err: Error) => addMessage("Error", err.message),
   });
@@ -99,6 +123,29 @@ export default function RecordsPage() {
           {isAdmin ? "Todas as notas clínicas recentes" : "As suas notas clínicas recentes, em todos os pacientes"}
         </p>
       </div>
+
+      {failedInvoices.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-[14px] px-5 py-3.5 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <p className="text-[12px] font-semibold text-amber-800">
+              Consulta{failedInvoices.length > 1 ? "s" : ""} concluída{failedInvoices.length > 1 ? "s" : ""} sem fatura gerada automaticamente
+            </p>
+          </div>
+          {failedInvoices.map((f) => (
+            <div key={f.id} className="flex items-center justify-between gap-3 pl-6">
+              <span className="text-[12px] text-dim-700">{f.patientName}</span>
+              <button
+                disabled={retryInvoiceMutation.isPending}
+                onClick={() => retryInvoiceMutation.mutate(f.id)}
+                className="text-[11px] font-semibold px-3 py-1 rounded-[8px] bg-amber-600 hover:bg-amber-700 text-white transition-colors disabled:opacity-50 shrink-0"
+              >
+                {retryInvoiceMutation.isPending ? "…" : "Gerar Fatura"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {canConclude && (
         <div className="flex gap-1.5 border-b border-dim-200">
@@ -175,7 +222,7 @@ export default function RecordsPage() {
                       <div className="flex gap-2">
                         <button
                           disabled={completeMutation.isPending || !completeDuration || Number(completeDuration) <= 0}
-                          onClick={() => completeMutation.mutate({ id: a.id, durationMinutes: Number(completeDuration) })}
+                          onClick={() => completeMutation.mutate({ id: a.id, durationMinutes: Number(completeDuration), patientName: a.patient.fullName })}
                           className="flex-1 text-[12px] font-semibold py-2 rounded-[8px] bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
                         >
                           {completeMutation.isPending ? "A concluir…" : "Confirmar Conclusão"}

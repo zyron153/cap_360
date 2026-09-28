@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { randomBytes } from "crypto";
-import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto, CreateLeaveRequestDto, LeaveRequestDecisionDto } from "@cap/types";
+import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto, CreateLeaveRequestDto, LeaveRequestDecisionDto, UpsertStaffShiftDto } from "@cap/types";
 import { StaffRepository } from "./staff.repository";
 import { PasswordService } from "../../common/services/password.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -164,5 +164,22 @@ export class StaffService {
       throw new ForbiddenException("Só pode remover bloqueios da sua própria agenda");
     }
     return this.repo.deleteLeaveRequest(id);
+  }
+
+  // ─── Shift overrides — admin-only, unlike the self-or-admin availability calendar above:
+  // assigning shifts is a scheduling/management action, not something staff do for themselves. ─
+
+  listShiftsForStaff(staffId: string, from: string, to: string) {
+    return this.repo.findShiftsForStaffInRange(staffId, new Date(from), new Date(to));
+  }
+
+  upsertShift(staffId: string, dto: UpsertStaffShiftDto) {
+    return this.repo.upsertShift(staffId, dto);
+  }
+
+  async deleteShift(id: string) {
+    const existing = await this.repo.findShiftById(id);
+    if (!existing) throw new NotFoundException(`Shift ${id} not found`);
+    return this.repo.deleteShift(id);
   }
 }

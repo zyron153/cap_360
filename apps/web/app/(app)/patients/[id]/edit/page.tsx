@@ -8,6 +8,7 @@ import { ArrowLeft } from "lucide-react";
 import type { Patient } from "@cap/types";
 import { useMessage } from "../../../../../components/ui/message-handler";
 import { Field } from "../../../../../components/ui/field";
+import { TagPicker } from "../../../../../components/ui/tag-picker";
 
 type FormState = {
   fullName: string;
@@ -17,6 +18,7 @@ type FormState = {
   nif: string;
   email: string;
   address: string;
+  tags: string[];
 };
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)]";
@@ -39,7 +41,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
   const router = useRouter();
   const { addMessage } = useMessage();
   const [form, setForm] = useState<FormState>({
-    fullName: "", dateOfBirth: "", gender: "female", phone: "", nif: "", email: "", address: "",
+    fullName: "", dateOfBirth: "", gender: "female", phone: "", nif: "", email: "", address: "", tags: [],
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
       nif: (patient as Patient & { nif?: string }).nif ?? "",
       email: patient.email ?? "",
       address: (patient as Patient & { address?: string }).address ?? "",
+      tags: patient.tags ?? [],
     });
   }, [patient]);
 
@@ -80,6 +83,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
         nif: form.nif.trim() || undefined,
         email: form.email.trim() || undefined,
         address: form.address.trim() || undefined,
+        tags: form.tags,
       };
       const res = await fetch(`/api/patients/${id}`, {
         method: "PATCH",
@@ -153,6 +157,10 @@ export default function PatientEditPage({ params }: { params: Promise<{ id: stri
 
           <Field label="Morada">
             <textarea value={form.address} onChange={set("address")} rows={2} className={`${INPUT} resize-none`} />
+          </Field>
+
+          <Field label="Etiquetas">
+            <TagPicker nome="TAG_PACIENTE" value={form.tags} onChange={(tags) => setForm((f) => ({ ...f, tags }))} />
           </Field>
 
           {error && <p className="text-[12px] text-red-600">{error}</p>}

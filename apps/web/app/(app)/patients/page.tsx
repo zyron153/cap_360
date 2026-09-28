@@ -10,6 +10,7 @@ import { Search, Plus, User, ChevronLeft, ChevronRight, AlertCircle } from "luci
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Field } from "../../../components/ui/field";
+import { TagPicker, TagBadges } from "../../../components/ui/tag-picker";
 import { useDebouncedValue } from "../../../lib/use-debounced-value";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
@@ -52,10 +53,11 @@ const TODAY = new Date().toISOString().slice(0, 10);
 function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { addMessage } = useMessage();
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreatePatientDto>({
+  const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<CreatePatientDto>({
     resolver: zodResolver(CreatePatientSchema),
-    defaultValues: { consentGiven: false, gender: "other" },
+    defaultValues: { consentGiven: false, gender: "other", tags: [] },
   });
+  const tags = watch("tags") ?? [];
 
   const mutation = useMutation({
     mutationFn: createPatient,
@@ -112,6 +114,12 @@ function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void
           <div className="col-span-2">
             <Field label="Morada">
               <textarea {...register("address")} rows={2} placeholder="Rua, Bairro, Cidade" className={inputCls} />
+            </Field>
+          </div>
+
+          <div className="col-span-2">
+            <Field label="Etiquetas">
+              <TagPicker nome="TAG_PACIENTE" value={tags} onChange={(v) => setValue("tags", v)} />
             </Field>
           </div>
         </div>
@@ -542,7 +550,10 @@ export default function PatientsPage() {
                               <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-800 font-semibold text-[11px] flex items-center justify-center shrink-0">
                                 {patient.fullName?.[0]?.toUpperCase()}
                               </div>
-                              <span className="text-[13px] font-semibold text-dim-900">{patient.fullName}</span>
+                              <div className="flex flex-col gap-1">
+                                <span className="text-[13px] font-semibold text-dim-900">{patient.fullName}</span>
+                                {patient.tags?.length > 0 && <TagBadges nome="TAG_PACIENTE" codes={patient.tags} />}
+                              </div>
                             </div>
                           </td>
                           <td className="px-5 py-3.5 border-b border-dim-100 font-mono text-[12px] text-dim-600">{patient.phone}</td>

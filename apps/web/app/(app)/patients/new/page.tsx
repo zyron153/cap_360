@@ -9,6 +9,7 @@ import { ArrowLeft, UserPlus } from "lucide-react";
 import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
 import { useMessage } from "../../../../components/ui/message-handler";
 import { Field } from "../../../../components/ui/field";
+import { TagPicker } from "../../../../components/ui/tag-picker";
 
 async function createPatient(data: CreatePatientDto) {
   const res = await fetch("/api/patients", {
@@ -34,10 +35,11 @@ export default function NewPatientPage() {
   const router = useRouter();
   const { addMessage } = useMessage();
 
-  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<CreatePatientDto>({
+  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<CreatePatientDto>({
     resolver: zodResolver(CreatePatientSchema),
-    defaultValues: { consentGiven: false, gender: "other" },
+    defaultValues: { consentGiven: false, gender: "other", tags: [] },
   });
+  const tags = watch("tags") ?? [];
 
   const mutation = useMutation({
     mutationFn: createPatient,
@@ -123,6 +125,12 @@ export default function NewPatientPage() {
                 placeholder="Rua, Bairro, Cidade"
                 className={inputCls}
               />
+            </Field>
+          </div>
+
+          <div className="col-span-2">
+            <Field label="Etiquetas">
+              <TagPicker nome="TAG_PACIENTE" value={tags} onChange={(v) => setValue("tags", v)} />
             </Field>
           </div>
         </div>

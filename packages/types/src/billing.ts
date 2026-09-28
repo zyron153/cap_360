@@ -74,6 +74,18 @@ export const UpdateInvoiceItemSchema = z
   );
 export type UpdateInvoiceItemDto = z.infer<typeof UpdateInvoiceItemSchema>;
 
+// Nova Fatura's "sem preço definido" flow: billing a service that isn't in the catalogue yet.
+// Creating a Service and linking a TIPO_SERVICO Parametrizacao entry to it are normally
+// admin-only actions — this narrow, billing-scoped endpoint lets a receptionist do both as one
+// step of creating an invoice, which is already within their granted "create invoice" permission.
+export const CreateDraftServiceSchema = z.object({
+  parametrizacaoId: z.number().int().positive(),
+  name: z.string().min(1).max(150),
+  code: z.string().min(1).max(50),
+  price: z.number().positive(),
+});
+export type CreateDraftServiceDto = z.infer<typeof CreateDraftServiceSchema>;
+
 export interface InvoiceItem {
   id: string;
   invoiceId: string;

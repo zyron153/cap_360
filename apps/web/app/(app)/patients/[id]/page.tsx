@@ -18,6 +18,7 @@ import {
   Plus,
 } from "lucide-react";
 import type { Patient, TimelineEvent } from "@cap/types";
+import { TagBadges } from "../../../../components/ui/tag-picker";
 import { ClinicalRecordsSection } from "./ClinicalRecordsSection";
 import { PatientRecordsPanel } from "./PatientRecordsPanel";
 import { PatientBalancePanel } from "./PatientBalancePanel";
@@ -101,6 +102,11 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
               </div>
               <h2 className="mt-3 font-display font-bold text-dim-900 text-[17px] leading-tight">{patient.fullName}</h2>
               <p className="text-[12px] text-dim-500 mt-0.5">{age} anos · {genderLabels[patient.gender] ?? patient.gender}</p>
+              {patient.tags?.length > 0 && (
+                <div className="flex justify-center mt-2">
+                  <TagBadges nome="TAG_PACIENTE" codes={patient.tags} />
+                </div>
+              )}
               {patient.activeHealthPlan ? (
                 <Link
                   href={`/health-plans/${patient.activeHealthPlan.id}`}

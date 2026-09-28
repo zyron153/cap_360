@@ -1,9 +1,92 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-25.
+> Snapshot overwritten each session. Última atualização: 2026-09-27.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **M6 — polimento geral do Financeiro (Faturas/Despesas/Entradas/Saldos), 2026-09-27.** Pedido do
+  utilizador: "polish the Financeiro feature including Faturas and everything else". Uma survey
+  dedicada (agente Explore) leu todo o módulo (backend `billing/`+`financeiro/`, os 5 separadores
+  do frontend) e confirmou que a doc `M6-billing-invoicing.md` está correta em tudo o que foi
+  verificado — os problemas reais encontrados foram estes 4, todos corrigidos:
+  - **Recepcionista apanhava `403` a concluir a própria fatura que a Nova Fatura convida a criar.**
+    Faturar um serviço ainda não catalogado cria um `Service` e liga uma entrada Parametrização
+    `TIPO_SERVICO` — ambos os passos (`POST /services`, `PATCH /parametrizacao/:id`) são admin-only,
+    mas "Criar fatura" é uma permissão real de recepcionista. Em vez de alargar os endpoints gerais
+    (daria à recepção acesso a editar qualquer grupo de Parametrização, não só este), novo
+    `POST /invoices/draft-service`, com o âmbito do próprio módulo de faturação
+    (`@Roles("admin","receptionist")`), que faz os dois passos como uma ação atómica.
+  - **Seletor de paciente na criação de faturas** (modal Nova Fatura e `/billing/new`) era um
+    `<select>` limitado aos primeiros 100 pacientes sem pesquisa — a mesma classe de bug já
+    corrigida para a marcação de consultas nesta sessão. Extraído o `PatientPicker` dessa correção
+    para um componente partilhado (`components/ui/patient-picker.tsx`) e reutilizado nos 3 sítios
+    (incluindo a marcação de consultas, de onde veio).
+  - **Campo de valor do pagamento ficava vazio** depois de um pagamento parcial, em vez de
+    pré-preencher com o novo saldo em dívida — risco real de erro de digitação num valor monetário.
+  - **Falha ao gerar fatura automática ao concluir uma consulta a partir de Registos Clínicos**
+    (fluxo normal do médico, não Marcações) não tinha forma de repetir — o aviso era só um toast e
+    a consulta desaparecia da lista "Check-in Feito" de qualquer forma. Novo banner persistente com
+    botão "Gerar Fatura" por tentativa falhada, reutilizando o endpoint de retry já existente.
+  - Verificação: 499 testes unitários da API (2 novos); `tsc`/lint limpos em `apps/web`/`apps/api`;
+    live-verified contra a API real (criado um serviço em falta via o novo endpoint, confirmado que
+    a entrada de Parametrização ficou ligada, dados de teste limpos depois).
+  - **`/billing/new` (formulário multi-linha) também corrigido**: era real mas inacessível —
+    nenhum link apontava para lá, além dos seus bugs próprios (cap de 100 pacientes, locale
+    `pt-PT` inconsistente). Distinto da modal Nova Fatura (vários itens do catálogo vs. um item
+    guiado por parametrização), por isso mantido como segunda opção explícita em vez de substituir
+    a modal: novo link "Fatura com Vários Itens" junto ao botão "Nova Fatura" no separador Faturas.
+  - Docs atualizados: `TODO.md` (M6), `Docs/modules/M6-billing-invoicing.md` (v1.10).
+
+- **M8 — turnos de profissionais (shift overrides), ligados de ponta a ponta (2026-09-27).**
+  `StaffShift` era código morto: nenhum endpoint CRUD existia e o único método de leitura
+  (`findStaffShift`) nunca era chamado pelo motor de disponibilidade — criar uma linha não tinha
+  qualquer efeito (`Docs/modules/M8-staff-resource-scheduler.md` §2.3 documentava isto
+  explicitamente). Corrigido dos dois lados:
+  - **Backend:** `GET/POST /staff/:id/shifts`, `DELETE /staff/shifts/:id` (escrita admin-only,
+    semântica de upsert). Novo `AppointmentsService.resolveDayWindows()`: uma linha `StaffShift`
+    para essa data **substitui** o modelo semanal `StaffAvailability` inteiramente nesse dia (não é
+    combinado com ele), usado tanto em `getAvailability()` como em `create()`.
+  - **Frontend:** novo separador "Turnos" na página de Equipa (`_ShiftPlanner.tsx`), calendário
+    genuinamente drag-to-assign — arrastar um intervalo na grelha define um turno, arrastar um
+    turno existente muda o dia, redimensionar muda as horas, clicar edita/remove.
+    `_CalendarView.tsx` ganhou props opcionais (`selectable`/`onSelect`/`durationEditable`/
+    `onEventResize`) só para este uso — o calendário de marcações fica inalterado.
+  - Verificação: 497 testes unitários da API (4 novos, cobrindo geração de slots e aceitação/
+    rejeição de marcações contra o turno); `tsc`/lint limpos em `apps/web` e `apps/api`. Live-
+    verified contra a API real: criado um turno para um médico real, confirmado que
+    `getAvailability` passou da janela semanal (08:00–13:00) para a do turno (15:00–17:00),
+    confirmado que `create()` rejeita a hora antiga e aceita a nova, removido o turno e confirmado
+    que a disponibilidade voltou ao normal — todos os dados de teste limpos depois.
+  - Docs atualizados: `TODO.md` (M8), `Docs/modules/M8-staff-resource-scheduler.md` (v1.3).
+
+- **M2 — sistema de etiquetas de pacientes (2026-09-27).** `TODO.md` listava "sem campo no schema".
+  Novo `Patient.tags` (`String[]` nativo do Postgres, `@default([])`), guardando códigos (não texto
+  livre) de um novo grupo de Parametrização "TAG_PACIENTE" (VIP/Crónico/Novo, seed adicionado) — 
+  reutiliza o ecrã de administração de Parametrizações já existente, sem UI de gestão nova. Novo
+  `TagPicker`/`TagBadges` (`components/ui/tag-picker.tsx`, mesmo padrão de pesquisa com debounce já
+  usado nos planos de saúde) ligado às 3 formas de criar/editar paciente e mostrado como pills na
+  lista e no perfil. Não é limpo pelo direito ao apagamento (como `gender`, não identifica por si só).
+  Verificação: `tsc --noEmit`/lint limpos em `apps/web` e `apps/api`; 494 testes unitários da API
+  continuam verdes; PATCH real contra a API a correr localmente confirmou o round-trip (guardar,
+  reler, reverter) e o grupo `TAG_PACIENTE` a devolver os 3 valores semeados.
+  - Limpeza incidental: vários processos `node --watch src/main.ts`/`jest` órfãos (de sessões
+    anteriores, alguns com 2 dias) estavam a bloquear o `prisma generate` (ficheiro `.dll` da engine
+    trancado) — terminados para desbloquear a alteração de schema.
+  - Doc atualizado: `TODO.md` (M2 Backend + Frontend).
+
+- **M2 — autocomplete de pacientes no modal "Nova Marcação" (2026-09-27).** O `<select>` de
+  paciente desse modal só carregava os primeiros 100 pacientes (`/api/patients?limit=100`, sem
+  pesquisa) — qualquer paciente fora dessa página ficava silenciosamente impossível de marcar a
+  partir deste, o principal ponto de entrada de marcação (sem `patientId` pré-preenchido, ao
+  contrário do link a partir do perfil do paciente ou da lista de espera). Substituído por um
+  campo de pesquisa "as-you-type" com debounce (300ms), reutilizando o mesmo padrão já validado em
+  `HealthPlanDetailBody.tsx` ("Adicionar Membro"): `/api/patients?q=` (já existente, sem alteração
+  no backend). Verificação: `tsc --noEmit` e lint limpos em `apps/web`; endpoint de pesquisa
+  confirmado idêntico ao já usado em produção pelos planos de saúde. **UI não verificada no
+  browser** — sem ferramenta de automação de browser disponível nesta sessão; a mudança é só de
+  frontend e reutiliza um componente/padrão já em uso real.
+  - Doc atualizado: `TODO.md` (M2 Frontend).
 
 - **Auditoria pré-deploy (2026-09-25) e correções.** Dois agentes: auditoria de código + testes/build.
   - Lembretes de consultas **nunca eram enviados** (o processor da fila `reminders` era um stub que só

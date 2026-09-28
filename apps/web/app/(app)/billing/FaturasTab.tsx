@@ -10,6 +10,7 @@ import type { Invoice, PaginatedResponse, EFaturaStatus, EFaturaSubmission } fro
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
+import { PatientPicker } from "../../../components/ui/patient-picker";
 import { InvoiceDetailBody } from "./InvoiceDetailBody";
 
 type InvoiceRow = Invoice & {
@@ -285,19 +286,23 @@ export function FaturasTab() {
       let serviceId = entry.codigo && servicesList.some(s => s.id === entry.codigo) ? entry.codigo : null;
 
       // Draft service with no configured price yet — create it now with the manually entered
-      // price, then backfill the parametrização entry's link (same pattern as Gestão de Serviços).
+      // price, then backfill the parametrização entry's link. Goes through the billing-scoped
+      // /invoices/draft-service endpoint rather than /services + /parametrizacao/:id directly —
+      // both of those are admin-only, but this is a step of creating an invoice, which a
+      // receptionist is otherwise fully able to do.
       if (!serviceId) {
-        const svcRes = await fetch("/api/services", {
+        const svcRes = await fetch("/api/invoices/draft-service", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: entry.valor, code: suggestServiceCode(entry.valor), price: Number(form.amount) }),
+          body: JSON.stringify({
+            parametrizacaoId: entry.id,
+            name: entry.valor,
+            code: suggestServiceCode(entry.valor),
+            price: Number(form.amount),
+          }),
         });
         if (!svcRes.ok) { const e = await svcRes.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao criar serviço"); }
         const newService = await svcRes.json();
         serviceId = newService.id;
-        await fetch(`/api/parametrizacao/${entry.id}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ codigo: serviceId }),
-        });
       }
 
       const res = await fetch("/api/invoices", {
@@ -340,13 +345,6 @@ export function FaturasTab() {
     staleTime: 60_000,
   });
 
-  const { data: patientsData } = useQuery<{ data: { id: string; fullName: string }[] }>({
-    queryKey: ["patients-list"],
-    queryFn: () => fetch("/api/patients?limit=100").then(r => { if (!r.ok) throw new Error("patients"); return r.json(); }),
-    staleTime: 60_000,
-  });
-  const patientsList = patientsData?.data ?? [];
-
   const { data: servicesList = [] } = useQuery<{ id: string; name: string; price: number }[]>({
     queryKey: ["services-list"],
     queryFn: () => fetch("/api/services").then(r => r.json()),
@@ -373,13 +371,21 @@ export function FaturasTab() {
           {isLoading ? "A carregar…" : error ? "Erro ao carregar faturas" : `${data?.total ?? 0} faturas`}
         </p>
         {canDo("billing", "create") && (
-          <button
-            onClick={() => setNewOpen(true)}
-            className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Nova Fatura
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/billing/new"
+              className="text-[13px] font-semibold text-dim-600 hover:text-dim-800 px-3 py-2 rounded-[10px] border border-dim-200 hover:bg-dim-50 transition-colors"
+            >
+              Fatura com Vários Itens
+            </Link>
+            <button
+              onClick={() => setNewOpen(true)}
+              className="flex items-center gap-1.5 bg-brand-700 hover:bg-brand-800 text-white text-[13px] font-semibold px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.08)] transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nova Fatura
+            </button>
+          </div>
         )}
       </div>
 
@@ -554,19 +560,11 @@ export function FaturasTab() {
       <div className="px-6 py-5 grid grid-cols-2 gap-4">
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Paciente *</label>
-          <select
+          <PatientPicker
             value={form.patientId}
-            onChange={(e) => {
-              const p = patientsList.find((pt) => pt.id === e.target.value);
-              setForm((f) => ({ ...f, patientId: e.target.value, patient: p?.fullName ?? "" }));
-            }}
+            onSelect={(id, name) => setForm((f) => ({ ...f, patientId: id, patient: name }))}
             className={inputCls}
-          >
-            <option value="">Selecionar paciente…</option>
-            {patientsList.map((p) => (
-              <option key={p.id} value={p.id}>{p.fullName}</option>
-            ))}
-          </select>
+          />
         </div>
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Serviço *</label>

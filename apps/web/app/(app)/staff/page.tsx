@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "../hooks/use-permissions";
-import { Users2, Stethoscope, UserCheck, Clock, Phone, Mail, CalendarDays, Table2 } from "lucide-react";
+import { Users2, Stethoscope, UserCheck, Clock, Phone, Mail, CalendarDays, Table2, CalendarClock } from "lucide-react";
 import AvailabilityCalendar from "./_AvailabilityCalendar";
+import ShiftPlanner from "./_ShiftPlanner";
 import { DB_ROLE_MAP, type ApiStaff, type UiRole } from "../../../components/staff/StaffForm";
 
 type StaffMember = {
@@ -82,7 +83,7 @@ export default function StaffPage() {
   useEffect(() => {
     if (!permLoading && !can("staff")) router.replace("/dashboard");
   }, [permLoading, can, router]);
-  const [view, setView] = useState<"overview" | "calendar">("overview");
+  const [view, setView] = useState<"overview" | "calendar" | "shifts">("overview");
 
   const { data: apiStaff = [], isLoading } = useQuery<ApiStaff[]>({
     queryKey: ["bff-staff"],
@@ -123,10 +124,20 @@ export default function StaffPage() {
             <CalendarDays className="w-3.5 h-3.5" />
             Calendário de Disponibilidade
           </button>
+          <button
+            onClick={() => setView("shifts")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+              view === "shifts" ? "bg-white text-dim-900 shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-500 hover:text-dim-700"
+            }`}
+          >
+            <CalendarClock className="w-3.5 h-3.5" />
+            Turnos
+          </button>
         </div>
       </div>
 
       {view === "calendar" && <AvailabilityCalendar />}
+      {view === "shifts" && <ShiftPlanner />}
 
       {view === "overview" && (
       <>

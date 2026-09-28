@@ -134,6 +134,15 @@ export class AppointmentsService {
     return { blockReason, window: window === "closed" ? null : window };
   }
 
+  /** A `StaffShift` row for this exact date, if one exists, replaces the weekly `StaffAvailability`
+   * template entirely for that day (a one-off override, e.g. a shorter Saturday or an extra shift)
+   * — it isn't merged with the template, it stands in for it. */
+  private async resolveDayWindows(staffId: string, date: Date, dayOfWeek: number) {
+    const shift = staffId ? await this.repo.findStaffShift(staffId, date) : null;
+    if (shift) return [{ startTime: shift.startTime, endTime: shift.endTime }];
+    return this.repo.findStaffAvailability(staffId, dayOfWeek);
+  }
+
   private isWithinWindow(start: Date, end: Date, window: { open: string; close: string } | null): boolean {
     if (!window) return true;
     const [openH, openM] = window.open.split(":").map(Number);
@@ -159,10 +168,7 @@ export class AppointmentsService {
     const { blockReason, window } = await this.loadBookingConstraints(query.staffId ?? "", date);
     if (blockReason) return [];
 
-    const availabilityRows = await this.repo.findStaffAvailability(
-      query.staffId ?? "",
-      dayOfWeek
-    );
+    const availabilityRows = await this.resolveDayWindows(query.staffId ?? "", date, dayOfWeek);
     if (!availabilityRows.length) return [];
 
     const bookedSlots = await this.repo.findConfirmedInRange(
@@ -194,7 +200,7 @@ export class AppointmentsService {
         slots.push({
           start: cursor.toISOString(),
           end: slotEnd.toISOString(),
-          staffId: avail.staffId,
+          staffId: query.staffId ?? "",
           staffName: "",
           available: !isBooked && this.isWithinWindow(cursor, slotEnd, window),
         });
@@ -220,7 +226,7 @@ export class AppointmentsService {
 
     const [{ blockReason, window }, availabilityRows, staffRow, serviceRow] = await Promise.all([
       this.loadBookingConstraints(dto.staffId, scheduledAt),
-      this.repo.findStaffAvailability(dto.staffId, scheduledAt.getDay()),
+      this.resolveDayWindows(dto.staffId, scheduledAt, scheduledAt.getDay()),
       this.prisma.staff.findUnique({ where: { id: dto.staffId }, select: { specialtyCode: true } }),
       this.prisma.service.findUnique({ where: { id: dto.serviceId }, select: { specialtyCode: true } }),
     ]);

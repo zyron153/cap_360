@@ -64,6 +64,7 @@ export class PatientsService {
           phone: true,
           email: true,
           consentGiven: true,
+          tags: true,
           createdAt: true,
           updatedAt: true,
         },

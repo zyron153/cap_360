@@ -14,6 +14,7 @@ import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
 import { usePermissions } from "../hooks/use-permissions";
+import { PatientPicker } from "../../../components/ui/patient-picker";
 
 async function fetchAvailability(serviceId: string, staffId: string, date: string): Promise<TimeSlot[]> {
   const params = new URLSearchParams({ serviceId, staffId, date });
@@ -227,11 +228,6 @@ export default function AppointmentsPage() {
     );
   }
 
-  const { data: patients } = useQuery<{ data: { id: string; fullName: string }[] }>({
-    queryKey: ["patients-list"],
-    queryFn: () => fetch("/api/patients?limit=100").then((r) => r.json()),
-    staleTime: 60_000,
-  });
   const { data: staffList } = useQuery<{ id: string; fullName: string; specialtyCode: string | null }[]>({
     queryKey: ["staff-list"],
     queryFn: () => fetch("/api/staff").then((r) => r.json()),
@@ -733,12 +729,7 @@ export default function AppointmentsPage() {
       <div className="px-6 py-5 grid grid-cols-2 gap-4">
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Paciente *</label>
-          <select value={form.patientId} onChange={(e) => set("patientId", e.target.value)} className={inputCls}>
-            <option value="">Selecionar paciente…</option>
-            {patients?.data?.map((p) => (
-              <option key={p.id} value={p.id}>{p.fullName}</option>
-            ))}
-          </select>
+          <PatientPicker value={form.patientId} onSelect={(id) => set("patientId", id)} />
         </div>
         <div>
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Serviço *</label>
