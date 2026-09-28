@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, develop]
+    branches: [master, staging, develop]
   pull_request:
-    branches: [master, develop]
+    branches: [master, staging, develop]
 
 env:
   NODE_VERSION: "20"
@@ -100,7 +100,7 @@ jobs:
     name: Build & Push Images
     needs: [quality, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/staging')
     permissions:
       contents: read
       packages: write
@@ -118,13 +118,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # master -> tagged "latest" and built against the prod API URL; staging -> tagged
+      # "staging" and built against the staging API URL (baked into the web bundle at build time).
+      - name: Set per-branch values
+        id: vars
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/master" ]; then
+            echo "extra_tag=latest" >> "$GITHUB_OUTPUT"
+            echo "api_url=${{ vars.PUBLIC_APP_URL }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "extra_tag=staging" >> "$GITHUB_OUTPUT"
+            echo "api_url=${{ vars.STAGING_PUBLIC_APP_URL }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build & Push API image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: infra/docker/api.Dockerfile
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}-api:${{ github.sha }},${{ env.IMAGE_PREFIX }}-api:latest
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ github.sha }},${{ env.IMAGE_PREFIX }}-api:${{ steps.vars.outputs.extra_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -134,11 +147,35 @@ jobs:
           context: .
           file: infra/docker/web.Dockerfile
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_APP_URL }}
+            NEXT_PUBLIC_API_URL=${{ steps.vars.outputs.api_url }}
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}-web:${{ github.sha }},${{ env.IMAGE_PREFIX }}-web:latest
+          tags: ${{ env.IMAGE_PREFIX }}-web:${{ github.sha }},${{ env.IMAGE_PREFIX }}-web:${{ steps.vars.outputs.extra_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ─── Deploy to Staging (auto, no manual gate) ──────────────────────────────
+  # Same single-host Compose runbook as production, on its own VPS. Secrets: STAGING_DEPLOY_HOST,
+  # STAGING_DEPLOY_USER, STAGING_DEPLOY_SSH_KEY, STAGING_DEPLOY_PATH; vars: STAGING_PUBLIC_APP_URL.
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.STAGING_DEPLOY_SSH_KEY }}
+
+      - name: Deploy
+        run: |
+          ssh -o StrictHostKeyChecking=accept-new ${{ secrets.STAGING_DEPLOY_USER }}@${{ secrets.STAGING_DEPLOY_HOST }}             "cd ${{ secrets.STAGING_DEPLOY_PATH }} && git pull --ff-only &&              sed -i '/^IMAGE_TAG=/d' .env.prod && echo IMAGE_TAG=${{ github.sha }} >> .env.prod &&              docker compose --env-file .env.prod -f docker-compose.prod.yml pull &&              docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --remove-orphans"
+
+      - name: Smoke test
+        run: |
+          sleep 30
+          curl -fsS "${{ vars.STAGING_PUBLIC_APP_URL }}/v1/health" || exit 1
 
   # ─── Deploy to Production (manual approval via the `production` environment) ──────
   # Assumes a single Docker host with this repo checked out at $DEPLOY_PATH and an untracked
@@ -149,6 +186,7 @@ jobs:
     name: Deploy to Production
     needs: build
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
     environment: production
 
     steps:

@@ -18,14 +18,35 @@
 
 ## 0. Production runbook — single VPS (Docker Compose)
 
-> **Status 2026-09-26:** structure and configs are prepared; **no VPS and no domain exist yet**.
-> Nothing below has been run against a real server. The Kubernetes material further down is
-> superseded by this for the first launch.
+> **Status 2026-09-28:** structure and configs are prepared; **no VPS and no domain exist yet**,
+> for either environment. Nothing below has been run against a real server. The Kubernetes
+> material further down is superseded by this for the first launch.
 
 **Pieces (all in the repo):** `infra/docker/{api,web}.Dockerfile`, `docker-compose.prod.yml`,
 `infra/nginx/{nginx.conf,conf.d/app.conf,tls.conf.example}`, `.env.prod.example`, and the
 `deploy-production` job in `.github/workflows/ci.yml` (push to `master` → build/push images to GHCR
 → SSH deploy → `/v1/health` smoke test; the `production` GitHub environment is the manual gate).
+
+### 0.1 Staging — same runbook, second VPS
+
+Push to `staging` runs the mirror job, `deploy-staging` — same build, same `docker-compose.prod.yml`,
+same `.env.prod` shape, just a second VPS and no manual-approval gate (the `staging` GitHub
+environment has no required reviewers, so it deploys automatically on every push). The web image is
+rebuilt with a staging-specific `NEXT_PUBLIC_API_URL`, and images are tagged `:staging` instead of
+`:latest`, so the two environments never share a tag.
+
+**When the staging VPS exists:**
+1. Same steps as prod §"When the VPS exists" below, on its own box: install Docker, clone the repo,
+   `cp .env.prod.example .env.prod` and fill it in with the staging box's own
+   `POSTGRES_PASSWORD`/`FIELD_ENCRYPTION_KEY` (generate fresh ones — never reuse prod's).
+2. GitHub → repo secrets `STAGING_DEPLOY_HOST`, `STAGING_DEPLOY_USER`, `STAGING_DEPLOY_SSH_KEY`,
+   `STAGING_DEPLOY_PATH`; repo variable `STAGING_PUBLIC_APP_URL`; environment `staging` (no required
+   reviewers — that's what makes it auto-deploy).
+3. Push to `staging` (or merge to it) to trigger the first deploy; run the `seed` profile once, same
+   as prod.
+
+**Still missing before this can run for real:** the staging VPS itself and its credentials above —
+everything else (workflow, compose file, nginx config) is already in place and shared with prod.
 
 **Stack:** postgres, redis, `migrate` (one-shot), `api`, `web`, `nginx`, plus `seed` (profile
 `tools`). `migrate` runs `prisma db push` **without** `--accept-data-loss` (a destructive schema
@@ -217,35 +238,30 @@ pnpm db:studio          # Prisma Studio
 
 ## 5. CI/CD Pipeline (GitHub Actions)
 
-The real pipeline (`.github/workflows/ci.yml`) is 4 jobs on push/PR to `main`/`develop` — no
-`staging` branch:
+The real pipeline (`.github/workflows/ci.yml`), as of 2026-09-28, is 5 jobs on push/PR to
+`master`/`staging`/`develop`:
 
 ```
 quality          → pnpm install, turbo run typecheck, turbo run lint
 test             → real postgres:16 + redis:7 service containers, then:
-                    pnpm --filter @cms/database run db:generate     ⚠️ SEE BUG BELOW
-                    pnpm --filter @cms/database run db:migrate:prod ⚠️ SEE BUG BELOW
+                    pnpm --filter @cap/database run db:generate
+                    pnpm --filter @cap/database run db:push (test DB, see §4)
                     pnpm turbo run test
-build            → docker build + push api.Dockerfile / web.Dockerfile to GHCR
-                    (only on push to main; needs quality+test to pass first)
-deploy-staging   → 🎭 STUB — just `echo`s a kubectl command, doesn't run one; then a real
-                    curl smoke-test against a staging URL that likely doesn't exist
-deploy-production→ 🎭 STUB — same: echoes kubectl, doesn't execute it
+build            → docker build + push api.Dockerfile / web.Dockerfile to GHCR, tagged
+                    <sha> + "latest" (from master) or <sha> + "staging" (from staging branch);
+                    web image bakes in NEXT_PUBLIC_API_URL from PUBLIC_APP_URL or
+                    STAGING_PUBLIC_APP_URL respectively. Only runs on push to master or staging,
+                    after quality+test pass.
+deploy-staging   → real SSH deploy (git pull + compose pull/up) to the staging VPS, then a
+                    curl smoke-test — same shape as prod, gated by the `staging` GitHub
+                    environment (no required reviewers, so it's automatic). Only on push to
+                    `staging`. See Docs/DEPLOYMENT.md §0.1.
+deploy-production→ real SSH deploy to the production VPS, gated by the `production` GitHub
+                    environment (manual-approval reviewers). Only on push to `master`.
 ```
 
-> ⚠️ **Real bug found while writing this doc:** the `test` job's `db:generate` and
-> `db:migrate:prod` steps target package `@cms/database` — but the package was renamed to
-> `@cap/database` during the rebrand (`packages/database/package.json`). `pnpm --filter
-> @cms/database ...` won't resolve to anything, so **CI likely fails or silently no-ops these two
-> steps** on every run. Combined with §4's finding (the two checked-in migrations don't match the
-> current schema even if `db:migrate:prod` did run), the `test` job's database is probably not in
-> the state the tests assume. The workflow also still says `maissaude`/`cms` throughout
-> (`POSTGRES_DB: maissaude_test`, `IMAGE_PREFIX: .../cms`) — cosmetic vs. the rebrand, but
-> consistent with this file not having been touched since before it.
-
-There is no branch called `staging`, no automatic staging deploy, no manual-approval gate, and no
-automatic rollback — `deploy-staging`/`deploy-production` are placeholders that print a command
-rather than run one.
+No automatic rollback exists — a rollback today means reverting the git commit and letting the
+pipeline redeploy the previous image.
 
 ---
 
