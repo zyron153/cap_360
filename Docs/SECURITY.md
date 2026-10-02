@@ -34,7 +34,16 @@
 - ✅ **Password hashing:** argon2id (`PasswordService`, via the `argon2` npm package's native
   binding) — no plaintext or reversibly-encrypted password is ever stored
 - ✅ **Password policy:** min 10 chars, 1 uppercase, 1 digit (`ChangePasswordSchema`/
-  `ResetPasswordSchema`/`ActivateInvitationSchema`, enforced by Zod)
+  `ResetPasswordSchema`, enforced by Zod)
+- ✅ **Temporary passwords (no email invitations):** an admin creating a user, or using "Redefinir
+  senha", gets a random 14-character password (`PasswordService.generateTemporary`, `crypto.randomInt`)
+  returned once in the response (`Cache-Control: no-store`) — never stored in plaintext or logged
+  (the audit interceptor records method/URL only, not bodies). The account is flagged
+  `Staff.mustChangePassword`, and `SessionAuthGuard` refuses every authenticated route except
+  `GET /staff/me` and `PATCH /staff/me/password` (`403 PASSWORD_CHANGE_REQUIRED`), re-reading the
+  flag from the DB on each request so an admin reset also cuts off an already-open session. The new
+  password must differ from the temporary one. Trade-off: the admin sees the plaintext once and
+  has to relay it themselves. The dev `AUTH_BYPASS` skips this enforcement
 - ✅ **Brute-force protection, real and two-layered:**
   - Per-IP: `POST /auth/login` and `POST /auth/forgot-password` are throttled to 5 req/min
     (stricter than the global 300/min default) via `@nestjs/throttler`

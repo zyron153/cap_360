@@ -1,15 +1,19 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query, Req, HttpCode, HttpStatus } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query, Req, Header, HttpCode, HttpStatus } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
+import { AllowDuringPasswordChange } from "../../common/decorators/allow-password-change.decorator";
+import { CreateStaffSchema, CreateStaffDto, UpdateStaffSchema, UpdateStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")
 export class StaffController {
   constructor(private readonly service: StaffService) {}
 
+  // Reachable while a temporary password is pending (see AllowDuringPasswordChange) — the web
+  // app reads mustChangePassword from here to decide whether to show /change-password.
   @Get("me")
+  @AllowDuringPasswordChange()
   findMe(@Req() req: { user: { sub: string; email?: string } }) {
     return this.service.findById(req.user.sub);
   }
@@ -18,6 +22,7 @@ export class StaffController {
   // corporate_hr) may change their own password, not just the 4 roles listed above.
   @Patch("me/password")
   @Roles("admin", "receptionist", "doctor", "nurse", "lab_tech", "corporate_hr")
+  @AllowDuringPasswordChange()
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @Req() req: { user: { sub: string } },
@@ -30,18 +35,6 @@ export class StaffController {
   @Get()
   findAll() {
     return this.service.findAll();
-  }
-
-  @Get("invitations")
-  @Roles("admin")
-  listInvitations() {
-    return this.service.listInvitations();
-  }
-
-  @Delete("invitations/:id")
-  @Roles("admin")
-  cancelInvitation(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.cancelInvitation(id);
   }
 
   // ─── Leave Requests ────────────────────────────────────────────────────────
@@ -139,13 +132,21 @@ export class StaffController {
     return this.service.findById(id);
   }
 
-  @Post("invite")
+  // Creates the user with a generated temporary password, returned once in this response
+  // (hence no-store) — no email is sent. The user must change it on first login.
+  @Post()
   @Roles("admin")
-  invite(
-    @Body(new ZodValidationPipe(InviteStaffSchema)) dto: InviteStaffDto,
-    @Req() req: { user: { email?: string } },
-  ) {
-    return this.service.invite(dto, req.user.email);
+  @Header("Cache-Control", "no-store")
+  create(@Body(new ZodValidationPipe(CreateStaffSchema)) dto: CreateStaffDto) {
+    return this.service.create(dto);
+  }
+
+  @Post(":id/reset-password")
+  @Roles("admin")
+  @HttpCode(HttpStatus.OK)
+  @Header("Cache-Control", "no-store")
+  resetPassword(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.resetPassword(id);
   }
 
   @Patch(":id")

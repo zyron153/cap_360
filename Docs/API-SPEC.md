@@ -24,7 +24,7 @@ recover one.
 
 ```
 POST /auth/login             body: { email, password }
-                              → 200 { staff: { id, email, fullName, role } }, sets cap_session cookie
+                              → 200 { staff: { id, email, fullName, role, mustChangePassword } }, sets cap_session cookie
                               → 401 wrong credentials or unknown email (identical message either way)
                               → 401 account locked (5 failed attempts / 15min → 15min lock, per email, in Redis)
                               throttled: 5 req/min per IP (tighter than the 300/min global default)
@@ -479,34 +479,46 @@ DELETE /services/:id       roles: admin
 
 ---
 
-## 7. Staff & Invitations (M8)
+## 7. Staff & Temporary Passwords (M8)
 
 **Controller roles (default):** admin, receptionist, doctor, nurse
 
 ```
-GET    /staff/me                                    — resolves the caller's own staff record from the session
-PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below
+GET    /staff/me                                    — resolves the caller's own staff record from the session (includes mustChangePassword); reachable while a temporary password is pending
+PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below; reachable while a temporary password is pending; 400 if newPassword === currentPassword; clears mustChangePassword
 GET    /staff                                       — active staff list
-GET    /staff/invitations         roles: admin       — pending invitations
-DELETE /staff/invitations/:id     roles: admin
 GET    /staff/:id
-POST   /staff/invite              roles: admin       body: CreateStaffSchema shape (see below) — sends the invite email, does not create a Staff row yet
+POST   /staff                     roles: admin       body: CreateStaffSchema (see below) — creates the user with a generated temporary password; 409 if the email exists
+POST   /staff/:id/reset-password  roles: admin       — replaces the password with a new generated temporary one; 200
 PATCH  /staff/:id                 roles: admin
 ```
 
 ```
-Invite body:
+Create body:
 {
-  "fullName": "string (2-150)", "email": "string", "role": "admin | doctor | nurse | receptionist | lab_tech",
+  "fullName": "string (2-150)", "email": "string", "role": "admin | doctor | nurse | receptionist | lab_tech | corporate_hr",
   "jobTitle": "string (optional)", "phone": "string (optional)", "specialtyCode": "string (optional)",
+  "companyId": "uuid (optional, corporate_hr only)",
   "availability": [ { "dayOfWeek": 0-6, "startTime": "HH:MM", "endTime": "HH:MM" } ]
 }
+
+POST /staff and POST /staff/:id/reset-password both respond (Cache-Control: no-store):
+{ "staffId": "uuid", "fullName": "string", "email": "string", "temporaryPassword": "string" }
 ```
 
-Activation (public, token-based — see §9) hashes the password the invitee chose (argon2id) and
-creates the local `staff` row directly — no external system is involved, so there's nothing to
-leave orphaned on a partial failure. ❌ No MFA/TOTP of any kind exists — that was a Keycloak
-feature (never actually enforced for pre-existing accounts even then) and has no replacement.
+**Temporary passwords replace the old email-invitation flow** (removed — no email is sent, there is
+no `/staff/invite`, `/staff/invitations*` or `/public/invitations*`). `temporaryPassword` is 14
+random characters (`PasswordService.generateTemporary`, `crypto.randomInt`: upper + lower + digit +
+symbol, no look-alike characters) returned **once** to the admin; only its argon2id hash is stored.
+The account is flagged `Staff.mustChangePassword = true`, and `SessionAuthGuard` answers every
+authenticated request from such an account with `403 { code: "PASSWORD_CHANGE_REQUIRED" }` except
+routes marked `@AllowDuringPasswordChange()` (`GET /staff/me`, `PATCH /staff/me/password`). The flag
+is read from the DB on every request, so an admin reset also locks out a session the user already
+had open. `POST /auth/login` returns `staff.mustChangePassword` so the web app can redirect to
+`/change-password`. Changing the password (or completing the email reset flow under Authentication above) clears the
+flag. The dev `AUTH_BYPASS` skips this enforcement. ❌ No MFA/TOTP of any kind exists — that was a
+Keycloak feature (never actually enforced for pre-existing accounts even then) and has no
+replacement.
 
 There is no `POST /staff/:id/shifts` or `POST /staff/:id/leave` endpoint — `StaffShift` and
 `LeaveRequest` rows exist in the schema and are honoured by the appointments-availability logic,
@@ -550,8 +562,6 @@ GET  /public/services                          — active services for the booki
 GET  /public/staff                             — staff list for the booking widget
 GET  /public/availability      query: serviceId, staffId?, date
 POST /public/bookings          body: PublicBookingSchema (below)
-GET  /public/invitations/:token                — staff invitation preview (fullName, email, role, expired)
-POST /public/invitations/:token/activate       body: { fullName, password } — see §7
 ```
 
 ```

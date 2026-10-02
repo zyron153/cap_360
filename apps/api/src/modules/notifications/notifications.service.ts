@@ -55,10 +55,6 @@ export class NotificationsService implements OnModuleInit {
     return s.wa_reminder !== false;
   }
 
-  async sendInvite(email: string, fullName: string, token: string) {
-    await this.queue.add("send-invite", { email, fullName, token }, { attempts: 3 });
-  }
-
   async sendPasswordReset(email: string, fullName: string, token: string) {
     await this.queue.add("send-password-reset", { email, fullName, token }, { attempts: 3 });
   }

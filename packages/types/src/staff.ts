@@ -26,36 +26,17 @@ export type CreateStaffDto = z.infer<typeof CreateStaffSchema>;
 export const UpdateStaffSchema = CreateStaffSchema.partial();
 export type UpdateStaffDto = z.infer<typeof UpdateStaffSchema>;
 
-// ─── Invitations ───────────────────────────────────────────────────────────
+// ─── Temporary credentials ──────────────────────────────────────────────────
+// Creating a user (POST /staff) or resetting their password (POST /staff/:id/reset-password)
+// generates a one-time temporary password, returned once to the admin who triggered it. The
+// account is flagged mustChangePassword until the user replaces it on first login (see
+// SessionAuthGuard and PATCH /staff/me/password).
 
-export const InviteStaffSchema = CreateStaffSchema;
-export type InviteStaffDto = z.infer<typeof InviteStaffSchema>;
-
-// Password policy: minimum 10 chars, at least one uppercase letter and one digit (see auth.ts's
-// ResetPasswordSchema/ChangePasswordSchema, which reuse the same policy).
-export const ActivateInvitationSchema = z.object({
-  fullName: z.string().min(2).max(150),
-  password: z.string().min(10).max(72).regex(/[A-Z]/, "password must contain an uppercase letter").regex(/\d/, "password must contain a digit"),
-});
-export type ActivateInvitationDto = z.infer<typeof ActivateInvitationSchema>;
-
-export interface StaffInvitationEntry {
-  id: string;
-  email: string;
-  fullName: string;
-  role: string;
-  jobTitle: string | null;
-  phone: string | null;
-  specialtyCode: string | null;
-  expiresAt: string;
-  createdAt: string;
-}
-
-export interface PublicInvitationInfo {
+export interface TemporaryCredentials {
+  staffId: string;
   fullName: string;
   email: string;
-  role: string;
-  expired: boolean;
+  temporaryPassword: string;
 }
 
 // ─── Leave Requests ─────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ Next.js App Router routes for the `apps/web` application.
 | Path | File | Description |
 |---|---|---|
 | `/login` | `(auth)/login/page.tsx` | Real email + password form — posts to `/api/auth/login` |
-| `/activate` | `(auth)/activate/page.tsx` | Staff invitation acceptance (token from `POST /staff/invite`'s email) — not in the original doc at all |
+| `/change-password` | `(auth)/change-password/page.tsx` | First-login screen for accounts with an admin-issued temporary password — login redirects here when `staff.mustChangePassword`; `(app)/password-change-gate.tsx` redirects any in-app URL here too. **Not public:** needs the session issued at login (the middleware doesn't list it in `PUBLIC_PATHS`). Calls `PATCH /staff/me/password`, then hard-navigates to `?next=` (same-origin paths only) |
 | `/forgot-password` | `(auth)/forgot-password/page.tsx` | Not in the original doc — added 2026-08-31 with the Keycloak removal |
 | `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email |
 

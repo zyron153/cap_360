@@ -1,13 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { StaffRole } from "@cap/database";
 import { PrismaService } from "../../prisma/prisma.service";
-import { CreateStaffDto, UpdateStaffDto, InviteStaffDto, UpsertStaffShiftDto } from "@cap/types";
-
-const INVITATION_SELECT = {
-  id: true, email: true, fullName: true, role: true,
-  jobTitle: true, phone: true, specialtyCode: true, companyId: true,
-  expiresAt: true, createdAt: true,
-} as const;
+import { CreateStaffDto, UpdateStaffDto, UpsertStaffShiftDto } from "@cap/types";
 
 const STAFF_SELECT = {
   id: true,
@@ -18,6 +12,7 @@ const STAFF_SELECT = {
   specialtyCode: true,
   phone: true,
   companyId: true,
+  mustChangePassword: true,
   availability: {
     where: { active: true },
     select: { dayOfWeek: true, startTime: true, endTime: true },
@@ -63,8 +58,11 @@ export class StaffRepository {
     });
   }
 
-  updatePasswordHash(id: string, passwordHash: string) {
-    return this.prisma.staff.update({ where: { id }, data: { passwordHash } });
+  /** Setting a password the user chose themselves (change / reset-by-email) clears
+   * mustChangePassword; an admin-issued temporary password passes `true` so the user is forced to
+   * replace it on next login. */
+  updatePasswordHash(id: string, passwordHash: string, mustChangePassword = false) {
+    return this.prisma.staff.update({ where: { id }, data: { passwordHash, mustChangePassword } });
   }
 
   /** Same soft-delete convention as patients.repository.ts — deletedAt, not a hard delete. Staff
@@ -103,12 +101,14 @@ export class StaffRepository {
     });
   }
 
-  /** Creates the real Staff row — called only from invitation activation, once the invitee has set a password. */
-  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; companyId?: string | null; availability?: CreateStaffDto["availability"] }) {
+  /** Creates the Staff row — only called by an admin creating a user, with a generated temporary
+   * password (mustChangePassword: true). */
+  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; mustChangePassword?: boolean; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; companyId?: string | null; availability?: CreateStaffDto["availability"] }) {
     const avail = dto.availability ?? [];
     return this.prisma.staff.create({
       data: {
         passwordHash: dto.passwordHash,
+        mustChangePassword: dto.mustChangePassword ?? false,
         fullName: dto.fullName,
         email: dto.email,
         role: dto.role,
@@ -134,55 +134,6 @@ export class StaffRepository {
     });
   }
 
-  // ─── Invitations ───────────────────────────────────────────────────────────
-
-  createInvitation(dto: InviteStaffDto, token: string, expiresAt: Date, invitedBy?: string) {
-    return this.prisma.staffInvitation.create({
-      data: {
-        token,
-        email: dto.email,
-        fullName: dto.fullName,
-        role: dto.role,
-        jobTitle: dto.jobTitle ?? null,
-        phone: dto.phone ?? null,
-        specialtyCode: dto.specialtyCode ?? null,
-        companyId: dto.companyId ?? null,
-        availability: dto.availability ?? undefined,
-        invitedBy: invitedBy ?? null,
-        expiresAt,
-      },
-      select: INVITATION_SELECT,
-    });
-  }
-
-  findPendingInvitations() {
-    return this.prisma.staffInvitation.findMany({
-      where: { acceptedAt: null },
-      select: INVITATION_SELECT,
-      orderBy: { createdAt: "desc" },
-    });
-  }
-
-  findInvitationByEmail(email: string) {
-    return this.prisma.staffInvitation.findFirst({ where: { email, acceptedAt: null } });
-  }
-
-  findInvitationByToken(token: string) {
-    return this.prisma.staffInvitation.findUnique({ where: { token } });
-  }
-
-  findInvitationById(id: string) {
-    return this.prisma.staffInvitation.findUnique({ where: { id } });
-  }
-
-  markInvitationAccepted(id: string) {
-    return this.prisma.staffInvitation.update({ where: { id }, data: { acceptedAt: new Date() } });
-  }
-
-  deleteInvitation(id: string) {
-    return this.prisma.staffInvitation.delete({ where: { id } });
-  }
-
   // ─── Leave Requests ────────────────────────────────────────────────────────
 
   createLeaveRequest(staffId: string, dto: { startDate: string; endDate: string; reason?: string }) {
@@ -203,7 +154,7 @@ export class StaffRepository {
     });
   }
 
-  /** Admin queue — pending only, same convention as findPendingInvitations. */
+  /** Admin queue — pending only. */
   findPendingLeaveRequests() {
     return this.prisma.leaveRequest.findMany({
       where: { status: "pending" },

@@ -29,6 +29,7 @@ const STAFF = {
   fullName: "Ana Costa",
   role: "doctor",
   passwordHash: "$argon2id$real-hash",
+  mustChangePassword: false,
 };
 
 describe("AuthService", () => {
@@ -68,8 +69,18 @@ describe("AuthService", () => {
       expect(sessions.create).toHaveBeenCalledWith({ staffId: "staff-1", email: "ana@cap.cv", roles: ["doctor"] });
       expect(result).toEqual({
         sessionId: "sess-abc",
-        staff: { id: "staff-1", email: "ana@cap.cv", fullName: "Ana Costa", role: "doctor" },
+        staff: { id: "staff-1", email: "ana@cap.cv", fullName: "Ana Costa", role: "doctor", mustChangePassword: false },
       });
+    });
+
+    it("reports mustChangePassword so the web app can send a temporary-password user to /change-password", async () => {
+      staffRepo.findByEmailWithPassword.mockResolvedValue({ ...STAFF, mustChangePassword: true });
+      password.verify.mockResolvedValue(true);
+      sessions.create.mockResolvedValue("sess-abc");
+
+      const result = await service.login({ email: "ana@cap.cv", password: "Tmp-Pass#1234" });
+
+      expect(result.staff.mustChangePassword).toBe(true);
     });
 
     it("records a failure and rejects on a wrong password", async () => {

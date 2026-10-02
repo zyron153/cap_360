@@ -1,10 +1,12 @@
 import {
   Injectable,
   ExecutionContext,
+  ForbiddenException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { IS_PUBLIC_KEY } from "../decorators/public.decorator";
+import { ALLOW_PASSWORD_CHANGE_KEY } from "../decorators/allow-password-change.decorator";
 import { SessionService, SESSION_COOKIE_NAME } from "../../modules/auth/session.service";
 import { StaffRepository } from "../../modules/staff/staff.repository";
 
@@ -46,6 +48,24 @@ export class SessionAuthGuard {
     // next request instead of staying valid for up to SESSION_TTL_SECONDS more.
     const staff = await this.staffRepo.findById(session.staffId);
     if (!staff) throw new UnauthorizedException("Account deactivated");
+
+    // Admin-issued temporary password (new user / "Redefinir senha") — nothing but the
+    // change-password screen's own routes until the user has replaced it. Checked against the DB
+    // row on every request (not baked into the session), so an admin reset also locks out a
+    // session the user already had open.
+    if (staff.mustChangePassword) {
+      const allowed = this.reflector.getAllAndOverride<boolean>(ALLOW_PASSWORD_CHANGE_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (!allowed) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          code: "PASSWORD_CHANGE_REQUIRED",
+          message: "Tem de alterar a palavra-passe temporária antes de continuar.",
+        });
+      }
+    }
 
     request.user = { sub: session.staffId, email: session.email, roles: session.roles };
     return true;

@@ -12,6 +12,8 @@ export type ApiStaff = {
   phone: string | null;
   specialtyCode: string | null;
   companyId?: string | null;
+  /** Still on an admin-issued temporary password (see Gestão de Acesso → Utilizadores). */
+  mustChangePassword?: boolean;
   availability: { dayOfWeek: number; startTime: string; endTime: string }[];
 };
 
@@ -60,7 +62,7 @@ const DAYS_OF_WEEK = [
 export const inputCls =
   "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)] hover:border-dim-300";
 
-/** POST /staff/invite (create, InviteStaffSchema === CreateStaffSchema) or PATCH /staff/:id (edit) body. */
+/** POST /staff (create, CreateStaffSchema) or PATCH /staff/:id (edit) body. */
 export function toApiBody(form: FormValues) {
   return {
     fullName: form.name.trim(),

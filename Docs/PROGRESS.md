@@ -1,9 +1,38 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-09-27.
+> Snapshot overwritten each session. Última atualização: 2026-10-02.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **Gestão de Acesso — utilizadores criados com palavra-passe temporária, sem convite por email,
+  2026-10-02.** Pedido do utilizador: remover o convite por email; ao adicionar um utilizador criar e
+  atribuir a palavra-passe; forçar a troca no primeiro login.
+  - **Criação:** `POST /staff` cria o utilizador logo, com uma palavra-passe aleatória de 14
+    caracteres (`PasswordService.generateTemporary`, `crypto.randomInt`, sem caracteres ambíguos),
+    devolvida **uma só vez** ao admin (`Cache-Control: no-store`) num modal com botão Copiar; só o
+    hash argon2id é guardado. "Redefinir senha" (`POST /staff/:id/reset-password`) volta a emitir uma.
+  - **Troca forçada:** novo `Staff.mustChangePassword`. `SessionAuthGuard` responde
+    `403 PASSWORD_CHANGE_REQUIRED` a tudo menos `GET /staff/me` e `PATCH /staff/me/password`
+    (`@AllowDuringPasswordChange()`), lendo a flag da BD em cada pedido — por isso um reset também
+    corta uma sessão já aberta. O login devolve `staff.mustChangePassword` e leva a `/change-password`
+    (nova página, não pública); `(app)/password-change-gate.tsx` cobre quem abre um URL da app
+    diretamente. A nova palavra-passe tem de ser diferente da temporária.
+  - **Removido:** `/staff/invite`, `/staff/invitations*`, `/public/invitations*`, o job `send-invite`
+    e a página `/activate`. A tabela `staff_invitations` fica no schema como modelo legado (marcado),
+    para o `db:push --accept-data-loss` do CI não a apagar — pode ser removida mais tarde.
+  - **Utilizadores existentes** não são forçados a trocar; o botão "Redefinir senha" serve para isso.
+    Keycloak não é usado no login de staff, por isso a imposição é só pela flag na app.
+  - Verificação: 102 testes unitários nos módulos tocados (novos: gerador, serviço, guard, login);
+    novo `staff-temporary-password.integration-spec.ts` (8 testes, sem `AUTH_BYPASS`, contra BD/Redis
+    reais); novo e2e `staff-temporary-password.spec.ts`; fluxo da UI conduzido num browser real
+    (criar → modal → badge → redefinir). `tsc` limpo em `apps/api`; em `apps/web` só restam tipos
+    gerados obsoletos em `.next/` da página `/activate` removida.
+  - Também neste commit (alterações já pendentes, não relacionadas): o nome da clínica na sidebar
+    passa a vir de `usePermissions()` e os itens do menu ficam ocultos enquanto as permissões carregam.
+  - Docs atualizados: `API-SPEC.md` §7/§9, `DATABASE-SCHEMA.md` §1.2/§1.3, `FRONTEND-ROUTES.md`,
+    `SECURITY.md` §2.1, `TESTING.md`, `TODO.md` (M8), `modules/M8-staff-resource-scheduler.md`.
+    `REVIEW.md` é um registo histórico e não foi alterado.
 
 - **M6 — polimento geral do Financeiro (Faturas/Despesas/Entradas/Saldos), 2026-09-27.** Pedido do
   utilizador: "polish the Financeiro feature including Faturas and everything else". Uma survey

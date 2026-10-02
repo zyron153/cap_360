@@ -104,6 +104,7 @@ export class BffService {
         jobTitle: true,
         phone: true,
         specialtyCode: true,
+        mustChangePassword: true, // Gestão de Acesso badges accounts still on a temporary password
         availability: {
           where: { active: true },
           select: { dayOfWeek: true, startTime: true, endTime: true },

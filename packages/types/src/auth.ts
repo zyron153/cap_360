@@ -11,7 +11,8 @@ export const ForgotPasswordSchema = z.object({
 });
 export type ForgotPasswordDto = z.infer<typeof ForgotPasswordSchema>;
 
-// Same policy as ActivateInvitationSchema (staff.ts) — kept in sync deliberately.
+// Password policy: minimum 10 chars, at least one uppercase letter and one digit.
+// PasswordService.generateTemporary() always produces passwords that satisfy it.
 export const ResetPasswordSchema = z.object({
   token: z.string().min(1),
   password: z.string().min(10).max(72).regex(/[A-Z]/, "password must contain an uppercase letter").regex(/\d/, "password must contain a digit"),
@@ -29,4 +30,7 @@ export interface AuthenticatedStaff {
   fullName: string;
   email: string;
   role: string;
+  /** True while the account still has an admin-issued temporary password — the web app sends the
+   * user to /change-password before anything else. */
+  mustChangePassword: boolean;
 }

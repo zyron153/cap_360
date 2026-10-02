@@ -1,5 +1,6 @@
-import { UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { SessionAuthGuard } from "./session-auth.guard";
+import { ALLOW_PASSWORD_CHANGE_KEY } from "../decorators/allow-password-change.decorator";
 
 const reflector = { getAllAndOverride: jest.fn() };
 const sessions = { get: jest.fn() };
@@ -65,6 +66,39 @@ describe("SessionAuthGuard", () => {
     const ctx = makeContext({ cap_session: "good" });
     await expect(guard().canActivate(ctx)).rejects.toThrow(UnauthorizedException);
     expect(ctx.__request.user).toBeUndefined();
+  });
+
+  describe("temporary password (mustChangePassword)", () => {
+    beforeEach(() => {
+      sessions.get.mockResolvedValue({ staffId: "s1", email: "a@cap.cv", roles: ["doctor"] });
+      staffRepo.findById.mockResolvedValue({ id: "s1", mustChangePassword: true });
+    });
+
+    function routeAllowsPasswordChange(allowed: boolean) {
+      reflector.getAllAndOverride.mockImplementation((key: string) => (key === ALLOW_PASSWORD_CHANGE_KEY ? allowed : false));
+    }
+
+    it("refuses an ordinary route with 403 PASSWORD_CHANGE_REQUIRED", async () => {
+      routeAllowsPasswordChange(false);
+      const ctx = makeContext({ cap_session: "good" });
+      const err = await guard().canActivate(ctx).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toMatchObject({ code: "PASSWORD_CHANGE_REQUIRED" });
+      expect(ctx.__request.user).toBeUndefined();
+    });
+
+    it("lets the change-password route through (@AllowDuringPasswordChange)", async () => {
+      routeAllowsPasswordChange(true);
+      const ctx = makeContext({ cap_session: "good" });
+      await expect(guard().canActivate(ctx)).resolves.toBe(true);
+      expect(ctx.__request.user).toMatchObject({ sub: "s1" });
+    });
+
+    it("does not restrict anything once the flag is cleared", async () => {
+      routeAllowsPasswordChange(false);
+      staffRepo.findById.mockResolvedValue({ id: "s1", mustChangePassword: false });
+      await expect(guard().canActivate(makeContext({ cap_session: "good" }))).resolves.toBe(true);
+    });
   });
 
   describe("dev bypass posture", () => {

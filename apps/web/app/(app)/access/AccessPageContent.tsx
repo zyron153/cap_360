@@ -6,9 +6,9 @@ import {
   ShieldCheck, Plus, Check, Building2, Users,
   LayoutDashboard, CalendarDays, UserRound, HeartPulse,
   FlaskConical, Receipt, ClipboardList, UserCog,
-  Home, BarChart2, Settings2, SlidersHorizontal,
+  Home, BarChart2, Settings2, SlidersHorizontal, Copy, KeyRound,
 } from "lucide-react";
-import type { StaffInvitationEntry } from "@cap/types";
+import type { TemporaryCredentials } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
 import { defaultPerms, type PageKey, type PagePerms, type RolePerms, type AccessControl } from "../../../lib/access-control";
@@ -72,18 +72,61 @@ function TabButton({ active, onClick, icon: Icon, children }: { active: boolean;
   );
 }
 
-function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose, pending }: {
+function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose, pending, tone = "danger" }: {
   title: string; message: string; confirmLabel: string; onConfirm: () => void; onClose: () => void; pending?: boolean;
+  /** "danger" (red) for destructive actions; "primary" (brand) for the rest. */
+  tone?: "danger" | "primary";
 }) {
+  const confirmCls = tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-brand-700 hover:bg-brand-800";
   return (
     <Modal open onClose={onClose} title={title}>
       <div className="p-5 flex flex-col gap-4">
         <p className="text-[13px] text-dim-600">{message}</p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
-          <button type="button" onClick={onConfirm} disabled={pending} className="px-4 py-2 text-[13px] font-semibold bg-red-600 text-white rounded-[10px] hover:bg-red-700 disabled:opacity-50 transition-colors">
+          <button type="button" onClick={onConfirm} disabled={pending} className={`px-4 py-2 text-[13px] font-semibold text-white rounded-[10px] disabled:opacity-50 transition-colors ${confirmCls}`}>
             {pending ? "A processar…" : confirmLabel}
           </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Shown once, right after a user is created or their password is reset — the API never returns the
+ * plaintext again (only its hash is stored), so closing this without copying it means resetting
+ * the password again. */
+function TemporaryPasswordModal({ credentials, onClose }: { credentials: TemporaryCredentials; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(credentials.temporaryPassword);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked (insecure origin / permissions) — the password is selectable on screen.
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Palavra-passe temporária" description={`${credentials.fullName} · ${credentials.email}`}>
+      <div className="p-5 flex flex-col gap-4">
+        <div className="flex items-center gap-2 bg-dim-50 border border-dim-200 rounded-[10px] px-3.5 py-3">
+          <KeyRound className="text-dim-400 shrink-0" style={{ width: 16, height: 16 }} />
+          <code data-testid="temporary-password" className="flex-1 text-[15px] font-mono font-semibold text-dim-900 tracking-wide select-all break-all">
+            {credentials.temporaryPassword}
+          </code>
+          <button type="button" onClick={copy} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-dim-200 text-dim-700 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
+            {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
+            {copied ? "Copiada" : "Copiar"}
+          </button>
+        </div>
+        <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200/80 rounded-[10px] px-3.5 py-2.5">
+          Guarde-a agora — não volta a ser mostrada. Partilhe-a com o utilizador por um canal seguro; será obrigado/a a escolher uma palavra-passe nova no primeiro login.
+        </p>
+        <div className="flex justify-end">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 transition-colors">Concluído</button>
         </div>
       </div>
     </Modal>
@@ -416,7 +459,7 @@ function ProfilesSection() {
   );
 }
 
-/* ── Utilizadores — full lifecycle: invite, edit, deactivate ─────────────── */
+/* ── Utilizadores — full lifecycle: create (temporary password), edit, reset password, deactivate ── */
 
 function UsersSection() {
   const qc = useQueryClient();
@@ -424,16 +467,14 @@ function UsersSection() {
   const [addOpen, setAddOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<ApiStaff | null>(null);
   const [deactivating, setDeactivating] = useState<ApiStaff | null>(null);
+  const [resetting, setResetting] = useState<ApiStaff | null>(null);
+  // The one-time temporary password from the last create/reset — held in state only, never cached.
+  const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
 
   const { data: staffList = [], isLoading } = useQuery<ApiStaff[]>({
     queryKey: ["bff-staff"],
     queryFn: () => fetch("/api/bff/staff").then((r) => r.json()),
     staleTime: 60_000,
-  });
-  const { data: invitations = [] } = useQuery<StaffInvitationEntry[]>({
-    queryKey: ["staff-invitations"],
-    queryFn: () => fetch("/api/staff/invitations").then((r) => r.json()),
-    staleTime: 30_000,
   });
   const { data: jobTitleOptions = [] } = useQuery<ParamOption[]>({
     queryKey: ["parametrizacao", "FUNCAO"],
@@ -447,13 +488,29 @@ function UsersSection() {
   });
 
   const createMut = useMutation({
-    mutationFn: (body: object) => fetch("/api/staff/invite", {
+    mutationFn: (body: object) => fetch("/api/staff", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    }).then(async (r) => { if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao enviar convite"); } }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["staff-invitations"] });
-      addMessage("Success", "Convite enviado com sucesso! O colaborador vai receber um email para ativar a conta.");
+    }).then(async (r) => {
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao criar utilizador"); }
+      return r.json() as Promise<TemporaryCredentials>;
+    }),
+    onSuccess: (creds) => {
+      qc.invalidateQueries({ queryKey: ["bff-staff"] });
       setAddOpen(false);
+      setCredentials(creds);
+    },
+    onError: (e: Error) => addMessage("Error", e.message),
+  });
+
+  const resetMut = useMutation({
+    mutationFn: (id: string) => fetch(`/api/staff/${id}/reset-password`, { method: "POST" }).then(async (r) => {
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao redefinir a palavra-passe"); }
+      return r.json() as Promise<TemporaryCredentials>;
+    }),
+    onSuccess: (creds) => {
+      qc.invalidateQueries({ queryKey: ["bff-staff"] });
+      setResetting(null);
+      setCredentials(creds);
     },
     onError: (e: Error) => addMessage("Error", e.message),
   });
@@ -467,13 +524,6 @@ function UsersSection() {
       addMessage("Success", "Alterações guardadas com sucesso!");
       setEditingStaff(null);
     },
-    onError: (e: Error) => addMessage("Error", e.message),
-  });
-
-  const cancelInviteMut = useMutation({
-    mutationFn: (id: string) => fetch(`/api/staff/invitations/${id}`, { method: "DELETE" })
-      .then((r) => { if (!r.ok) throw new Error("Erro ao cancelar convite"); }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["staff-invitations"] }); addMessage("Success", "Convite cancelado."); },
     onError: (e: Error) => addMessage("Error", e.message),
   });
 
@@ -492,16 +542,13 @@ function UsersSection() {
     lab_tech:     "bg-amber-50 text-amber-700 ring-amber-200/80",
     corporate_hr: "bg-dim-100 text-dim-600 ring-dim-200/80",
   };
-  const totalRows = staffList.length + invitations.length;
 
   return (
     <div className={CARD}>
       <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
         <div>
           <h3 className="font-display text-[14px] font-semibold text-dim-900">Utilizadores</h3>
-          <p className="text-[11px] text-dim-400 mt-0.5">
-            {staffList.length} colaboradores{invitations.length > 0 ? ` · ${invitations.length} convite(s) pendente(s)` : ""}
-          </p>
+          <p className="text-[11px] text-dim-400 mt-0.5">{staffList.length} colaboradores</p>
         </div>
         <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 transition-colors">
           <Plus style={{ width: 14, height: 14 }} /> Adicionar Utilizador
@@ -510,34 +557,10 @@ function UsersSection() {
 
       {isLoading ? (
         <div className="px-5 py-8 text-center text-[13px] text-dim-400">A carregar utilizadores…</div>
-      ) : totalRows === 0 ? (
+      ) : staffList.length === 0 ? (
         <div className="px-5 py-8 text-center text-[13px] text-dim-400">Sem utilizadores registados.</div>
       ) : (
         <div className="divide-y divide-dim-100">
-          {invitations.map((inv) => {
-            const initials = inv.fullName.split(" ").filter(Boolean).slice(0, 2).map((n) => n[0]).join("").toUpperCase();
-            const expired = new Date(inv.expiresAt).getTime() < Date.now();
-            return (
-              <div key={`inv-${inv.id}`} className="px-5 py-3.5 flex items-center justify-between hover:bg-dim-50/60 transition-colors opacity-80">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-dim-100 text-dim-500 font-semibold text-[11px] flex items-center justify-center shrink-0 border border-dashed border-dim-300">{initials}</div>
-                  <div>
-                    <p className="text-[13px] font-medium text-dim-700">{inv.fullName}</p>
-                    <p className="text-[11px] text-dim-400">{inv.email}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${expired ? "bg-red-50 text-red-600 ring-1 ring-red-200/80" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80"}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${expired ? "bg-red-400" : "bg-amber-400 animate-pulse"}`} />
-                    {expired ? "Convite Expirado" : "Convite Pendente"}
-                  </span>
-                  <button onClick={() => cancelInviteMut.mutate(inv.id)} disabled={cancelInviteMut.isPending} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-500 rounded-[8px] hover:border-red-300 hover:text-red-600 transition-colors">
-                    Cancelar Convite
-                  </button>
-                </div>
-              </div>
-            );
-          })}
           {staffList.map((s) => {
             const initials = s.fullName.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
             return (
@@ -550,9 +573,18 @@ function UsersSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  {s.mustChangePassword && (
+                    <span title="Ainda não alterou a palavra-passe temporária" className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200/80">
+                      <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      Senha temporária
+                    </span>
+                  )}
                   <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ${roleBadgeCls[s.role] ?? "bg-dim-100 text-dim-500"}`}>
                     {ROLE_LABELS[s.role] ?? s.role}
                   </span>
+                  <button onClick={() => setResetting(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
+                    Redefinir senha
+                  </button>
                   <button onClick={() => setEditingStaff(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
                     Editar
                   </button>
@@ -566,11 +598,11 @@ function UsersSection() {
         </div>
       )}
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar Utilizador" description="Envia um convite por email para ativar a conta" size="lg">
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar Utilizador" description="Cria a conta com uma palavra-passe temporária, que o utilizador terá de alterar no primeiro login" size="lg">
         <StaffForm
           onSave={(form) => createMut.mutate(toApiBody(form))}
           onCancel={() => setAddOpen(false)}
-          submitLabel="Enviar Convite"
+          submitLabel="Criar Utilizador"
           saving={createMut.isPending}
           jobTitleOptions={jobTitleOptions}
           specialtyOptions={specialtyOptions}
@@ -590,6 +622,20 @@ function UsersSection() {
           />
         )}
       </Modal>
+
+      {resetting && (
+        <ConfirmModal
+          title="Redefinir Palavra-passe"
+          message={`Gerar uma nova palavra-passe temporária para "${resetting.fullName}"? A palavra-passe atual deixa de funcionar e o utilizador terá de escolher uma nova no próximo login.`}
+          confirmLabel="Redefinir"
+          tone="primary"
+          pending={resetMut.isPending}
+          onConfirm={() => resetMut.mutate(resetting.id)}
+          onClose={() => setResetting(null)}
+        />
+      )}
+
+      {credentials && <TemporaryPasswordModal credentials={credentials} onClose={() => setCredentials(null)} />}
 
       {deactivating && (
         <ConfirmModal

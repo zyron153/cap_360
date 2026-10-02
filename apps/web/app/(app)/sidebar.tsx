@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -56,13 +55,8 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { can, isLoading, role, me } = usePermissions();
+  const { can, isLoading, role, me, clinicName } = usePermissions();
   const [previewRole, setPreviewRole] = useState("");
-  const { data: clinicName } = useQuery({
-    queryKey: ["settings-clinic-name"],
-    queryFn: () => fetch("/api/settings").then(r => r.json()).then((all: Record<string, { name?: string }>) => all.clinic?.name ?? null),
-    staleTime: 120_000,
-  });
 
   useEffect(() => {
     setPreviewRole(localStorage.getItem("cms:preview-role") ?? "");
@@ -85,9 +79,9 @@ export function Sidebar() {
   }
 
   function isVisible(href: string): boolean {
-    if (isLoading) return true;
     const pageKey = HREF_TO_PAGE[href];
     if (!pageKey) return true;
+    if (isLoading) return false;
     return can(pageKey);
   }
 

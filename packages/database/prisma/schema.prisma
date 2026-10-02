@@ -163,6 +163,10 @@ model Staff {
   /// argon2id hash (see PasswordService) — never selected in a normal find; only the login path
   /// reads it explicitly.
   passwordHash  String    @db.VarChar(255)
+  /// True while passwordHash is an admin-issued temporary password (new user, or "Redefinir
+  /// senha"). SessionAuthGuard blocks every route except the change-password one until the user
+  /// sets their own, which clears it.
+  mustChangePassword Boolean @default(false)
   fullName      String    @db.VarChar(150)
   email         String    @unique @db.VarChar(150)
   role          StaffRole
@@ -200,6 +204,9 @@ model Staff {
   @@map("staff")
 }
 
+/// Legacy — the email-invitation flow was replaced by admin-created users with a temporary
+/// password (Staff.mustChangePassword). Nothing reads or writes this table any more; it is kept
+/// only so `db:push` doesn't drop rows (CI's push runs with --accept-data-loss). Safe to remove.
 model StaffInvitation {
   id            String    @id @default(uuid())
   token         String    @unique @db.VarChar(64)

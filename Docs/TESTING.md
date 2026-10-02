@@ -146,10 +146,14 @@ coverage:
   forged POSTs rejected with nothing stored, a signed message stored as ciphertext and a retry
   deduplicated, thread served decrypted via the inbox API, resolve then reopen on the next inbound.
   Temporarily swaps in test credentials for the `integration_whatsapp` setting and restores it after.
-- **`staff-invitation.integration-spec.ts`** — the one spec that deliberately skips `AUTH_BYPASS`:
-  real admin login → invite → activation (token read straight from the DB row, the same way a real
-  invitee would read it from their inbox — the API never returns it) → the new hire's own real
-  login → session actually authenticates on a protected route with their real role.
+- **`staff-temporary-password.integration-spec.ts`** — the one spec that deliberately skips
+  `AUTH_BYPASS`: real admin login → `POST /staff` returns a one-time temporary password (only the
+  hash is stored) → the new user's real login reports `mustChangePassword` → every route except
+  `GET /staff/me` / `PATCH /staff/me/password` answers `403 PASSWORD_CHANGE_REQUIRED` → a "new"
+  password equal to the temporary one is refused → changing it lifts the block on the same session →
+  an admin "Redefinir senha" re-flags the account and cuts off the user's open session → a
+  non-admin can't create users or reset passwords. Uses 4 logins on purpose: `/auth/login` is
+  throttled to 5/min per IP, so the spec reuses sessions rather than logging in again.
 
 Note on the M1 §2.4 reminder-cancellation gap this section used to flag as unfixed: it was closed
 in the roadmap's Phase 1 (`appointments.service.ts`'s `cancelPendingReminders` now runs from both
@@ -193,12 +197,14 @@ status-transition UI on `/appointments` (Confirmar → Check-in feito → Conclu
 call) to its auto-created invoice, then paying it off through the "Registar Pagamento" form itself
 rather than the API.
 
-#### Staff Invitation → Activation → Login — ✅ `apps/web/e2e/staff-invitation.spec.ts`
-Corrected: an earlier version of this doc said this flow was only covered by an integration spec
-because the activation token "only ever reaches a real invitee by email." That premise was
-already stale when written — `POST /staff/invite` returns the token directly in its response body
-(there's no separate email-delivery step gating it), so the real E2E spec reads it from the invite
-response and drives the activation form and login form through the browser like any other flow.
+#### Temporary Password → First Login → /change-password — ✅ `apps/web/e2e/staff-temporary-password.spec.ts`
+Replaced `staff-invitation.spec.ts` when the email-invitation flow was removed. Creates a user via
+`POST /staff`, then drives the real login form with the temporary password and asserts the redirect
+to `/change-password` and that screen's client-side validation (new ≠ temporary, policy, confirmation
+match). It deliberately stops short of submitting a valid change: the dev stack runs with
+`AUTH_BYPASS`, where every request is the seeded admin, so `PATCH /staff/me/password` would be checked
+against the admin's password. The real enforcement and the full change are covered by
+`staff-temporary-password.integration-spec.ts` (§4), which runs without the bypass.
 
 #### Manual Invoice Creation + Payment — ✅ `apps/web/e2e/manual-invoice-payment.spec.ts`
 The one invoice-lifecycle path the other two Financeiro specs don't touch: creating an invoice by

@@ -36,6 +36,7 @@ export function usePermissions() {
     role,
     me,
     isAdmin,
+    clinicName: (settings?.clinic as { name?: string } | undefined)?.name ?? null,
     can: (page: PageKey): boolean => isAdmin || (perms[page]?.view ?? false),
     canDo: (page: PageKey, action: "create" | "edit" | "delete"): boolean =>
       isAdmin || (perms[page]?.[action] ?? false),

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/activate", "/forgot-password", "/reset-password"];
+// /change-password is deliberately NOT public — it needs the session the user just got at login.
+const PUBLIC_PATHS = ["/login", "/forgot-password", "/reset-password"];
 const SESSION_COOKIE = "cap_session";
 // ponytail: mock-only modules (no backend) hidden until built — remove the entry to re-enable.
 const HIDDEN_PATHS = ["/exams", "/visits"];

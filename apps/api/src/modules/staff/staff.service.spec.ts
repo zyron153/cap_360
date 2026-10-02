@@ -1,14 +1,12 @@
 import { Test } from "@nestjs/testing";
-import { GoneException, NotFoundException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
+import { ConflictException, NotFoundException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { StaffRepository } from "./staff.repository";
 import { PasswordService } from "../../common/services/password.service";
-import { NotificationsService } from "../notifications/notifications.service";
 
 const repo = {
-  findInvitationByToken: jest.fn(),
   create: jest.fn(),
-  markInvitationAccepted: jest.fn(),
+  findByEmail: jest.fn(),
   findByIdWithPassword: jest.fn(),
   updatePasswordHash: jest.fn(),
   createLeaveRequest: jest.fn(),
@@ -21,73 +19,84 @@ const repo = {
   findById: jest.fn(),
   softDelete: jest.fn(),
 };
-const password = { hash: jest.fn(), verify: jest.fn() };
-const notifications = { sendInvite: jest.fn() };
+const password = { hash: jest.fn(), verify: jest.fn(), generateTemporary: jest.fn() };
 
-const INVITE = {
-  id: "invite-1",
-  email: "ana@cap.cv",
-  role: "doctor",
-  jobTitle: "Psicóloga",
-  phone: null,
-  specialtyCode: null,
-  availability: null,
-  acceptedAt: null,
-  expiresAt: new Date(Date.now() + 60_000),
-};
+async function makeService() {
+  const mod = await Test.createTestingModule({
+    providers: [
+      StaffService,
+      { provide: StaffRepository, useValue: repo },
+      { provide: PasswordService, useValue: password },
+    ],
+  }).compile();
+  return mod.get(StaffService);
+}
 
-describe("StaffService — activateInvitation", () => {
+describe("StaffService — create (temporary password)", () => {
+  let service: StaffService;
+  const DTO = { fullName: "  Ana Costa ", email: "ana@cap.cv", role: "doctor" as const, jobTitle: "Psicóloga" };
+
+  beforeEach(async () => {
+    service = await makeService();
+    jest.clearAllMocks();
+    repo.findByEmail.mockResolvedValue(null);
+    password.generateTemporary.mockReturnValue("Tmp-Pass#1234");
+    password.hash.mockResolvedValue("$argon2id$hashed");
+    repo.create.mockResolvedValue({ id: "staff-1", fullName: "Ana Costa", email: "ana@cap.cv" });
+  });
+
+  it("throws ConflictException when the email already belongs to a user, without creating anything", async () => {
+    repo.findByEmail.mockResolvedValue({ id: "x" });
+    await expect(service.create(DTO)).rejects.toThrow(ConflictException);
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it("creates the user with the hashed temporary password and mustChangePassword set", async () => {
+    await service.create(DTO);
+
+    expect(password.hash).toHaveBeenCalledWith("Tmp-Pass#1234");
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullName: "Ana Costa",
+        email: "ana@cap.cv",
+        role: "doctor",
+        passwordHash: "$argon2id$hashed",
+        mustChangePassword: true,
+      })
+    );
+  });
+
+  it("returns the plaintext temporary password once, and never passes it to the repository", async () => {
+    const result = await service.create(DTO);
+
+    expect(result).toEqual({ staffId: "staff-1", fullName: "Ana Costa", email: "ana@cap.cv", temporaryPassword: "Tmp-Pass#1234" });
+    expect(JSON.stringify(repo.create.mock.calls[0][0])).not.toContain("Tmp-Pass#1234");
+  });
+});
+
+describe("StaffService — resetPassword", () => {
   let service: StaffService;
 
   beforeEach(async () => {
-    const mod = await Test.createTestingModule({
-      providers: [
-        StaffService,
-        { provide: StaffRepository, useValue: repo },
-        { provide: PasswordService, useValue: password },
-        { provide: NotificationsService, useValue: notifications },
-      ],
-    }).compile();
-    service = mod.get(StaffService);
+    service = await makeService();
     jest.clearAllMocks();
-    repo.findInvitationByToken.mockResolvedValue(INVITE);
+    password.generateTemporary.mockReturnValue("Tmp-Pass#5678");
     password.hash.mockResolvedValue("$argon2id$hashed");
   });
 
-  it("throws NotFoundException for an unknown or already-used invitation", async () => {
-    repo.findInvitationByToken.mockResolvedValue(null);
-    await expect(service.activateInvitation("tok", { fullName: "Ana Costa", password: "x" })).rejects.toThrow(
-      NotFoundException
-    );
+  it("throws NotFoundException for an unknown staff id, without touching the password", async () => {
+    repo.findById.mockResolvedValue(null);
+    await expect(service.resetPassword("ghost")).rejects.toThrow(NotFoundException);
+    expect(repo.updatePasswordHash).not.toHaveBeenCalled();
   });
 
-  it("throws GoneException for an expired invitation", async () => {
-    repo.findInvitationByToken.mockResolvedValue({ ...INVITE, expiresAt: new Date(Date.now() - 1000) });
-    await expect(service.activateInvitation("tok", { fullName: "Ana Costa", password: "x" })).rejects.toThrow(
-      GoneException
-    );
-    expect(password.hash).not.toHaveBeenCalled();
-  });
+  it("stores a fresh hashed temporary password flagged mustChangePassword and returns the plaintext once", async () => {
+    repo.findById.mockResolvedValue({ id: "s1", fullName: "Ana Costa", email: "ana@cap.cv" });
 
-  it("hashes the chosen password, creates the local staff row, and marks the invitation accepted", async () => {
-    repo.create.mockResolvedValue({ id: "staff-1", email: "ana@cap.cv" });
+    const result = await service.resetPassword("s1");
 
-    const result = await service.activateInvitation("tok", { fullName: "Ana Costa", password: "S3cret!!!!" });
-
-    expect(password.hash).toHaveBeenCalledWith("S3cret!!!!");
-    expect(repo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ fullName: "Ana Costa", email: "ana@cap.cv", passwordHash: "$argon2id$hashed" })
-    );
-    expect(repo.markInvitationAccepted).toHaveBeenCalledWith("invite-1");
-    expect(result).toEqual({ id: "staff-1", email: "ana@cap.cv" });
-  });
-
-  it("never stores the plaintext password anywhere in the create() call", async () => {
-    repo.create.mockResolvedValue({ id: "staff-1" });
-    await service.activateInvitation("tok", { fullName: "Ana Costa", password: "S3cret!!!!" });
-
-    const createArg = repo.create.mock.calls[0][0];
-    expect(JSON.stringify(createArg)).not.toContain("S3cret");
+    expect(repo.updatePasswordHash).toHaveBeenCalledWith("s1", "$argon2id$hashed", true);
+    expect(result).toEqual({ staffId: "s1", fullName: "Ana Costa", email: "ana@cap.cv", temporaryPassword: "Tmp-Pass#5678" });
   });
 });
 
@@ -100,7 +109,6 @@ describe("StaffService — changePassword", () => {
         StaffService,
         { provide: StaffRepository, useValue: repo },
         { provide: PasswordService, useValue: password },
-        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
     service = mod.get(StaffService);
@@ -129,6 +137,17 @@ describe("StaffService — changePassword", () => {
     expect(repo.updatePasswordHash).not.toHaveBeenCalled();
   });
 
+  it("rejects a new password identical to the current (temporary) one, without changing anything", async () => {
+    repo.findByIdWithPassword.mockResolvedValue({ id: "s1", passwordHash: "$argon2id$old" });
+    password.verify.mockResolvedValue(true);
+
+    await expect(
+      service.changePassword("s1", { currentPassword: "Tmp-Pass#1234", newPassword: "Tmp-Pass#1234" })
+    ).rejects.toThrow(BadRequestException);
+    expect(password.hash).not.toHaveBeenCalled();
+    expect(repo.updatePasswordHash).not.toHaveBeenCalled();
+  });
+
   it("throws NotFoundException for an unknown staff id", async () => {
     repo.findByIdWithPassword.mockResolvedValue(null);
     await expect(
@@ -146,7 +165,6 @@ describe("StaffService — leave requests", () => {
         StaffService,
         { provide: StaffRepository, useValue: repo },
         { provide: PasswordService, useValue: password },
-        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
     service = mod.get(StaffService);
@@ -189,7 +207,6 @@ describe("StaffService — availability blocks (calendar tab)", () => {
         StaffService,
         { provide: StaffRepository, useValue: repo },
         { provide: PasswordService, useValue: password },
-        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
     service = mod.get(StaffService);
@@ -267,7 +284,6 @@ describe("StaffService — softDelete (deactivation)", () => {
         StaffService,
         { provide: StaffRepository, useValue: repo },
         { provide: PasswordService, useValue: password },
-        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
     service = mod.get(StaffService);

@@ -61,6 +61,10 @@ CREATE TABLE staff (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "passwordHash"  VARCHAR(255) NOT NULL,  -- argon2id, via PasswordService — never selected in a
                                            -- normal find, only the login/change-password paths
+  "mustChangePassword" BOOLEAN NOT NULL DEFAULT false,
+                                           -- true while passwordHash is an admin-issued temporary
+                                           -- password (new user / "Redefinir senha"); cleared when the
+                                           -- user sets their own — see API-SPEC.md §7
   "fullName"      VARCHAR(150) NOT NULL,
   email           VARCHAR(150) NOT NULL UNIQUE,
   role            VARCHAR(30) NOT NULL,   -- admin | doctor | nurse | receptionist | lab_tech | corporate_hr
@@ -76,7 +80,12 @@ CREATE INDEX ON staff(role);
 CREATE INDEX ON staff("deletedAt");
 ```
 
-### 1.3 `staff_invitations`
+### 1.3 `staff_invitations` — legacy, unused
+
+> The email-invitation flow was replaced by admin-created users with a temporary password
+> (`staff."mustChangePassword"`, §1.2). Nothing reads or writes this table any more; it stays in
+> `schema.prisma` (marked legacy) only so `db:push --accept-data-loss` doesn't drop its rows. Safe
+> to remove from the schema.
 
 ```sql
 CREATE TABLE staff_invitations (
@@ -98,11 +107,6 @@ CREATE TABLE staff_invitations (
 CREATE INDEX ON staff_invitations(email);
 CREATE INDEX ON staff_invitations(token);
 ```
-
-Activation (`StaffService.activateInvitation`) hashes the invitee's own chosen password
-(argon2id) and creates the local `staff` row directly — no external identity provider is involved,
-so there's nothing that can be left orphaned on a partial failure (that used to be a real concern
-when this created a Keycloak user first; removed along with Keycloak).
 
 No auth session data lives in Postgres at all: sessions, login-lockout counters, and
 password-reset tokens are all Redis-only (`SessionService`) — see `SECURITY.md` §2.1.

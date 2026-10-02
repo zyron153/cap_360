@@ -10,7 +10,6 @@ function LoginCard() {
   const params = useSearchParams();
   const router = useRouter();
   const next = params.get("next") ?? "/dashboard";
-  const activated = params.get("activated") === "1";
   const reset = params.get("reset") === "1";
 
   const [email, setEmail] = useState("");
@@ -32,7 +31,9 @@ function LoginCard() {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.message ?? "Não foi possível iniciar sessão.");
       }
-      router.push(next);
+      const { staff } = (await res.json()) as { staff: { mustChangePassword?: boolean } };
+      // Admin-issued temporary password → the user must pick their own before anything else.
+      router.push(staff.mustChangePassword ? `/change-password?next=${encodeURIComponent(next)}` : next);
       router.refresh();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Erro desconhecido.");
@@ -64,12 +65,6 @@ function LoginCard() {
               <div className="flex items-start gap-2 text-left bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
                 <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                 <p className="text-xs text-red-700">{error}</p>
-              </div>
-            )}
-            {activated && !error && (
-              <div className="flex items-start gap-2 text-left bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                <p className="text-xs text-emerald-700">Conta ativada com sucesso! Inicie sessão para continuar.</p>
               </div>
             )}
             {reset && !error && (
