@@ -7,8 +7,11 @@
 > header involved. See the **Authentication** section below.
 > **Content-Type:** `application/json` (all bodies are validated with Zod via a shared `ZodValidationPipe`)
 > **Error format:** `{ "statusCode": 400, "message": "...", "error": "Bad Request" }`
-> **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) skips
-> session verification entirely for local development.
+> **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) makes
+> requests with **no valid login session** run as the seeded admin, for local development. A valid
+> session cookie always wins over it — so logging in as someone else in dev really is that user
+> (including the temporary-password block below); a stale cookie or a deactivated account falls back
+> to the admin.
 
 This document reflects the routes and body shapes that actually exist in
 `apps/api/src/modules/*/*.controller.ts` and `packages/types/src/*.ts`. Field names are the real
@@ -288,7 +291,8 @@ Body:
   "items": [ { "serviceId": "uuid, required", "description": "string", "quantity": 1, "unitPrice": number } ],
   "notes": "string (optional)", "dueDate": "YYYY-MM-DD (optional)"
 }
-Response 201: Invoice with computed totals; E-Fatura submission queued automatically
+Response 201: Invoice with computed totals. If e-Fatura is enabled and the invoice is issued after the go-live date,
+its fiscal document row is created in the same insert and queued for DNRE.
 ```
 A catalogued `serviceId` billed at a price other than `services.price` is a price override —
 always logged, and **admin-only** (non-admins get `403`). An item with no `serviceId` (off-
@@ -334,18 +338,39 @@ and edits to a custom (no `serviceId`) line item are unrestricted.
 Response 200: Invoice with status "cancelled"
 Response 400: cannot cancel a fully paid invoice
 ```
-Idempotent on an already-cancelled invoice (returns it unchanged). If the invoice's E-Fatura
-submission had already been `accepted` by the tax authority, also enqueues an E-Fatura cancel job.
+Idempotent on an already-cancelled invoice (returns it unchanged). The invoice and its fiscal documents
+change in one transaction: a document that never reached DNRE is cancelled locally and will never be
+sent; an authorized one is voided with an FDC event (nothing paid) or reversed with a credit note
+(partially paid FTE); a document that is being sent right now answers `409` (retry in a moment).
 
 #### GET `/invoices/:id/efatura`
 ```
-Response 200: EFaturaSubmission record
-Response 404: no submission exists for this invoice
+Response 200: the invoice's own fiscal document (FTE/FRE/TVE) — never includes the signed XML
+Response 404: the invoice is not reported to DNRE
+```
+
+#### GET `/invoices/:id/efatura/documents`
+```
+Response 200: every fiscal document of the invoice, oldest first: issue, receipts (RCE), credit note / cancel event
 ```
 
 #### POST `/invoices/:id/efatura/retry`
 ```
-Response 202: { "queued": true } — resets the submission to "pending" and re-enqueues it
+Response 202: { "queued": boolean, "count": number }
+```
+Re-queues the documents in `error`, `rejected` or `pending`. A rejected document is re-prepared (its
+data may have been fixed) but keeps its number; one that failed technically is re-sent exactly as
+signed, after asking DNRE whether it already holds it. Accepted documents are never touched.
+
+#### `/efatura` — roles: admin (direct integration with DNRE, see `modules/M6a-efatura-direct-integration.md`)
+```
+GET    /efatura/config               — settings + status: hasClientSecret, connected, hasCertificate, ready, missing[] (secrets are never returned)
+PATCH  /efatura/config               — any subset of the non-secret settings (+ write-only oauthClientSecret)
+POST   /efatura/certificate          — { file: base64 .p12/.pfx or PEM text, password } — validated before it is stored
+DELETE /efatura/certificate
+POST   /efatura/oauth/authorize      — { url }: where to send the browser for the taxpayer's consent (Authorization Code + PKCE)
+GET    /efatura/oauth/callback       — DNRE redirects here (the Redirect URI registered in the PE); sends the admin on to /settings
+POST   /efatura/oauth/disconnect
 ```
 
 There is still no standalone `POST /invoices/:id/issue` and no `GET /invoices/:id/pdf` — a receipt
@@ -516,7 +541,8 @@ routes marked `@AllowDuringPasswordChange()` (`GET /staff/me`, `PATCH /staff/me/
 is read from the DB on every request, so an admin reset also locks out a session the user already
 had open. `POST /auth/login` returns `staff.mustChangePassword` so the web app can redirect to
 `/change-password`. Changing the password (or completing the email reset flow under Authentication above) clears the
-flag. The dev `AUTH_BYPASS` skips this enforcement. ❌ No MFA/TOTP of any kind exists — that was a
+flag. The dev `AUTH_BYPASS` doesn't skip this: it only applies when there is no valid session, so a
+logged-in user on a temporary password is still blocked in dev. ❌ No MFA/TOTP of any kind exists — that was a
 Keycloak feature (never actually enforced for pre-existing accounts even then) and has no
 replacement.
 
@@ -586,10 +612,10 @@ Response 201: the created Appointment (patient found-or-created by phone; consen
 ### `/settings` — roles: admin, receptionist, doctor, nurse (mutations narrower, see below)
 ```
 GET   /settings                                                 — all settings keyed by name
-PATCH /settings/clinic              roles: admin, receptionist  — business hours, address, etc. (JSON)
+PATCH /settings/clinic              roles: admin, receptionist  — validated; only an admin may change `name` and `nif` (they are the emitter of every fiscal document)
 PATCH /settings/notifications       roles: admin, receptionist  — feature toggles (wa_confirm, wa_cancel, wa_reminder, email_daily, email_overdue)
 PATCH /settings/access-control      roles: admin
-PATCH /settings/integration/:key    roles: admin                — e.g. integration_whatsapp, integration_email_smtp, integration_efatura credentials
+PATCH /settings/integration/:key    roles: admin                — e.g. integration_whatsapp, integration_email_smtp (e-Fatura has its own /efatura API and is rejected here)
 ```
 
 ### `/parametrizacao` — roles: admin, receptionist, doctor, nurse, lab_tech (mutations: admin only)

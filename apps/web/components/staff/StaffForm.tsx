@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Field } from "../ui/field";
+import { NewPasswordFields } from "../ui/new-password-fields";
+import { PASSWORD_RULE_SUMMARY, isValidPassword } from "../../lib/password-policy";
 
 export type ApiStaff = {
   id: string;
@@ -12,8 +14,6 @@ export type ApiStaff = {
   phone: string | null;
   specialtyCode: string | null;
   companyId?: string | null;
-  /** Still on an admin-issued temporary password (see Gestão de Acesso → Utilizadores). */
-  mustChangePassword?: boolean;
   availability: { dayOfWeek: number; startTime: string; endTime: string }[];
 };
 
@@ -36,13 +36,15 @@ export type DayHours = { start: string; end: string };
 export type FormValues = {
   name: string; role: UiRole; jobTitle: string; specialty: string;
   phone: string; email: string;
+  /** Only used when creating a user (`withPassword`); never part of the edit body — see toApiBody. */
+  password: string; confirm: string;
   days: number[]; hours: Record<number, DayHours>;
 };
 
 export const DEFAULT_DAY_HOURS: DayHours = { start: "08:00", end: "17:00" };
 
 export const BLANK_FORM: FormValues = {
-  name: "", role: "doctor", jobTitle: "", specialty: "", phone: "", email: "",
+  name: "", role: "doctor", jobTitle: "", specialty: "", phone: "", email: "", password: "", confirm: "",
   days: [1, 2, 3, 4, 5],
   hours: { 1: DEFAULT_DAY_HOURS, 2: DEFAULT_DAY_HOURS, 3: DEFAULT_DAY_HOURS, 4: DEFAULT_DAY_HOURS, 5: DEFAULT_DAY_HOURS },
 };
@@ -89,12 +91,14 @@ export function toFormValues(s: ApiStaff): FormValues {
     specialty: s.specialtyCode ?? "",
     phone: s.phone ?? "",
     email: s.email,
+    password: "",
+    confirm: "",
     days: [...new Set(s.availability.map((a) => a.dayOfWeek))].sort(),
     hours,
   };
 }
 
-export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving, jobTitleOptions, specialtyOptions }: {
+export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving, jobTitleOptions, specialtyOptions, withPassword }: {
   initialValues?: FormValues;
   onSave: (v: FormValues) => void;
   onCancel: () => void;
@@ -102,6 +106,9 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
   saving?: boolean;
   jobTitleOptions: ParamOption[];
   specialtyOptions: ParamOption[];
+  /** Create flow: also asks the admin to set the new user's password (with confirmation). The edit
+   * form leaves it out — passwords are changed with "Alterar senha" on the user's row. */
+  withPassword?: boolean;
 }) {
   const [form, setForm] = useState<FormValues>(initialValues ?? BLANK_FORM);
   const [errs, setErrs] = useState<Record<string, string>>({});
@@ -138,6 +145,10 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
     if (!form.name.trim()) e2.name = "Nome é obrigatório";
     if (!form.phone.trim()) e2.phone = "Telefone é obrigatório";
     if (!form.email.trim()) e2.email = "Email é obrigatório";
+    if (withPassword) {
+      if (!isValidPassword(form.password)) e2.password = `A palavra-passe deve ter ${PASSWORD_RULE_SUMMARY}.`;
+      else if (form.password !== form.confirm) e2.confirm = "As palavras-passe não coincidem.";
+    }
     if (Object.keys(e2).length) { setErrs(e2); return; }
     onSave(form);
   }
@@ -180,6 +191,21 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
         <Field label="Email" required error={errs.email}>
           <input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="nome@cap.cv" className={inputCls} />
         </Field>
+
+        {withPassword && (
+          <div className="col-span-2">
+            <NewPasswordFields
+              password={form.password}
+              confirm={form.confirm}
+              onChange={({ password, confirm }) => {
+                setForm((f) => ({ ...f, password, confirm }));
+                setErrs((prev) => ({ ...prev, password: "", confirm: "" }));
+              }}
+              inputCls={inputCls}
+              errors={{ password: errs.password, confirm: errs.confirm }}
+            />
+          </div>
+        )}
 
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-2">Dias e Horário de Trabalho</label>

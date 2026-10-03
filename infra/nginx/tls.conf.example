@@ -1,9 +1,17 @@
 # TLS server — NOT active. Enable once the domain exists and certs are in infra/nginx/certs/
 # (fullchain.pem + privkey.pem):
 #   1. cp infra/nginx/tls.conf.example infra/nginx/conf.d/tls.conf
-#   2. replace every YOUR_DOMAIN below
-#   3. turn conf.d/app.conf's server body into `return 301 https://$host$request_uri;`
-#   4. docker compose ... restart nginx
+#   2. replace every YOUR_DOMAIN below (sed 's/YOUR_DOMAIN/cap360.tech/g')
+#   3. docker compose ... restart nginx
+# Leave conf.d/app.conf as is: the :80 block below wins for requests to the domain, while app.conf's
+# default server keeps answering by IP / 127.0.0.1 — scripts/vps/deploy.sh probes
+# http://127.0.0.1/health and needs a 200 there, not a redirect.
+server {
+  listen 80;
+  server_name YOUR_DOMAIN;
+  return 301 https://$host$request_uri;
+}
+
 server {
   listen 443 ssl;
   server_name YOUR_DOMAIN;

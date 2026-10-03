@@ -19,8 +19,11 @@
 
 > **Status 2026-10-03:** pipeline, scripts and configs are written; `scripts/vps/deploy.sh` was
 > rehearsed locally against Docker Desktop (migrate → up → health check → forced-failure rollback,
-> see §0.8). **No VPS and no domain exist yet**, so nothing has run against a real server or on
-> GitHub Actions. The Kubernetes material further down is superseded by this for the first launch.
+> see §0.8). **The VPS now exists** (Hostinger KVM 2, Ubuntu 24.04, `179.198.220.184`; hardened, Docker +
+> certbot installed, `deploy` user and `/opt/cap360-*` created — see [VPS_CONFIG.md](VPS_CONFIG.md)) and the
+> domain `cap360.tech` points at it with a Let's Encrypt cert already issued (§0.7). Still never run: the GitHub Actions
+> workflows and the first deploy to the box. The Kubernetes material further down is superseded by this
+> for the first launch.
 
 Staging and production share **one VPS** and are fully separate stacks: own directory, own compose
 project name (hence own volumes and containers), own `.env.prod`, own image-tag prefix.
@@ -214,14 +217,21 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
   happens in the GitHub runner's `docker build`; re-run the workflow if it flakes).
 - CI runs Node 22 (pnpm 11 in `package.json` needs ≥ 22.13) while the Docker images run Node 20.
 
-### 0.7 When the domain exists (enable HTTPS)
-1. Point DNS at the VPS; obtain certs (e.g. certbot) into `infra/nginx/certs/` as `fullchain.pem` +
-   `privkey.pem`.
-2. `cp infra/nginx/tls.conf.example infra/nginx/conf.d/tls.conf`, replace `YOUR_DOMAIN`, and turn
-   `conf.d/app.conf`'s server body into `return 301 https://$host$request_uri;`.
-3. Update `.env.prod` (`WEB_URL`, `ALLOWED_ORIGINS` → `https://<domain>`) and the `PUBLIC_APP_URL` /
-   `STAGING_PUBLIC_APP_URL` variable, then redeploy (the web image bakes the URL in at build time, so
-   it must be rebuilt). Staging on :8443 needs its own server block/certs — not covered yet.
+### 0.7 Domain and HTTPS — `cap360.tech` (prod)
+Domain `cap360.tech` was claimed on 2026-10-03; **prod = `https://cap360.tech`**, staging stays on
+`http://<vps-ip>:8080` (it can get `staging.cap360.tech` + a `:8443` cert later). The A record is set and the cert was issued on
+2026-10-03 (expires 2027-01-01, certbot renews it). The exact order of work, with the certbot
+renewal hooks, is in [VPS_CONFIG.md](VPS_CONFIG.md) Phase 9. In short:
+1. DNS `A @ → <vps-ip>`; issue the cert with `certbot certonly --standalone -d cap360.tech` (certbot is
+   already installed on the VPS) while nothing listens on :80, and copy `fullchain.pem` + `privkey.pem`
+   into `/opt/cap360-prod/infra/nginx/certs/` (a certbot deploy hook does this on every renewal).
+2. `sed 's/YOUR_DOMAIN/cap360.tech/g' infra/nginx/tls.conf.example > infra/nginx/conf.d/tls.conf`. **Do not
+   edit `conf.d/app.conf`**: `tls.conf` carries the :80 → :443 redirect for the domain, while `app.conf`'s
+   default server must keep answering `127.0.0.1/health` with 200 for `deploy.sh` (a blanket 301 there fails
+   every deploy's health check) — and the tracked file stays unmodified so `git checkout` on deploy is clean.
+3. `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://cap360.tech`; repo variable `PUBLIC_APP_URL` =
+   `https://cap360.tech`, set **before** the first prod build (the web image bakes the URL in, so changing
+   it later means a rebuild).
 
 ### 0.8 Verification status and known gaps
 - **Rehearsed locally (Docker Desktop, 2026-10-03):** `deploy.sh` end to end against a throwaway
@@ -619,3 +629,18 @@ Never commit `.env.production` to the repository. Use `1Password` or `Vault` for
 ---
 
 *CAP 360 · Deployment Guide v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
+
+## e-Fatura (DNRE) — go-live checklist
+
+1. In the Plataforma Eletrónica: adesão, certificates, *Proprietário de Software* (software code,
+   transmitter, **OAuth Redirect URI**), LED, emitter (see `EFATURA_INTEGRATION.docx`).
+2. The Redirect URI must be the public https URL that reaches the API's callback through the web
+   proxy: `https://<web-host>/api/efatura/oauth/callback`. The same string goes into
+   *Configurações → Integrações → E-Fatura CV → Redirect URI*.
+3. Redis must be available (OAuth state, access-token cache, queue) and `FIELD_ENCRYPTION_KEY` set.
+4. Configure in the UI as admin, upload the certificate, press *Autorizar ligação*, start in
+   **Homologação** (repository 2). To smoke-test in Principal without legal effect, switch on
+   *Marcar documentos como amostra* (DNRE deletes specimens after 24 h).
+5. The first invoice number of a (year, LED, type) is 1. If the LED was already used this year by
+   another tool, seed `efatura_counters.lastNumber` with its last number before enabling.
+6. Optional overrides (tests/staging only): `EFATURA_BASE_URL`, `EFATURA_IAM_URL`.

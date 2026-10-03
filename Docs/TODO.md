@@ -119,9 +119,9 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] PDF receipt generation (`generateReceiptPdf`, `pdfkit`) + R2 upload, with a placeholder-URL fallback when R2 isn't configured
 - [x] Auto-create draft invoice when an appointment's status → `completed`
 - [x] `recordPayment` runs insert+resum+status-update in one transaction, with a guard against `amountPaid` exceeding the invoice total
-- [x] `POST /invoices/:id/cancel` — rejects an already-paid invoice, idempotent on already-cancelled, triggers the (pre-existing but previously untriggered) E-Fatura cancel job when applicable
+- [x] `POST /invoices/:id/cancel` — rejects an already-paid invoice, idempotent on already-cancelled, voids or reverses the invoice's fiscal documents at DNRE (FDC event / credit note) in the same transaction
 - [x] Overdue-invoice detection — a pre-existing weekly job already emailed a digest of overdue invoices, but nothing ever set that status; it now marks `issued`/`partially_paid` invoices past `dueDate` as `overdue` first
-- [x] E-Fatura (Cabo Verde tax authority) submission via BullMQ queue + retry, with its own processor test suite
+- [~] E-Fatura direct integration with DNRE (`modules/M6a-efatura-direct-integration.md`): signed XML (XAdES-BES), OAuth2 + PKCE, FTE/FRE/TVE + RCE per payment, FDC/NCE voids, gap-free numbering, sweeper — validated against the official XSD and sample documents; **not yet exercised on Homologação**, offline/contingency mode not implemented, IVA/exemption treatment to confirm with the accountant
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
 - [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables
@@ -357,6 +357,11 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   refuse everything except `GET /staff/me` and `PATCH /staff/me/password` until the user sets their
   own; `POST /staff/:id/reset-password` re-issues one (and cuts off an already-open session). See
   `API-SPEC.md` §7.
+- [x] Fix (2026-10-03): the first-login password change always failed with "Palavra-passe atual
+  incorreta" in dev — `SessionAuthGuard`'s `AUTH_BYPASS` branch ignored the login cookie and ran every
+  request as the seeded admin, so the change was verified against the admin's password. The bypass now
+  applies only when there is no valid session (a stale cookie or deactivated account still falls back to
+  the admin); production is unaffected. Covered by new guard unit tests and the e2e spec's full-change test.
 - [x] Room/equipment conflict detection (see M1 — same underlying fix)
 - [x] Staff deactivation — `DELETE /staff/:id` (admin-only, self-deactivation blocked), soft-deletes via the
   `deletedAt` column that already existed and was already used by every staff read path but had no write

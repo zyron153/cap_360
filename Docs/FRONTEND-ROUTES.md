@@ -20,10 +20,17 @@ Next.js App Router routes for the `apps/web` application.
 
 | Path | File | Description |
 |---|---|---|
-| `/login` | `(auth)/login/page.tsx` | Real email + password form — posts to `/api/auth/login` |
-| `/change-password` | `(auth)/change-password/page.tsx` | First-login screen for accounts with an admin-issued temporary password — login redirects here when `staff.mustChangePassword`; `(app)/password-change-gate.tsx` redirects any in-app URL here too. **Not public:** needs the session issued at login (the middleware doesn't list it in `PUBLIC_PATHS`). Calls `PATCH /staff/me/password`, then hard-navigates to `?next=` (same-origin paths only) |
+| `/login` | `(auth)/login/page.tsx` | Real email + password form (show/hide button on the password field) — posts to `/api/auth/login` |
+| `/change-password` | `(auth)/change-password/page.tsx` | First-login screen for accounts with an admin-issued temporary password — login redirects here when `staff.mustChangePassword`; `(app)/password-change-gate.tsx` redirects any in-app URL here too. **Not public:** needs the session issued at login (the middleware doesn't list it in `PUBLIC_PATHS`). Calls `PATCH /staff/me/password`, then hard-navigates to `?next=` (same-origin paths only). Every field has a show/hide button, and the password rules (10+ characters, uppercase, digit, differs from the temporary one, confirmation matches) are listed up front and tick off live as the user types |
 | `/forgot-password` | `(auth)/forgot-password/page.tsx` | Not in the original doc — added 2026-08-31 with the Keycloak removal |
-| `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email |
+| `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email; same show/hide buttons and live rules list as `/change-password`. The same pair also backs Settings → Alterar Palavra-passe. Shared pieces: `components/ui/password-input.tsx`, `components/ui/password-checklist.tsx`, `lib/password-policy.ts` (mirrors the API's policy — the API stays the source of truth) |
+
+### Error pages
+
+| Scope | File | Behaviour |
+|---|---|---|
+| Whole app | `app/not-found.tsx` | 404 card ("Página não encontrada") with an **Ir para o login** button → `/login`. Full-screen (`fixed inset-0`), so it also hides the `(app)` sidebar/topbar |
+| `(app)` pages | `(app)/error.tsx` | Re-exports the same 404 card as the error boundary. A stale/invalid session passes the middleware's cookie-presence check, the API answers 401 and pages then crash on the error object (e.g. the dashboard's `todayAppts.filter`) — the user gets the 404 + login button instead of the raw crash. Side effect: any runtime error in an `(app)` page shows this card; the proper fix is for the query functions to throw on `!res.ok` and send 401s to `/login` |
 
 ❌ No `/login/callback` page, and no `apps/web/app/api/auth/*` Route Handlers at all anymore — the
 old OAuth/PKCE exchange with Keycloak is gone. `/api/auth/*` now reaches the API's own real

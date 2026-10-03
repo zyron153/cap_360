@@ -9,7 +9,7 @@
 
 ## 0. Executive Summary
 
-CAP 360 is meaningfully further along than a prototype — the appointments engine has real distributed-lock conflict resolution, the billing/E-Fatura pipeline is a genuine integration with Cabo Verde's tax authority, and the new Financeiro module is solid, tested code. That's the good news, and it's substantial.
+CAP 360 is meaningfully further along than a prototype — the appointments engine has real distributed-lock conflict resolution, the billing/E-Fatura pipeline now speaks the real DNRE protocol (signed XML, OAuth2 + PKCE, receipts, voids) — verified against the official XSD and sample documents, but not yet against a live Homologação environment, and the new Financeiro module is solid, tested code. That's the good news, and it's substantial.
 
 The bad news is that the project is running on a PRD written for a **different client**. `Docs/PRD.md` describes "Mais Saúde CV," a multi-specialty clinic offering Cardiology, Dental, Ophthalmology, ECG/Holter/MAPA, and ultrasound imaging. The actual client — CAP, a psychology clinic — was substituted into the code's branding (name, NIF, email, address) but **not into the product requirements, the roles matrix, the security spec, or the database schema's own header comment**, all of which still describe the old business. That mismatch isn't cosmetic: ICD-10 diagnosis coding, dental service catalogues, and DICOM imaging viewers are in the roadmap for a business that does none of those things, while the roadmap has nothing to say about session notes, therapy-specific consent, or the extra sensitivity of "this person is a mental-health patient" as a fact in itself.
 
@@ -164,7 +164,7 @@ Status legend: ✅ built and wired · 🟡 partial/stubbed · ❌ not started ·
 #### M6 — Billing & Invoicing → now **Financeiro**
 - ✅ Invoice creation, line items, sequential numbering
 - ✅ Payment recording with status machine (draft → issued → partially_paid → paid), tested in `billing.service.spec.ts`
-- ✅ E-Fatura submission to the Cabo Verde tax authority via BullMQ queue + retry, with its own processor test suite
+- ✅ E-Fatura direct integration (XML + XAdES signature, OAuth2/PKCE, receipts, voids, sweeper) — schema-validated and unit-tested; awaiting a Homologação run
 - ✅ PDF receipt generation + R2 upload, with a graceful placeholder-URL fallback when R2 isn't configured
 - ✅ **New this session:** Despesas (expenses) with approval workflow, receipt upload, category tracking
 - ✅ **New this session:** Entradas (manual income) separate from invoice payments

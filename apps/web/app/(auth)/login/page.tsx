@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { Stethoscope, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { PasswordInput } from "../../../components/ui/password-input";
 
 const inputCls = "w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-[13px] text-slate-900 placeholder:text-slate-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all";
 
@@ -31,9 +32,7 @@ function LoginCard() {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.message ?? "Não foi possível iniciar sessão.");
       }
-      const { staff } = (await res.json()) as { staff: { mustChangePassword?: boolean } };
-      // Admin-issued temporary password → the user must pick their own before anything else.
-      router.push(staff.mustChangePassword ? `/change-password?next=${encodeURIComponent(next)}` : next);
+      router.push(next);
       router.refresh();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Erro desconhecido.");
@@ -94,8 +93,7 @@ function LoginCard() {
                     Esqueceu-se?
                   </a>
                 </div>
-                <input
-                  type="password"
+                <PasswordInput
                   className={inputCls}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

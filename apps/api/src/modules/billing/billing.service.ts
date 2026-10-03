@@ -5,14 +5,13 @@ import {
   BadRequestException,
   ForbiddenException,
 } from "@nestjs/common";
-import { InjectQueue } from "@nestjs/bull";
-import { Queue } from "bull";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
 import { ServicesService } from "../services/services.service";
 import { ParametrizacaoService } from "../parametrizacao/parametrizacao.service";
+import { EFaturaService } from "../efatura/efatura.service";
 import { cvDayStart, cvDayEnd } from "../../common/cabo-verde-time";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { InvoiceStatus } from "@cap/database";
@@ -36,7 +35,7 @@ export class BillingService {
     private readonly healthPlansService: HealthPlansService,
     private readonly servicesService: ServicesService,
     private readonly parametrizacaoService: ParametrizacaoService,
-    @InjectQueue("efatura") private readonly efaturaQueue: Queue,
+    private readonly efatura: EFaturaService,
   ) {}
 
   /** Nova Fatura's "sem preço definido" flow: creates the missing Service and links it back to
@@ -81,6 +80,19 @@ export class BillingService {
       subtotal: subtotal - discountAmount,
       healthPlanId: explicitHealthPlanId ?? coverage.healthPlanId,
     };
+  }
+
+  /** nextInvoiceNumber() is race-safe only up to its own transaction; two concurrent creates can
+   * still read the same COUNT. The unique index catches that, so a collision just takes the next number. */
+  private async createNumbered(build: (invoiceNumber: string) => Parameters<BillingRepository["create"]>[0]) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.repo.create(build(await this.repo.nextInvoiceNumber()));
+      } catch (e) {
+        const dup = (e as { code?: string; meta?: { target?: unknown } })?.code === "P2002" && String((e as { meta?: { target?: unknown } }).meta?.target).includes("invoiceNumber");
+        if (!dup || attempt >= 4) throw e;
+      }
+    }
   }
 
   async create(dto: CreateInvoiceDto, callerRoles: string[] = []) {
@@ -141,9 +153,13 @@ export class BillingService {
     const discounted = await this.applyHealthPlanDiscount(dto.patientId, subtotal, itemsData, dto.healthPlanId);
     subtotal = discounted.subtotal;
 
-    const invoiceNumber = await this.repo.nextInvoiceNumber();
+    // The fiscal-document row is created in the same insert as the invoice (atomic); the job that
+    // sends it is queued afterwards, and the sweeper covers a failed enqueue.
+    const issuedAt = new Date();
+    const { enabled, goLiveAt } = await this.efatura.reporting();
+    const report = enabled && (!goLiveAt || issuedAt >= goLiveAt);
 
-    const invoice = await this.repo.create({
+    const invoice = await this.createNumbered((invoiceNumber) => ({
       invoiceNumber,
       patient: { connect: { id: dto.patientId } },
       ...(dto.appointmentId
@@ -155,22 +171,14 @@ export class BillingService {
       subtotal,
       total: subtotal,
       status: "issued",
-      issuedAt: new Date(),
+      issuedAt,
       notes: dto.notes,
       dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
       items: { create: itemsData },
-    });
+      ...(report ? { efaturaSubmissions: { create: { purpose: "issue" } } } : {}),
+    }));
 
-    // Create pending submission record then enqueue (fire-and-forget)
-    await this.prisma.eFaturaSubmission.create({
-      data: { invoiceId: invoice.id, status: "pending" },
-    });
-    await this.efaturaQueue.add(
-      "submit",
-      { invoiceId: invoice.id },
-      { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
-    );
-
+    for (const s of invoice.efaturaSubmissions) await this.efatura.enqueue(s.id);
     return invoice;
   }
 
@@ -204,7 +212,7 @@ export class BillingService {
         take: limit,
         include: {
           patient: { select: { id: true, fullName: true } },
-          efaturaSubmission: { select: { status: true, atcud: true } },
+          efaturaSubmissions: { where: { purpose: "issue" }, select: { status: true, iud: true, documentTypeCode: true } },
           appointment: { select: { id: true, scheduledAt: true, service: { select: { name: true } } } },
         },
         orderBy: { createdAt: "desc" },
@@ -215,31 +223,23 @@ export class BillingService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  /** The invoice's own fiscal document (FTE/FRE/TVE). */
   async getEFaturaStatus(invoiceId: string) {
-    const submission = await this.prisma.eFaturaSubmission.findUnique({
-      where: { invoiceId },
-    });
+    const submission = await this.efatura.primaryFor(invoiceId);
     if (!submission) throw new NotFoundException("No E-Factura submission for this invoice");
     return submission;
+  }
+
+  /** Every fiscal document sent for the invoice: the issue document, receipts, credit notes, cancel events. */
+  getEFaturaDocuments(invoiceId: string) {
+    return this.efatura.documents(invoiceId);
   }
 
   async retryEFatura(invoiceId: string) {
     const invoice = await this.repo.findByIdLite(invoiceId);
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
-
-    await this.prisma.eFaturaSubmission.upsert({
-      where: { invoiceId },
-      create: { invoiceId, status: "pending" },
-      update: { status: "pending", errorCode: null, errorMessage: null },
-    });
-
-    await this.efaturaQueue.add(
-      "submit",
-      { invoiceId },
-      { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
-    );
-
-    return { queued: true };
+    const count = await this.efatura.retry(invoiceId);
+    return { queued: count > 0, count };
   }
 
   async cancel(invoiceId: string, reason: string) {
@@ -251,27 +251,18 @@ export class BillingService {
       throw new BadRequestException("Cannot cancel a fully paid invoice");
     }
 
-    // Already reported to the tax authority — cancel it there too, via the same async
-    // queue+processor the submit/retry flow already uses.
-    const submission = await this.prisma.eFaturaSubmission.findUnique({ where: { invoiceId } });
-    if (submission?.status === "accepted" && submission.efaturaRef) {
-      await this.efaturaQueue.add(
-        "cancel",
-        { invoiceId, efaturaRef: submission.efaturaRef },
-        { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
-      );
-    }
-
-    // The generic AuditInterceptor already logs "POST invoices/:id/cancel" — this diff adds the
-    // semantic before/after (status + reason) to that same row, same mechanism as create()'s
-    // price-override diff above.
+    // The invoice and its fiscal documents change together or not at all. Nothing sent to DNRE is
+    // ever cancelled locally without telling DNRE: an authorized document is voided with an FDC
+    // event (nothing paid) or reversed with a credit note (partially paid); one that never got
+    // authorized is just cancelled here and will never be sent.
     RequestContext.setAuditDiff({ status: invoice.status }, { status: "cancelled", cancelReason: reason });
-
-    return this.repo.update(invoiceId, {
-      status: "cancelled",
-      cancelReason: reason,
-      cancelledAt: new Date(),
-    });
+    const { invoice: updated, efaturaIds } = await this.repo.cancelAtomic(
+      invoiceId,
+      { status: "cancelled", cancelReason: reason, cancelledAt: new Date() },
+      (tx) => this.efatura.planVoid(tx, invoiceId, reason, Number(invoice.amountPaid) > 0)
+    );
+    for (const id of efaturaIds) await this.efatura.enqueue(id);
+    return updated;
   }
 
   async recordPayment(invoiceId: string, dto: RecordPaymentDto, recordedById?: string) {
@@ -292,14 +283,16 @@ export class BillingService {
       );
     }
 
-    // A draft invoice (the appointment-completion auto-invoice) was never issued or submitted to
+    // A draft invoice (the appointment-completion auto-invoice) was never issued or reported to
     // e-Fatura the way create() issues a manual one — its first payment is what makes it real,
-    // so that's the point at which it needs to catch up on both, same as any other invoice.
+    // so that is when its fiscal document is created. Every payment on a reported invoice also
+    // gets a receipt row (it becomes an RCE, or turns out redundant if the invoice was an FRE/TVE).
     const wasDraft = invoice.status === "draft";
+    const { enabled, goLiveAt } = await this.efatura.reporting();
 
-    // Insert + re-sum + status update all happen inside one transaction (BillingRepository) —
-    // a concurrent payment on this invoice can't read a stale sum between the two steps.
-    const result = await this.repo.recordPaymentAtomic(
+    // Insert + re-sum + status update + fiscal rows all happen inside one transaction
+    // (BillingRepository) — a concurrent payment can't read a stale sum between the steps.
+    const { efaturaIds, ...result } = await this.repo.recordPaymentAtomic(
       invoiceId,
       {
         amount: dto.amount,
@@ -310,20 +303,11 @@ export class BillingService {
         recordedById,
       },
       Number(invoice.total),
-      wasDraft
+      wasDraft,
+      { enabled, issueNew: enabled && (!goLiveAt || new Date() >= goLiveAt) }
     );
 
-    if (wasDraft) {
-      await this.prisma.eFaturaSubmission.create({
-        data: { invoiceId, status: "pending" },
-      });
-      await this.efaturaQueue.add(
-        "submit",
-        { invoiceId },
-        { attempts: 3, backoff: { type: "exponential", delay: 5_000 } }
-      );
-    }
-
+    for (const id of efaturaIds) await this.efatura.enqueue(id);
     return result;
   }
 
@@ -343,8 +327,7 @@ export class BillingService {
     }];
     const discounted = await this.applyHealthPlanDiscount(data.patientId, data.unitPrice, itemsData);
 
-    const invoiceNumber = await this.repo.nextInvoiceNumber();
-    return this.repo.create({
+    return this.createNumbered((invoiceNumber) => ({
       invoiceNumber,
       patient: { connect: { id: data.patientId } },
       appointment: { connect: { id: data.appointmentId } },
@@ -357,7 +340,7 @@ export class BillingService {
       items: {
         create: itemsData,
       },
-    });
+    }));
   }
 
   /**

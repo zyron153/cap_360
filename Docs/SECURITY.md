@@ -43,7 +43,8 @@
   `GET /staff/me` and `PATCH /staff/me/password` (`403 PASSWORD_CHANGE_REQUIRED`), re-reading the
   flag from the DB on each request so an admin reset also cuts off an already-open session. The new
   password must differ from the temporary one. Trade-off: the admin sees the plaintext once and
-  has to relay it themselves. The dev `AUTH_BYPASS` skips this enforcement
+  has to relay it themselves. The dev `AUTH_BYPASS` only applies when there is no valid session (a
+  real login cookie always wins), so it doesn't skip this enforcement for a logged-in user
 - ✅ **Brute-force protection, real and two-layered:**
   - Per-IP: `POST /auth/login` and `POST /auth/forgot-password` are throttled to 5 req/min
     (stricter than the global 300/min default) via `@nestjs/throttler`
@@ -297,3 +298,18 @@ See also: Cabo Verde data protection authority notification requirements (consul
 ---
 
 *CAP 360 · Security & Compliance v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
+
+## e-Fatura credentials (DNRE)
+
+- The OAuth client secret, the refresh token, the signing certificate (`.p12`/PEM) and its password
+  are stored AES-256-GCM encrypted (`EncryptionService`) in `integration_efatura_secrets`. No endpoint
+  returns them — only booleans (`hasClientSecret`, `connected`, `hasCertificate`) and the
+  certificate's subject/expiry. `GET /settings` filters both e-Fatura keys out, and
+  `PATCH /settings/integration/efatura*` is rejected.
+- The platform host is fixed in code (`https://services.efatura.cv`, `https://iam.efatura.cv/...`);
+  there is no admin-editable URL, so the server cannot be pointed at an internal address.
+- Signed documents are kept encrypted (`efatura_submissions.signedXml`): they contain the patient's
+  name and NIF. Error messages shown to staff are our own; raw platform bodies are never stored or logged.
+- Only an admin can configure the integration or change the clinic's name/NIF (the emitter of every document).
+- The signing key can sign invoices in the clinic's name: protect `FIELD_ENCRYPTION_KEY` and database
+  backups accordingly, and revoke/rotate the DNRE credentials if either leaks.

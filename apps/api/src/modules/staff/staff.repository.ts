@@ -12,7 +12,6 @@ const STAFF_SELECT = {
   specialtyCode: true,
   phone: true,
   companyId: true,
-  mustChangePassword: true,
   availability: {
     where: { active: true },
     select: { dayOfWeek: true, startTime: true, endTime: true },
@@ -58,11 +57,8 @@ export class StaffRepository {
     });
   }
 
-  /** Setting a password the user chose themselves (change / reset-by-email) clears
-   * mustChangePassword; an admin-issued temporary password passes `true` so the user is forced to
-   * replace it on next login. */
-  updatePasswordHash(id: string, passwordHash: string, mustChangePassword = false) {
-    return this.prisma.staff.update({ where: { id }, data: { passwordHash, mustChangePassword } });
+  updatePasswordHash(id: string, passwordHash: string) {
+    return this.prisma.staff.update({ where: { id }, data: { passwordHash } });
   }
 
   /** Same soft-delete convention as patients.repository.ts — deletedAt, not a hard delete. Staff
@@ -101,14 +97,13 @@ export class StaffRepository {
     });
   }
 
-  /** Creates the Staff row — only called by an admin creating a user, with a generated temporary
-   * password (mustChangePassword: true). */
-  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; mustChangePassword?: boolean; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; companyId?: string | null; availability?: CreateStaffDto["availability"] }) {
+  /** Creates the Staff row — only called by an admin creating a user, with the password the admin
+   * chose (already hashed). */
+  create(dto: { fullName: string; email: string; role: StaffRole; passwordHash: string; jobTitle?: string | null; phone?: string | null; specialtyCode?: string | null; companyId?: string | null; availability?: CreateStaffDto["availability"] }) {
     const avail = dto.availability ?? [];
     return this.prisma.staff.create({
       data: {
         passwordHash: dto.passwordHash,
-        mustChangePassword: dto.mustChangePassword ?? false,
         fullName: dto.fullName,
         email: dto.email,
         role: dto.role,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PasswordSchema } from "./auth";
 
 const AvailabilitySchema = z.object({
   dayOfWeek: z.number().int().min(0).max(6),
@@ -26,18 +27,16 @@ export type CreateStaffDto = z.infer<typeof CreateStaffSchema>;
 export const UpdateStaffSchema = CreateStaffSchema.partial();
 export type UpdateStaffDto = z.infer<typeof UpdateStaffSchema>;
 
-// ─── Temporary credentials ──────────────────────────────────────────────────
-// Creating a user (POST /staff) or resetting their password (POST /staff/:id/reset-password)
-// generates a one-time temporary password, returned once to the admin who triggered it. The
-// account is flagged mustChangePassword until the user replaces it on first login (see
-// SessionAuthGuard and PATCH /staff/me/password).
+// ─── Admin-set passwords ────────────────────────────────────────────────────
+// The admin chooses the password when creating a user (POST /staff) and can change it later
+// (PATCH /staff/:id/password, "Alterar senha" in Gestão de Acesso) — no email is sent and the user
+// isn't forced to change it. Same policy as every other password (PasswordSchema in auth.ts).
 
-export interface TemporaryCredentials {
-  staffId: string;
-  fullName: string;
-  email: string;
-  temporaryPassword: string;
-}
+export const CreateStaffAccountSchema = CreateStaffSchema.extend({ password: PasswordSchema });
+export type CreateStaffAccountDto = z.infer<typeof CreateStaffAccountSchema>;
+
+export const SetStaffPasswordSchema = z.object({ password: PasswordSchema });
+export type SetStaffPasswordDto = z.infer<typeof SetStaffPasswordSchema>;
 
 // ─── Leave Requests ─────────────────────────────────────────────────────────
 

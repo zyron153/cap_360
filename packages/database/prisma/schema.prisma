@@ -65,6 +65,20 @@ enum EFaturaStatus {
   rejected
   cancelled
   error
+  /// A receipt (RCE) that turned out to be unnecessary because the invoice was reported as an
+  /// FRE/TVE (paid in full at issue) — the payment is already covered by that document.
+  not_required
+}
+
+enum EFaturaPurpose {
+  /// The invoice's own fiscal document: FTE, FRE or TVE (decided at preparation time).
+  issue
+  /// RCE — reports one payment received against an FTE.
+  receipt
+  /// NCE — corrects an authorized document (e.g. a cancelled invoice that was already reported).
+  credit_note
+  /// FDC event — voids an authorized document.
+  cancel
 }
 
 enum PaymentMethod {
@@ -163,10 +177,6 @@ model Staff {
   /// argon2id hash (see PasswordService) — never selected in a normal find; only the login path
   /// reads it explicitly.
   passwordHash  String    @db.VarChar(255)
-  /// True while passwordHash is an admin-issued temporary password (new user, or "Redefinir
-  /// senha"). SessionAuthGuard blocks every route except the change-password one until the user
-  /// sets their own, which clears it.
-  mustChangePassword Boolean @default(false)
   fullName      String    @db.VarChar(150)
   email         String    @unique @db.VarChar(150)
   role          StaffRole
@@ -204,9 +214,9 @@ model Staff {
   @@map("staff")
 }
 
-/// Legacy — the email-invitation flow was replaced by admin-created users with a temporary
-/// password (Staff.mustChangePassword). Nothing reads or writes this table any more; it is kept
-/// only so `db:push` doesn't drop rows (CI's push runs with --accept-data-loss). Safe to remove.
+/// Legacy — the email-invitation flow was replaced by admin-created users, whose password the
+/// admin sets (POST /staff, "Alterar senha"). Nothing reads or writes this table any more; it is
+/// kept only so existing rows aren't dropped. Safe to remove with its own migration.
 model StaffInvitation {
   id            String    @id @default(uuid())
   token         String    @unique @db.VarChar(64)
@@ -749,7 +759,9 @@ model Invoice {
   healthPlan        HealthPlan?        @relation(fields: [healthPlanId], references: [id])
   items             InvoiceItem[]
   payments          Payment[]
-  efaturaSubmission EFaturaSubmission?
+  /// One per fiscal document sent to DNRE for this invoice: the issue document (FTE/FRE/TVE),
+  /// one receipt (RCE) per payment, and credit notes / cancel events if it is later voided.
+  efaturaSubmissions EFaturaSubmission[]
 
   @@unique([appointmentId]) // one invoice per appointment — Postgres allows multiple NULLs, so
                             // manually-created invoices with no appointment link are unaffected
@@ -770,6 +782,11 @@ model InvoiceItem {
   quantity    Int     @default(1)
   unitPrice   Decimal @db.Decimal(10, 2)
   total       Decimal @db.Decimal(10, 2)
+  /// Tax treatment frozen when the invoice's fiscal document is prepared (e-Fatura), so a later
+  /// credit note reproduces the original lines exactly. Null until then. NA | IVA.
+  taxTypeCode            String?  @db.VarChar(3)
+  taxPercentage          Decimal? @db.Decimal(6, 3)
+  taxExemptionReasonCode Int?
 
   invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   service Service? @relation(fields: [serviceId], references: [id])
@@ -795,6 +812,7 @@ model Payment {
 
   invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   recordedBy Staff?  @relation(fields: [recordedById], references: [id])
+  efaturaReceipt EFaturaSubmission?
 
   @@unique([idempotencyKey])
   @@index([invoiceId])
@@ -803,24 +821,65 @@ model Payment {
 
 // ─── E-Factura ───────────────────────────────────────────────────────────────
 
+/// One fiscal document (DFE) or event sent to the Cabo Verde e-Fatura platform. Identity fields
+/// (number, IUD, issue time, signed XML) are assigned once at preparation and never change, so a
+/// retry re-sends exactly what was signed. onDelete: Restrict — fiscal evidence must not vanish
+/// with an invoice.
 model EFaturaSubmission {
-  id           String        @id @default(uuid())
-  invoiceId    String        @unique
-  status       EFaturaStatus @default(pending)
-  atcud        String?       @db.VarChar(100)
-  efaturaRef   String?       @db.VarChar(100)
-  errorCode    String?       @db.VarChar(50)
-  errorMessage String?       @db.VarChar(500)
-  retryCount   Int           @default(0)
-  submittedAt  DateTime?
-  acceptedAt   DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id             String         @id @default(uuid())
+  invoiceId      String
+  purpose        EFaturaPurpose @default(issue)
+  /// Set on receipts only: the payment this RCE reports. Unique so a payment is reported once.
+  paymentId      String?        @unique
+  /// Receipts, credit notes and cancel events point at the issue document they refer to.
+  referencesId   String?
+  status         EFaturaStatus  @default(pending)
+  /// 1 FTE · 2 FRE · 3 TVE · 4 RCE · 5 NCE. Null for events and until the document is prepared.
+  documentTypeCode Int?
+  year           Int?
+  ledCode        Int?
+  serie          String?        @db.VarChar(20)
+  documentNumber Int?
+  repositoryCode Int?
+  /// 45-char Identificador Único de DFE (24-char event id for cancel events).
+  iud            String?        @unique @db.VarChar(45)
+  /// Issue date/time stamped in the document (stored as an instant; the XML uses Cabo Verde time).
+  issuedAt       DateTime?
+  /// The final signed XML, AES-GCM encrypted (it contains the patient's name and NIF).
+  signedXml      String?        @db.Text
+  /// NCE / cancel reason shown to the platform.
+  reason         String?        @db.VarChar(500)
+  errorCode      String?        @db.VarChar(50)
+  errorMessage   String?        @db.VarChar(500)
+  retryCount     Int            @default(0)
+  submittedAt    DateTime?
+  /// Authorization timestamp returned by the platform.
+  acceptedAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice      Invoice             @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  payment      Payment?            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  references   EFaturaSubmission?  @relation("EFaturaRefs", fields: [referencesId], references: [id])
+  referencedBy EFaturaSubmission[] @relation("EFaturaRefs")
 
+  @@unique([year, ledCode, documentTypeCode, documentNumber])
+  @@index([invoiceId])
   @@index([status])
   @@map("efatura_submissions")
+}
+
+/// Last DocumentNumber handed out per (year, LED, document type) — the platform requires a
+/// gap-free sequence that restarts every civil year. Incremented inside the same transaction that
+/// stores the prepared document, so a rolled-back preparation never burns a number.
+model EFaturaCounter {
+  year             Int
+  ledCode          Int
+  documentTypeCode Int
+  lastNumber       Int @default(0)
+
+  @@id([year, ledCode, documentTypeCode])
+  @@map("efatura_counters")
 }
 
 // ─── Financeiro (expenses + manual income; invoice payments are the other side of Entradas) ──

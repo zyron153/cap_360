@@ -6,11 +6,12 @@ import {
   ShieldCheck, Plus, Check, Building2, Users,
   LayoutDashboard, CalendarDays, UserRound, HeartPulse,
   FlaskConical, Receipt, ClipboardList, UserCog,
-  Home, BarChart2, Settings2, SlidersHorizontal, Copy, KeyRound,
+  Home, BarChart2, Settings2, SlidersHorizontal,
 } from "lucide-react";
-import type { TemporaryCredentials } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
+import { NewPasswordFields } from "../../../components/ui/new-password-fields";
+import { PASSWORD_RULE_SUMMARY, isValidPassword } from "../../../lib/password-policy";
 import { defaultPerms, type PageKey, type PagePerms, type RolePerms, type AccessControl } from "../../../lib/access-control";
 import { StaffForm, toApiBody, toFormValues, type ApiStaff, type ParamOption } from "../../../components/staff/StaffForm";
 
@@ -72,19 +73,16 @@ function TabButton({ active, onClick, icon: Icon, children }: { active: boolean;
   );
 }
 
-function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose, pending, tone = "danger" }: {
+function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose, pending }: {
   title: string; message: string; confirmLabel: string; onConfirm: () => void; onClose: () => void; pending?: boolean;
-  /** "danger" (red) for destructive actions; "primary" (brand) for the rest. */
-  tone?: "danger" | "primary";
 }) {
-  const confirmCls = tone === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-brand-700 hover:bg-brand-800";
   return (
     <Modal open onClose={onClose} title={title}>
       <div className="p-5 flex flex-col gap-4">
         <p className="text-[13px] text-dim-600">{message}</p>
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
-          <button type="button" onClick={onConfirm} disabled={pending} className={`px-4 py-2 text-[13px] font-semibold text-white rounded-[10px] disabled:opacity-50 transition-colors ${confirmCls}`}>
+          <button type="button" onClick={onConfirm} disabled={pending} className="px-4 py-2 text-[13px] font-semibold bg-red-600 text-white rounded-[10px] hover:bg-red-700 disabled:opacity-50 transition-colors">
             {pending ? "A processar…" : confirmLabel}
           </button>
         </div>
@@ -93,45 +91,59 @@ function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose, pendin
   );
 }
 
-/** Shown once, right after a user is created or their password is reset — the API never returns the
- * plaintext again (only its hash is stored), so closing this without copying it means resetting
- * the password again. */
-function TemporaryPasswordModal({ credentials, onClose }: { credentials: TemporaryCredentials; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
+/** "Alterar senha": the admin sets a new password for a user (or for themselves). The user's open
+ * sessions are ended by the API, so they have to sign in again with the new password. */
+function ChangePasswordModal({ staff, onClose, onDone }: { staff: ApiStaff; onClose: () => void; onDone: () => void }) {
+  const { addMessage } = useMessage();
+  const [pw, setPw] = useState({ password: "", confirm: "" });
+  const [errors, setErrors] = useState<{ password?: string; confirm?: string }>({});
 
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(credentials.temporaryPassword);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard blocked (insecure origin / permissions) — the password is selectable on screen.
-    }
+  const mutation = useMutation({
+    mutationFn: () => fetch(`/api/staff/${staff.id}/password`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw.password }),
+    }).then(async (r) => {
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(typeof e.message === "string" ? e.message : "Erro ao alterar a palavra-passe"); }
+      return r.json() as Promise<{ sessionsEnded: number }>;
+    }),
+    onSuccess: ({ sessionsEnded }) => {
+      addMessage("Success", `Palavra-passe de ${staff.fullName} alterada.${sessionsEnded > 0 ? " As sessões abertas foram terminadas." : ""}`);
+      onDone();
+    },
+    onError: (e: Error) => addMessage("Error", e.message),
+  });
+
+  function submit(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (!isValidPassword(pw.password)) { setErrors({ password: `A palavra-passe deve ter ${PASSWORD_RULE_SUMMARY}.` }); return; }
+    if (pw.password !== pw.confirm) { setErrors({ confirm: "As palavras-passe não coincidem." }); return; }
+    setErrors({});
+    mutation.mutate();
   }
 
   return (
-    <Modal open onClose={onClose} title="Palavra-passe temporária" description={`${credentials.fullName} · ${credentials.email}`}>
-      <div className="p-5 flex flex-col gap-4">
-        <div className="flex items-center gap-2 bg-dim-50 border border-dim-200 rounded-[10px] px-3.5 py-3">
-          <KeyRound className="text-dim-400 shrink-0" style={{ width: 16, height: 16 }} />
-          <code data-testid="temporary-password" className="flex-1 text-[15px] font-mono font-semibold text-dim-900 tracking-wide select-all break-all">
-            {credentials.temporaryPassword}
-          </code>
-          <button type="button" onClick={copy} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-dim-200 text-dim-700 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
-            {copied ? <Check style={{ width: 13, height: 13 }} /> : <Copy style={{ width: 13, height: 13 }} />}
-            {copied ? "Copiada" : "Copiar"}
+    <Modal open onClose={onClose} title="Alterar senha" description={`${staff.fullName} · ${staff.email}`} size="lg">
+      <form onSubmit={submit} className="p-5 flex flex-col gap-4">
+        <NewPasswordFields
+          password={pw.password}
+          confirm={pw.confirm}
+          onChange={(next) => { setPw(next); setErrors({}); }}
+          inputCls={inputCls}
+          errors={errors}
+        />
+        <p className="text-[11px] text-dim-500">Se o utilizador tiver sessões abertas, serão terminadas e terá de entrar com a nova palavra-passe.</p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
+          <button type="submit" disabled={mutation.isPending} className="px-4 py-2 text-[13px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 disabled:opacity-50 transition-colors">
+            {mutation.isPending ? "A guardar…" : "Guardar palavra-passe"}
           </button>
         </div>
-        <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200/80 rounded-[10px] px-3.5 py-2.5">
-          Guarde-a agora — não volta a ser mostrada. Partilhe-a com o utilizador por um canal seguro; será obrigado/a a escolher uma palavra-passe nova no primeiro login.
-        </p>
-        <div className="flex justify-end">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 transition-colors">Concluído</button>
-        </div>
-      </div>
+      </form>
     </Modal>
   );
 }
+
 
 /* ── Organização — Company entities ──────────────────────────────────────── */
 
@@ -459,7 +471,7 @@ function ProfilesSection() {
   );
 }
 
-/* ── Utilizadores — full lifecycle: create (temporary password), edit, reset password, deactivate ── */
+/* ── Utilizadores — full lifecycle: create (admin sets the password), edit, change password, deactivate ── */
 
 function UsersSection() {
   const qc = useQueryClient();
@@ -467,9 +479,7 @@ function UsersSection() {
   const [addOpen, setAddOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<ApiStaff | null>(null);
   const [deactivating, setDeactivating] = useState<ApiStaff | null>(null);
-  const [resetting, setResetting] = useState<ApiStaff | null>(null);
-  // The one-time temporary password from the last create/reset — held in state only, never cached.
-  const [credentials, setCredentials] = useState<TemporaryCredentials | null>(null);
+  const [changingPassword, setChangingPassword] = useState<ApiStaff | null>(null);
 
   const { data: staffList = [], isLoading } = useQuery<ApiStaff[]>({
     queryKey: ["bff-staff"],
@@ -491,26 +501,12 @@ function UsersSection() {
     mutationFn: (body: object) => fetch("/api/staff", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }).then(async (r) => {
-      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao criar utilizador"); }
-      return r.json() as Promise<TemporaryCredentials>;
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(typeof e.message === "string" ? e.message : "Erro ao criar utilizador"); }
     }),
-    onSuccess: (creds) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bff-staff"] });
+      addMessage("Success", "Utilizador criado com sucesso! Já pode entrar com a palavra-passe definida.");
       setAddOpen(false);
-      setCredentials(creds);
-    },
-    onError: (e: Error) => addMessage("Error", e.message),
-  });
-
-  const resetMut = useMutation({
-    mutationFn: (id: string) => fetch(`/api/staff/${id}/reset-password`, { method: "POST" }).then(async (r) => {
-      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao redefinir a palavra-passe"); }
-      return r.json() as Promise<TemporaryCredentials>;
-    }),
-    onSuccess: (creds) => {
-      qc.invalidateQueries({ queryKey: ["bff-staff"] });
-      setResetting(null);
-      setCredentials(creds);
     },
     onError: (e: Error) => addMessage("Error", e.message),
   });
@@ -573,17 +569,11 @@ function UsersSection() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  {s.mustChangePassword && (
-                    <span title="Ainda não alterou a palavra-passe temporária" className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200/80">
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                      Senha temporária
-                    </span>
-                  )}
                   <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ${roleBadgeCls[s.role] ?? "bg-dim-100 text-dim-500"}`}>
                     {ROLE_LABELS[s.role] ?? s.role}
                   </span>
-                  <button onClick={() => setResetting(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
-                    Redefinir senha
+                  <button onClick={() => setChangingPassword(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
+                    Alterar senha
                   </button>
                   <button onClick={() => setEditingStaff(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
                     Editar
@@ -598,9 +588,10 @@ function UsersSection() {
         </div>
       )}
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar Utilizador" description="Cria a conta com uma palavra-passe temporária, que o utilizador terá de alterar no primeiro login" size="lg">
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar Utilizador" description="Cria a conta com a palavra-passe que definir. Pode alterá-la mais tarde com “Alterar senha”" size="lg">
         <StaffForm
-          onSave={(form) => createMut.mutate(toApiBody(form))}
+          withPassword
+          onSave={(form) => createMut.mutate({ ...toApiBody(form), password: form.password })}
           onCancel={() => setAddOpen(false)}
           submitLabel="Criar Utilizador"
           saving={createMut.isPending}
@@ -623,19 +614,9 @@ function UsersSection() {
         )}
       </Modal>
 
-      {resetting && (
-        <ConfirmModal
-          title="Redefinir Palavra-passe"
-          message={`Gerar uma nova palavra-passe temporária para "${resetting.fullName}"? A palavra-passe atual deixa de funcionar e o utilizador terá de escolher uma nova no próximo login.`}
-          confirmLabel="Redefinir"
-          tone="primary"
-          pending={resetMut.isPending}
-          onConfirm={() => resetMut.mutate(resetting.id)}
-          onClose={() => setResetting(null)}
-        />
+      {changingPassword && (
+        <ChangePasswordModal staff={changingPassword} onClose={() => setChangingPassword(null)} onDone={() => setChangingPassword(null)} />
       )}
-
-      {credentials && <TemporaryPasswordModal credentials={credentials} onClose={() => setCredentials(null)} />}
 
       {deactivating && (
         <ConfirmModal

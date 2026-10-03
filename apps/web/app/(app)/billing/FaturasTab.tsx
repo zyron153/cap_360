@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Plus, Receipt, ChevronLeft, ChevronRight, TrendingUp, AlertCircle, Clock, Shield } from "lucide-react";
 import type { Invoice, PaginatedResponse, EFaturaStatus, EFaturaSubmission } from "@cap/types";
+import { EFATURA_META, WAITING_REASON, docLabel } from "../../../lib/efatura";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { usePermissions } from "../hooks/use-permissions";
@@ -15,6 +16,8 @@ import { InvoiceDetailBody } from "./InvoiceDetailBody";
 
 type InvoiceRow = Invoice & {
   patient: { fullName: string | null };
+  // the invoice's own fiscal document (FTE/FRE/TVE), when it is reported to DNRE
+  efaturaSubmissions?: { status: EFaturaStatus; iud: string | null; documentTypeCode: number | null }[];
   appointment?: { id: string; scheduledAt: string; service: { name: string } } | null;
 };
 
@@ -59,30 +62,15 @@ const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rg
 
 const inputCls = "w-full border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 placeholder:text-dim-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all shadow-[0_1px_2px_rgba(0,0,0,.05)]";
 
-const EFATURA_DOT: Record<string, string> = {
-  pending:    "bg-dim-300",
-  submitting: "bg-brand-400 animate-pulse",
-  accepted:   "bg-emerald-500",
-  rejected:   "bg-red-500",
-  error:      "bg-amber-500",
-  cancelled:  "bg-dim-300",
-};
+type ListedSubmission = { status: EFaturaStatus; iud: string | null; documentTypeCode: number | null };
 
-const EFATURA_LABEL: Record<string, string> = {
-  pending:    "A aguardar emissão…",
-  submitting: "A submeter à AT…",
-  accepted:   "Aceite pela AT",
-  rejected:   "Rejeitada pela AT",
-  error:      "Erro na submissão",
-  cancelled:  "Anulada",
-};
-
-function EFaturaBadge({ status, atcud }: { status: EFaturaStatus; atcud: string | null }) {
-  const dot = EFATURA_DOT[status] ?? "bg-dim-300";
+function EFaturaBadge({ sub }: { sub: ListedSubmission }) {
+  const meta = EFATURA_META[sub.status] ?? EFATURA_META.pending;
+  const title = sub.iud ? `${docLabel({ purpose: "issue", documentTypeCode: sub.documentTypeCode })} · ${meta.label} · ${sub.iud}` : `e-Fatura: ${meta.label}`;
   return (
-    <span title={atcud ? `ATCUD: ${atcud}` : status} className="inline-flex items-center gap-1">
+    <span title={title} className="inline-flex items-center gap-1">
       <Shield className="w-3 h-3 text-dim-400" />
-      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
     </span>
   );
 }
@@ -157,10 +145,11 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
       q.state.data?.status === "submitting" || q.state.data?.status === "pending" ? 3_000 : false,
   });
 
-  const status = submission?.status ?? "pending";
+  const meta = submission ? EFATURA_META[submission.status] ?? EFATURA_META.pending : null;
+  const waiting = submission?.status === "pending" && submission.errorCode ? WAITING_REASON[submission.errorCode] : null;
 
   return (
-    <Modal open={!!invoiceId} onClose={onClose} title="Fatura Emitida" description="Documento eletrónico E-Fatura" size="lg">
+    <Modal open={!!invoiceId} onClose={onClose} title="Fatura Emitida" description="Pré-visualização da fatura" size="lg">
       {isLoading || !invoice ? (
         <div className="px-6 py-10 text-center text-[13px] text-dim-400">A carregar fatura…</div>
       ) : (
@@ -189,11 +178,17 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
             </div>
             <div className="text-right">
               <p className="text-dim-400 uppercase text-[10px] font-bold tracking-[0.06em] mb-1">Estado E-Fatura</p>
-              <p className="inline-flex items-center gap-1.5 justify-end text-dim-800 font-semibold">
-                <span className={`w-1.5 h-1.5 rounded-full ${EFATURA_DOT[status] ?? "bg-dim-300"}`} />
-                {EFATURA_LABEL[status] ?? status}
-              </p>
-              {submission?.atcud && <p className="font-mono text-dim-500 mt-0.5">ATCUD: {submission.atcud}</p>}
+              {meta ? (
+                <p className="inline-flex items-center gap-1.5 justify-end text-dim-800 font-semibold">
+                  <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+                  {meta.label}
+                </p>
+              ) : (
+                <p className="text-dim-400 font-semibold">Não comunicada</p>
+              )}
+              {submission && <p className="text-dim-500 mt-0.5">{docLabel(submission)}</p>}
+              {waiting && <p className="text-dim-500 mt-0.5">{waiting}</p>}
+              {submission?.iud && <p className="font-mono text-[10px] text-dim-500 mt-0.5 break-all">IUD: {submission.iud}</p>}
             </div>
           </div>
 
@@ -327,7 +322,7 @@ export function FaturasTab() {
       setForm(BLANK_FORM);
       setNewOpen(false);
       setPreviewInvoiceId(invoice.id);
-      addMessage("Success", "Fatura emitida e enviada para E-Fatura!");
+      addMessage("Success", "Fatura emitida!");
     },
     onError: (e: Error) => addMessage("Error", e.message),
   });
@@ -507,12 +502,7 @@ export function FaturasTab() {
                         </span>
                       </td>
                       <td className="px-5 py-3.5 border-b border-dim-100">
-                        {(inv as Invoice & { efaturaSubmission?: { status: EFaturaStatus; atcud: string | null } }).efaturaSubmission && (
-                          <EFaturaBadge
-                            status={(inv as Invoice & { efaturaSubmission?: { status: EFaturaStatus; atcud: string | null } }).efaturaSubmission!.status}
-                            atcud={(inv as Invoice & { efaturaSubmission?: { status: EFaturaStatus; atcud: string | null } }).efaturaSubmission!.atcud}
-                          />
-                        )}
+                        {inv.efaturaSubmissions?.[0] && <EFaturaBadge sub={inv.efaturaSubmissions[0]} />}
                       </td>
                       <td className="px-5 py-3.5 border-b border-dim-100">
                         <button
@@ -556,7 +546,7 @@ export function FaturasTab() {
       </div>
     </div>
 
-    <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Fatura" description="Cria e emite a fatura, submetendo automaticamente à E-Fatura" size="md">
+    <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Fatura" description="Cria e emite a fatura. Com a e-Fatura ativa, é comunicada automaticamente à DNRE." size="md">
       <div className="px-6 py-5 grid grid-cols-2 gap-4">
         <div className="col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Paciente *</label>

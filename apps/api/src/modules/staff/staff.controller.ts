@@ -1,19 +1,16 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query, Req, Header, HttpCode, HttpStatus } from "@nestjs/common";
+import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query, Req, HttpCode, HttpStatus } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { AllowDuringPasswordChange } from "../../common/decorators/allow-password-change.decorator";
-import { CreateStaffSchema, CreateStaffDto, UpdateStaffSchema, UpdateStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
+import { SESSION_COOKIE_NAME } from "../auth/session.service";
+import { CreateStaffAccountSchema, CreateStaffAccountDto, SetStaffPasswordSchema, SetStaffPasswordDto, UpdateStaffSchema, UpdateStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")
 export class StaffController {
   constructor(private readonly service: StaffService) {}
 
-  // Reachable while a temporary password is pending (see AllowDuringPasswordChange) — the web
-  // app reads mustChangePassword from here to decide whether to show /change-password.
   @Get("me")
-  @AllowDuringPasswordChange()
   findMe(@Req() req: { user: { sub: string; email?: string } }) {
     return this.service.findById(req.user.sub);
   }
@@ -22,7 +19,6 @@ export class StaffController {
   // corporate_hr) may change their own password, not just the 4 roles listed above.
   @Patch("me/password")
   @Roles("admin", "receptionist", "doctor", "nurse", "lab_tech", "corporate_hr")
-  @AllowDuringPasswordChange()
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @Req() req: { user: { sub: string } },
@@ -132,21 +128,24 @@ export class StaffController {
     return this.service.findById(id);
   }
 
-  // Creates the user with a generated temporary password, returned once in this response
-  // (hence no-store) — no email is sent. The user must change it on first login.
+  // Creates the user with the password the admin chose — no email is sent.
   @Post()
   @Roles("admin")
-  @Header("Cache-Control", "no-store")
-  create(@Body(new ZodValidationPipe(CreateStaffSchema)) dto: CreateStaffDto) {
+  create(@Body(new ZodValidationPipe(CreateStaffAccountSchema)) dto: CreateStaffAccountDto) {
     return this.service.create(dto);
   }
 
-  @Post(":id/reset-password")
+  // "Alterar senha" in Gestão de Acesso: an admin sets another user's password (or their own) and the
+  // user's open sessions end. Declared after `me/password` so "me" never reaches the :id route.
+  @Patch(":id/password")
   @Roles("admin")
   @HttpCode(HttpStatus.OK)
-  @Header("Cache-Control", "no-store")
-  resetPassword(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.resetPassword(id);
+  setPassword(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: { user: { sub: string }; cookies?: Record<string, string> },
+    @Body(new ZodValidationPipe(SetStaffPasswordSchema)) dto: SetStaffPasswordDto,
+  ) {
+    return this.service.setPassword(id, dto, req.user.sub, req.cookies?.[SESSION_COOKIE_NAME]);
   }
 
   @Patch(":id")

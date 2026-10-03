@@ -2,12 +2,10 @@ import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { PerfPanel } from "../../components/dev/PerfPanel";
 import { MessageProvider } from "../../components/ui/message-handler";
-import { PasswordChangeGate } from "./password-change-gate";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <MessageProvider>
-      <PasswordChangeGate />
       <div className="flex h-screen overflow-hidden bg-dim-100">
         <Sidebar />
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">

@@ -101,6 +101,11 @@ export class BillingController {
     return this.service.getEFaturaStatus(id);
   }
 
+  @Get(":id/efatura/documents")
+  getEFaturaDocuments(@Param("id", ParseUUIDPipe) id: string) {
+    return this.service.getEFaturaDocuments(id);
+  }
+
   @Post(":id/efatura/retry")
   @HttpCode(HttpStatus.ACCEPTED)
   retryEFatura(@Param("id", ParseUUIDPipe) id: string) {

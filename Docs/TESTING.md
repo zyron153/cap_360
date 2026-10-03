@@ -200,10 +200,13 @@ rather than the API.
 #### Temporary Password → First Login → /change-password — ✅ `apps/web/e2e/staff-temporary-password.spec.ts`
 Replaced `staff-invitation.spec.ts` when the email-invitation flow was removed. Creates a user via
 `POST /staff`, then drives the real login form with the temporary password and asserts the redirect
-to `/change-password` and that screen's client-side validation (new ≠ temporary, policy, confirmation
-match). It deliberately stops short of submitting a valid change: the dev stack runs with
-`AUTH_BYPASS`, where every request is the seeded admin, so `PATCH /staff/me/password` would be checked
-against the admin's password. The real enforcement and the full change are covered by
+to `/change-password`, the rules list shown up front (and ticking live as the new password is typed),
+the per-field show/hide buttons, and that screen's validation (new ≠ temporary, policy, confirmation
+match). A second test completes the change end to end and asserts `/api/staff/me` then reports the
+new user with `mustChangePassword: false` — a regression guard for a real bug: the dev `AUTH_BYPASS`
+used to ignore the login cookie, so the change was checked against the seeded admin's password and
+always failed with "Palavra-passe atual incorreta" (fixed in `SessionAuthGuard`, which now prefers a
+valid session over the bypass). The 403 enforcement and admin reset are covered by
 `staff-temporary-password.integration-spec.ts` (§4), which runs without the bypass.
 
 #### Manual Invoice Creation + Payment — ✅ `apps/web/e2e/manual-invoice-payment.spec.ts`
@@ -229,10 +232,13 @@ The other missing Financeiro state transition: cancelling an `issued` invoice vi
 Fatura" — the two-step inline confirmation, the required-reason gate (confirm button stays
 disabled under 3 characters), the resulting "Cancelada" banner with reason/timestamp, and that a
 cancelled invoice no longer offers "Cancelar Fatura" or "Registar Pagamento". Also asserts the
-E-Factura panel on a freshly-issued invoice — deliberately narrow: this dev environment has no
-`integration_efatura` Setting configured, so `EFaturaProcessor.handleSubmit` always leaves the
-submission on `pending` (see `efatura.processor.ts`); that's the one E-Factura state this suite can
-assert on without a real (or sandbox) tax-authority endpoint.
+that the E-Factura panel stays out of the way on a freshly-issued invoice — deliberately narrow:
+this dev environment has the e-Fatura integration switched off, so an issued invoice gets no fiscal
+document and no panel; that's the one E-Factura state this suite can assert on without a real
+(or Homologação) tax-authority endpoint. The integration itself is covered by unit tests: documents
+are built, signed and validated against DNRE's XSD pack (`apps/api/test/fixtures/efatura-xsd`), the
+signature is verified independently, and the multipart request is checked over a real local HTTP
+server (`efatura-client.http.spec.ts`).
 
 #### Health-Plan Payment Method — ✅ `apps/web/e2e/health-plan-payment.spec.ts`
 Every other spec that records a payment leaves the method on its default (cash) — none exercised

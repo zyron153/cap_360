@@ -44,13 +44,7 @@ export class AuthService {
 
     return {
       sessionId,
-      staff: {
-        id: staff.id,
-        email: staff.email,
-        fullName: staff.fullName,
-        role: staff.role,
-        mustChangePassword: staff.mustChangePassword,
-      },
+      staff: { id: staff.id, email: staff.email, fullName: staff.fullName, role: staff.role },
     };
   }
 

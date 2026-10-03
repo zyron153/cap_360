@@ -5,6 +5,39 @@
 
 ## Done
 
+- **Página 404 + botão para o login, 2026-10-03.** Pedido: aceder ao dashboard sem sessão válida
+  rebentava com `todayAppts.filter is not a function` (a API devolve o objeto de erro 401, não uma
+  lista). Agora aparece uma página 404 com o botão «Ir para o login».
+  - `app/not-found.tsx` (404 de ecrã inteiro) e `app/(app)/error.tsx` (reutiliza o mesmo cartão como
+    error boundary das páginas da app).
+  - Pendente (não pedido): as `queryFn` fazem `fetch().then(r => r.json())` sem verificar `!res.ok`;
+    a correção de raiz é lançar erro aí e redirecionar 401 → `/login`. O boundary mostra «404» para
+    qualquer erro de runtime em páginas `(app)`.
+  - Verificação: `tsc` sem erros nos ficheiros novos; o resto do `apps/web` tem 6 erros de tipo em
+    `billing/FaturasTab.tsx` e `billing/InvoiceDetailBody.tsx` (`atcud`/`efaturaRef` já não existem em
+    `EFaturaSubmission` após a reescrita e-Fatura direta) — UI de faturação por atualizar.
+  - Docs atualizados: `FRONTEND-ROUTES.md` (secção «Error pages»).
+
+- **Troca de palavra-passe no primeiro login — correção do bloqueio + olho + regras visíveis,
+  2026-10-03.** Pedido: o ecrã `/change-password` rejeitava a palavra-passe temporária correta
+  ("Palavra-passe atual incorreta"); acrescentar botão de visibilidade e mostrar as regras da nova
+  palavra-passe antes de submeter.
+  - **Causa:** em dev, o `AUTH_BYPASS` do `SessionAuthGuard` ignorava o cookie de sessão e tratava todos
+    os pedidos como o admin semeado — a troca era verificada contra a palavra-passe do admin. Reproduzido
+    contra a API real (com a sessão do utilizador novo, `GET /staff/me` devolvia o admin).
+  - **Correção:** o bypass só se aplica quando não há sessão válida; uma sessão real tem sempre
+    prioridade (cookie obsoleto ou conta desativada continuam a cair no admin). Produção não é afetada.
+  - **UI:** botão de mostrar/ocultar em cada campo de palavra-passe (login, `/change-password`,
+    `/reset-password`, Definições → Alterar Palavra-passe) e lista de regras sempre visível que fica
+    verde à medida que se escreve (10+ caracteres, maiúscula, número, diferente da temporária/atual,
+    confirmação igual). Componentes partilhados: `password-input.tsx`, `password-checklist.tsx`,
+    `lib/password-policy.ts`.
+  - Verificação: 16 testes do guard (4 novos); integração `staff-temporary-password` 8/8 sem bypass;
+    e2e `staff-temporary-password.spec.ts` 2/2 (o segundo conclui a troca de ponta a ponta e
+    garante que a sessão é a do utilizador novo); `tsc` limpo em `apps/web`; verificado no browser.
+  - Docs atualizados: `API-SPEC.md` (nota do bypass + §7), `SECURITY.md` §2.1, `TESTING.md`,
+    `FRONTEND-ROUTES.md`, `TODO.md` (M8).
+
 - **CI/CD — deploy de staging/produção por GitHub Actions + rollback automático, 2026-10-03.** Pedido:
   replicar a pipeline do DOPE STUDIO ERP (deploy por git/SSH) com checks de PR, health check +
   rollback e deploy de produção. Adaptado a este repo (imagens no GHCR, Postgres, NestJS/Next) em vez

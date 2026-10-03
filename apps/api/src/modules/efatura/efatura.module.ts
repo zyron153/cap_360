@@ -2,11 +2,23 @@ import { Module } from "@nestjs/common";
 import { BullModule } from "@nestjs/bull";
 import { EFaturaService } from "./efatura.service";
 import { EFaturaProcessor } from "./efatura.processor";
+import { EFaturaController } from "./efatura.controller";
+import { EFaturaConfigService } from "./efatura-config.service";
+import { EFaturaAuthService } from "./efatura-auth.service";
+import { EFaturaClientService } from "./efatura-client.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 
 @Module({
   imports: [BullModule.registerQueue({ name: "efatura" })],
-  providers: [EFaturaService, EFaturaProcessor, EncryptionService],
-  exports: [EFaturaService, BullModule],
+  controllers: [EFaturaController],
+  providers: [
+    EFaturaService,
+    EFaturaProcessor,
+    EFaturaConfigService,
+    EFaturaAuthService,
+    EFaturaClientService,
+    EncryptionService,
+  ],
+  exports: [EFaturaService, EFaturaConfigService, BullModule],
 })
 export class EFaturaModule {}

@@ -32,26 +32,4 @@ describe("PasswordService", () => {
       await expect(service.verify("not-a-real-hash", "anything")).resolves.toBe(false);
     });
   });
-
-  describe("generateTemporary", () => {
-    it("always meets the password policy (≥10 chars, uppercase, lowercase, digit, symbol)", () => {
-      for (let i = 0; i < 200; i++) {
-        const pw = service.generateTemporary();
-        expect(pw).toHaveLength(14);
-        expect(pw).toMatch(/[A-Z]/);
-        expect(pw).toMatch(/[a-z]/);
-        expect(pw).toMatch(/\d/);
-        expect(pw).toMatch(/[!@#$%&*?]/);
-      }
-    });
-
-    it("never contains visually ambiguous characters", () => {
-      for (let i = 0; i < 200; i++) expect(service.generateTemporary()).not.toMatch(/[0O1lI]/);
-    });
-
-    it("is different each time", () => {
-      const all = new Set(Array.from({ length: 50 }, () => service.generateTemporary()));
-      expect(all.size).toBe(50);
-    });
-  });
 });

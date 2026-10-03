@@ -1,6 +1,5 @@
-import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import { UnauthorizedException } from "@nestjs/common";
 import { SessionAuthGuard } from "./session-auth.guard";
-import { ALLOW_PASSWORD_CHANGE_KEY } from "../decorators/allow-password-change.decorator";
 
 const reflector = { getAllAndOverride: jest.fn() };
 const sessions = { get: jest.fn() };
@@ -68,39 +67,6 @@ describe("SessionAuthGuard", () => {
     expect(ctx.__request.user).toBeUndefined();
   });
 
-  describe("temporary password (mustChangePassword)", () => {
-    beforeEach(() => {
-      sessions.get.mockResolvedValue({ staffId: "s1", email: "a@cap.cv", roles: ["doctor"] });
-      staffRepo.findById.mockResolvedValue({ id: "s1", mustChangePassword: true });
-    });
-
-    function routeAllowsPasswordChange(allowed: boolean) {
-      reflector.getAllAndOverride.mockImplementation((key: string) => (key === ALLOW_PASSWORD_CHANGE_KEY ? allowed : false));
-    }
-
-    it("refuses an ordinary route with 403 PASSWORD_CHANGE_REQUIRED", async () => {
-      routeAllowsPasswordChange(false);
-      const ctx = makeContext({ cap_session: "good" });
-      const err = await guard().canActivate(ctx).catch((e) => e);
-      expect(err).toBeInstanceOf(ForbiddenException);
-      expect(err.getResponse()).toMatchObject({ code: "PASSWORD_CHANGE_REQUIRED" });
-      expect(ctx.__request.user).toBeUndefined();
-    });
-
-    it("lets the change-password route through (@AllowDuringPasswordChange)", async () => {
-      routeAllowsPasswordChange(true);
-      const ctx = makeContext({ cap_session: "good" });
-      await expect(guard().canActivate(ctx)).resolves.toBe(true);
-      expect(ctx.__request.user).toMatchObject({ sub: "s1" });
-    });
-
-    it("does not restrict anything once the flag is cleared", async () => {
-      routeAllowsPasswordChange(false);
-      staffRepo.findById.mockResolvedValue({ id: "s1", mustChangePassword: false });
-      await expect(guard().canActivate(makeContext({ cap_session: "good" }))).resolves.toBe(true);
-    });
-  });
-
   describe("dev bypass posture", () => {
     it("does NOT bypass when AUTH_BYPASS is unset, even outside production", async () => {
       delete process.env.AUTH_BYPASS;
@@ -120,6 +86,35 @@ describe("SessionAuthGuard", () => {
       const ctx = makeContext();
       await expect(guard().canActivate(ctx)).resolves.toBe(true);
       expect(ctx.__request.user).toMatchObject({ roles: ["admin"] });
+    });
+
+    describe("with AUTH_BYPASS=true and a login cookie", () => {
+      beforeEach(() => {
+        process.env.AUTH_BYPASS = "true";
+        process.env.NODE_ENV = "development";
+      });
+
+      it("uses the real session's user instead of the seeded admin", async () => {
+        sessions.get.mockResolvedValue({ staffId: "s1", email: "ana@cap.cv", roles: ["receptionist"] });
+        const ctx = makeContext({ cap_session: "good" });
+        await expect(guard().canActivate(ctx)).resolves.toBe(true);
+        expect(ctx.__request.user).toEqual({ sub: "s1", email: "ana@cap.cv", roles: ["receptionist"] });
+      });
+
+      it("falls back to the seeded admin for a stale cookie (session expired / unknown)", async () => {
+        sessions.get.mockResolvedValue(null);
+        const ctx = makeContext({ cap_session: "stale" });
+        await expect(guard().canActivate(ctx)).resolves.toBe(true);
+        expect(ctx.__request.user).toMatchObject({ roles: ["admin"] });
+      });
+
+      it("falls back to the seeded admin when the cookie's account has since been deactivated", async () => {
+        sessions.get.mockResolvedValue({ staffId: "s1", email: "ana@cap.cv", roles: ["receptionist"] });
+        staffRepo.findById.mockResolvedValue(null);
+        const ctx = makeContext({ cap_session: "good" });
+        await expect(guard().canActivate(ctx)).resolves.toBe(true);
+        expect(ctx.__request.user).toMatchObject({ roles: ["admin"] });
+      });
     });
 
     it("never bypasses in production, even if AUTH_BYPASS=true", async () => {

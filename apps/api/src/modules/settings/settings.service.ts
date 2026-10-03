@@ -1,8 +1,11 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
+import { ClinicSettingsSchema } from "@cap/types";
 import { PrismaService } from "../../prisma/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
 
-// Field names used across integration settings (E-Factura, Keycloak, WhatsApp, R2, SMTP, ...)
+const EFATURA_PREFIX = "integration_efatura";
+
+// Field names used across integration settings (Keycloak, WhatsApp, R2, SMTP, ...)
 // that hold credentials and must never be sent back to the client in plaintext.
 const MASK = "••••••••";
 const SECRET_FIELDS = ["apiKey", "clientSecret", "accessToken", "webhookToken", "appSecret", "secretKey", "secretAccessKey", "password"];
@@ -25,10 +28,30 @@ export class SettingsService {
 
   async getAll(): Promise<Record<string, unknown>> {
     const rows = await this.prisma.setting.findMany();
-    return Object.fromEntries(rows.map((r) => [r.key, maskSecrets(r.value)]));
+    // e-Fatura has its own admin-only API (EFaturaController); its settings never travel through
+    // this endpoint, which every staff role can read.
+    return Object.fromEntries(rows.filter((r) => !r.key.startsWith(EFATURA_PREFIX)).map((r) => [r.key, maskSecrets(r.value)]));
+  }
+
+  /** The clinic's name and NIF are the legal identity on every fiscal document, so only an admin
+   * may change them; everything else (hours, phone, address…) stays editable by reception. */
+  async updateClinic(body: unknown, roles: string[]) {
+    const parsed = ClinicSettingsSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.issues.map((i) => i.message).join("; "));
+    if (!roles.includes("admin")) {
+      const row = await this.prisma.setting.findUnique({ where: { key: "clinic" } });
+      const current = row?.value as { name?: string; nif?: string } | undefined;
+      const nifChanged = parsed.data.nif !== (current?.nif ?? "");
+      const nameChanged = !!current && parsed.data.name !== (current.name ?? "");
+      if (nifChanged || nameChanged) throw new ForbiddenException("Só um administrador pode alterar o nome fiscal e o NIF da clínica");
+    }
+    return this.upsert("clinic", parsed.data);
   }
 
   async upsert(key: string, value: unknown) {
+    if (key.startsWith(EFATURA_PREFIX)) {
+      throw new BadRequestException("A configuração e-Fatura é gerida em /efatura/config");
+    }
     const merged = await this.preserveMaskedSecrets(key, value);
     /* eslint-disable @typescript-eslint/no-explicit-any -- Prisma's Json column type has no
      * narrower shape to cast `merged` (already validated per-integration upstream) to here. */

@@ -146,15 +146,31 @@ export const EFaturaStatus = {
   REJECTED: "rejected",
   CANCELLED: "cancelled",
   ERROR: "error",
+  NOT_REQUIRED: "not_required",
 } as const;
 export type EFaturaStatus = (typeof EFaturaStatus)[keyof typeof EFaturaStatus];
 
+/** issue = the invoice's own DFE (FTE/FRE/TVE) · receipt = RCE per payment · credit_note = NCE ·
+ * cancel = FDC void event. */
+export type EFaturaPurpose = "issue" | "receipt" | "credit_note" | "cancel";
+
+/** One fiscal document (or event) sent to DNRE for an invoice. */
 export interface EFaturaSubmission {
   id: string;
   invoiceId: string;
+  purpose: EFaturaPurpose;
+  paymentId: string | null;
   status: EFaturaStatus;
-  atcud: string | null;
-  efaturaRef: string | null;
+  /** 1 FTE · 2 FRE · 3 TVE · 4 RCE · 5 NCE; null for events and until prepared. */
+  documentTypeCode: number | null;
+  year: number | null;
+  ledCode: number | null;
+  serie: string | null;
+  documentNumber: number | null;
+  /** The platform's unique document id (45 chars); the QR code / public reference. */
+  iud: string | null;
+  issuedAt: string | null;
+  reason: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   retryCount: number;
@@ -162,15 +178,6 @@ export interface EFaturaSubmission {
   acceptedAt: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface EFaturaConfig {
-  enabled: boolean;
-  sandbox: boolean;
-  endpoint: string;
-  nifContribuinte: string;
-  apiKey: string;
-  nomeEmpresa: string;
 }
 
 export const InvoiceListQuerySchema = z.object({

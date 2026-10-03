@@ -34,7 +34,7 @@ export class BillingRepository {
   create(data: Prisma.InvoiceCreateInput) {
     return this.prisma.invoice.create({
       data,
-      include: { items: true, payments: true },
+      include: { items: true, payments: true, efaturaSubmissions: true },
     });
   }
 
@@ -64,7 +64,7 @@ export class BillingRepository {
   findByIdLite(id: string) {
     return this.prisma.invoice.findUnique({
       where: { id },
-      select: { id: true, status: true, total: true, invoiceNumber: true },
+      select: { id: true, status: true, total: true, amountPaid: true, invoiceNumber: true },
     });
   }
 
@@ -99,15 +99,20 @@ export class BillingRepository {
    * Inserts the payment, re-sums, and updates the invoice's status/amountPaid in one DB
    * transaction — a concurrent payment on the same invoice can no longer read a stale sum
    * between the insert and the status update, since both happen inside the same transaction.
+   *
+   * With `efatura.enabled` the fiscal rows are written in that same transaction: the issue
+   * document for a draft's first payment (`issueNew`), and one receipt row per payment on any
+   * reported invoice. Returns the ids of rows worth putting on the queue.
    */
   recordPaymentAtomic(
     invoiceId: string,
     payment: { amount: number; method: PaymentMethod; reference?: string; paidAt: Date; idempotencyKey?: string; recordedById?: string },
     invoiceTotal: number,
     markIssued = false,
+    efatura: { enabled: boolean; issueNew: boolean } = { enabled: false, issueNew: false },
   ) {
     return this.prisma.$transaction(async (tx) => {
-      await tx.payment.create({
+      const created = await tx.payment.create({
         data: {
           invoiceId,
           amount: payment.amount,
@@ -133,7 +138,7 @@ export class BillingRepository {
       const amountDue = invoiceTotal - totalPaid;
       const status: InvoiceStatus = amountDue <= 0 ? "paid" : totalPaid > 0 ? "partially_paid" : "issued";
 
-      return tx.invoice.update({
+      const updated = await tx.invoice.update({
         where: { id: invoiceId },
         // pdfR2Key: null invalidates any previously-cached receipt — getReceiptUrl only
         // regenerates when it's unset, so a stale receipt showing the pre-payment balance would
@@ -143,6 +148,38 @@ export class BillingRepository {
         data: { amountPaid: totalPaid, status, pdfR2Key: null, ...(markIssued ? { issuedAt: new Date() } : {}) },
         select: { id: true, status: true, amountPaid: true, issuedAt: true },
       });
+
+      const efaturaIds: string[] = [];
+      if (efatura.enabled) {
+        let primary = await tx.eFaturaSubmission.findFirst({ where: { invoiceId, purpose: "issue" } });
+        if (!primary && markIssued && efatura.issueNew) {
+          primary = await tx.eFaturaSubmission.create({ data: { invoiceId, purpose: "issue" } });
+          efaturaIds.push(primary.id);
+        }
+        if (primary) {
+          const receipt = await tx.eFaturaSubmission.create({
+            data: { invoiceId, purpose: "receipt", paymentId: created.id, referencesId: primary.id },
+          });
+          efaturaIds.push(receipt.id);
+          // a primary parked on "awaiting payment" can now be re-evaluated
+          if (primary.status === "pending" && !efaturaIds.includes(primary.id)) efaturaIds.push(primary.id);
+        }
+      }
+      return { ...updated, efaturaIds };
+    });
+  }
+
+  /** Cancels an invoice and — in the same transaction — lets `beforeUpdate` record what that means
+   * for its fiscal documents. Returns the updated invoice and the fiscal rows to enqueue. */
+  cancelAtomic(
+    invoiceId: string,
+    data: Prisma.InvoiceUpdateInput,
+    beforeUpdate: (tx: Prisma.TransactionClient) => Promise<string[]>,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const efaturaIds = await beforeUpdate(tx);
+      const invoice = await tx.invoice.update({ where: { id: invoiceId }, data, include: { items: true, payments: true } });
+      return { invoice, efaturaIds };
     });
   }
 

@@ -2,6 +2,8 @@ export * from "./auth";
 export * from "./patient";
 export * from "./appointment";
 export * from "./billing";
+export * from "./efatura";
+export * from "./settings";
 export * from "./common";
 export * from "./health-plan";
 export * from "./public-booking";

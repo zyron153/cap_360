@@ -534,31 +534,64 @@ CREATE INDEX ON payments("invoiceId");
 
 No `card` payment method, no `received_by` staff reference — never implemented.
 
-### 6.4 `efatura_submissions`
+### 6.4 `efatura_submissions` and `efatura_counters`
+
+One row per fiscal document (or event) sent to the Cabo Verde e-Fatura platform (DNRE). An invoice
+has one `issue` document (FTE, FRE or TVE — decided when it is prepared), one `receipt` (RCE) per
+payment while it is an FTE, and — if it is later voided — a `cancel` event (FDC) or a `credit_note`
+(NCE). See `modules/M6a-efatura-direct-integration.md`.
 
 ```sql
+CREATE TYPE "EFaturaPurpose" AS ENUM ('issue', 'receipt', 'credit_note', 'cancel');
+-- EFaturaStatus: pending | submitting | accepted | rejected | cancelled | error | not_required
+
 CREATE TABLE efatura_submissions (
-  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "invoiceId"    UUID NOT NULL UNIQUE REFERENCES invoices(id) ON DELETE CASCADE,
-  status         VARCHAR(20) NOT NULL DEFAULT 'pending',
-  -- pending | submitting | accepted | rejected | cancelled | error
-  atcud          VARCHAR(100),
-  "efaturaRef"   VARCHAR(100),
-  "errorCode"    VARCHAR(50),
-  "errorMessage" VARCHAR(500),
-  "retryCount"   INT NOT NULL DEFAULT 0,
-  "submittedAt"  TIMESTAMPTZ,
-  "acceptedAt"   TIMESTAMPTZ,
-  "createdAt"    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  "updatedAt"    TIMESTAMPTZ NOT NULL
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "invoiceId"        UUID NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
+  purpose            "EFaturaPurpose" NOT NULL DEFAULT 'issue',
+  "paymentId"        UUID UNIQUE REFERENCES payments(id) ON DELETE RESTRICT,   -- receipts only
+  "referencesId"     UUID REFERENCES efatura_submissions(id),                   -- receipt/NCE/FDC -> the issue document
+  status             "EFaturaStatus" NOT NULL DEFAULT 'pending',
+  "documentTypeCode" INT,            -- 1 FTE, 2 FRE, 3 TVE, 4 RCE, 5 NCE; NULL for events / until prepared
+  year               INT,
+  "ledCode"          INT,
+  serie              VARCHAR(20),
+  "documentNumber"   INT,            -- gap-free per (year, LED, type)
+  "repositoryCode"   INT,            -- 1 Principal, 2 Homologação, 3 Teste
+  iud                VARCHAR(45) UNIQUE,   -- 45-char document id (24-char id for events)
+  "issuedAt"         TIMESTAMPTZ,    -- issue date/time stamped in the document
+  "signedXml"        TEXT,           -- final signed XML, AES-256-GCM encrypted (contains patient name/NIF)
+  reason             VARCHAR(500),
+  "errorCode"        VARCHAR(50),
+  "errorMessage"     VARCHAR(500),
+  "retryCount"       INT NOT NULL DEFAULT 0,
+  "submittedAt"      TIMESTAMPTZ,
+  "acceptedAt"       TIMESTAMPTZ,    -- authorization time returned by the platform
+  "createdAt"        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"        TIMESTAMPTZ NOT NULL,
+  UNIQUE (year, "ledCode", "documentTypeCode", "documentNumber")
 );
 
+CREATE INDEX ON efatura_submissions("invoiceId");
 CREATE INDEX ON efatura_submissions(status);
+
+CREATE TABLE efatura_counters (
+  year INT NOT NULL, "ledCode" INT NOT NULL, "documentTypeCode" INT NOT NULL,
+  "lastNumber" INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (year, "ledCode", "documentTypeCode")
+);
 ```
 
-Submission to the Cabo Verde tax authority (SAF-T CV / mw.efatura.cv) runs via a BullMQ queue with
-retry; `patient.nif` is decrypted just before building the payload. Not present in the original
-design doc at all — added when E-Fatura was actually built.
+The identity of a document (number, IUD, issue time, signed XML) is assigned once, inside the
+transaction that bumps `efatura_counters`, and never changes — a retry re-sends exactly what was
+signed. `ON DELETE RESTRICT`: fiscal evidence cannot disappear with an invoice. The old `atcud` /
+`efaturaRef` columns were dropped (ATCUD is a Portuguese concept; the Cabo Verde identifier is the
+IUD). `invoice_items` also gained `taxTypeCode`, `taxPercentage`, `taxExemptionReasonCode`: the tax
+treatment frozen when the document is prepared, so a credit note can mirror it.
+
+Integration settings live in the `settings` table: `integration_efatura` (non-secret) and
+`integration_efatura_secrets` (AES-GCM encrypted: client secret, refresh token, certificate and its
+password). Neither is returned by `GET /settings`.
 
 ### 6.5 `expenses` and `income`
 

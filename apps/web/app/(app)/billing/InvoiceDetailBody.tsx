@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield, XCircle } from "lucide-react";
 import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type InvoiceItem, type EFaturaSubmission, type UpdateInvoiceItemDto } from "@cap/types";
+import { EFATURA_META, WAITING_REASON, docLabel, docNumber } from "../../../lib/efatura";
 
 async function cancelInvoice(id: string, reason: string) {
   const res = await fetch(`/api/invoices/${id}/cancel`, {
@@ -47,10 +48,10 @@ async function getReceiptUrl(id: string) {
   return res.json() as Promise<{ url: string }>;
 }
 
-async function fetchEFaturaStatus(id: string) {
-  const res = await fetch(`/api/invoices/${id}/efatura`);
-  if (!res.ok) return null;
-  return res.json() as Promise<EFaturaSubmission>;
+async function fetchEFaturaDocuments(id: string) {
+  const res = await fetch(`/api/invoices/${id}/efatura/documents`);
+  if (!res.ok) return [];
+  return res.json() as Promise<EFaturaSubmission[]>;
 }
 
 async function retryEFatura(id: string) {
@@ -72,24 +73,59 @@ async function updateInvoiceItem(invoiceId: string, itemId: string, data: Update
   return res.json() as Promise<Invoice>;
 }
 
-const EFATURA_META: Record<string, { label: string; cls: string; dot: string }> = {
-  pending:    { label: "Pendente",    cls: "bg-dim-100 text-dim-500",                                       dot: "bg-dim-400"    },
-  submitting: { label: "A enviar…",  cls: "bg-brand-50 text-brand-700 ring-1 ring-brand-200/80",            dot: "bg-brand-500"  },
-  accepted:   { label: "Aceite",     cls: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80",      dot: "bg-emerald-500"},
-  rejected:   { label: "Rejeitada",  cls: "bg-red-50 text-red-600 ring-1 ring-red-200/80",                  dot: "bg-red-500"    },
-  cancelled:  { label: "Cancelada",  cls: "bg-dim-100 text-dim-400",                                        dot: "bg-dim-300"    },
-  error:      { label: "Erro",       cls: "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80",             dot: "bg-amber-500"  },
-};
+function EFaturaDocRow({ doc }: { doc: EFaturaSubmission }) {
+  const meta = EFATURA_META[doc.status] ?? EFATURA_META.pending;
+  const waiting = doc.status === "pending" && doc.errorCode ? WAITING_REASON[doc.errorCode] : null;
+  const number = docNumber(doc);
+  return (
+    <div className="flex flex-col gap-1.5 py-3 first:pt-0 last:pb-0 border-b border-dim-100 last:border-0">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[12px] font-semibold text-dim-900">{docLabel(doc)}</span>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.cls}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
+          {meta.label}
+        </span>
+      </div>
+      {number && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-dim-500">Número</span>
+          <span className="font-mono text-[11px] text-dim-900">{number}</span>
+        </div>
+      )}
+      {doc.iud && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[11px] text-dim-500 shrink-0">IUD</span>
+          <span className="font-mono text-[10px] text-dim-900 break-all text-right select-all">{doc.iud}</span>
+        </div>
+      )}
+      {doc.acceptedAt && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-dim-500">Autorizada em</span>
+          <span className="font-mono text-[11px] text-dim-600">{format(new Date(doc.acceptedAt), "d MMM yyyy HH:mm", { locale: pt })}</span>
+        </div>
+      )}
+      {waiting && <p className="text-[11px] text-dim-600 p-2 bg-dim-100/60 rounded-[8px]">{waiting}</p>}
+      {!waiting && doc.errorMessage && (
+        <p className="text-[11px] text-red-600 p-2 bg-red-50 rounded-[8px]">{doc.errorMessage}</p>
+      )}
+      {doc.retryCount > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-dim-500">Tentativas</span>
+          <span className="font-mono text-[11px] text-dim-500">{doc.retryCount}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function EFaturaPanel({ invoiceId }: { invoiceId: string }) {
   const qc = useQueryClient();
-  const { data: submission, isLoading } = useQuery({
+  const { data: docs = [], isLoading } = useQuery({
     queryKey: ["efatura", invoiceId],
-    queryFn: () => fetchEFaturaStatus(invoiceId),
+    queryFn: () => fetchEFaturaDocuments(invoiceId),
+    // keep polling while something is on its way; a document parked on a reason isn't moving
     refetchInterval: (q) =>
-      q.state.data?.status === "submitting" || q.state.data?.status === "pending"
-        ? 4_000
-        : false,
+      q.state.data?.some((d) => d.status === "submitting" || (d.status === "pending" && !d.errorCode)) ? 4_000 : false,
   });
 
   const retryMutation = useMutation({
@@ -100,56 +136,20 @@ function EFaturaPanel({ invoiceId }: { invoiceId: string }) {
   });
 
   if (isLoading) return null;
-  if (!submission) return null;
+  // No fiscal document means the invoice isn't reported to DNRE (integration off / before go-live).
+  if (docs.length === 0) return null;
 
-  const meta = EFATURA_META[submission.status] ?? EFATURA_META.pending;
-  const canRetry = submission.status === "error" || submission.status === "rejected";
+  const canRetry = docs.some((d) => d.status === "error" || d.status === "rejected");
 
   return (
     <div className="px-6 py-5 border-t border-dim-100 bg-dim-50/30">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <Shield className="w-3.5 h-3.5 text-dim-500" />
-          <h3 className="font-display text-[13px] font-semibold text-dim-900">E-Factura</h3>
-        </div>
-        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.cls}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-          {meta.label}
-        </span>
+      <div className="flex items-center gap-2 mb-3">
+        <Shield className="w-3.5 h-3.5 text-dim-500" />
+        <h3 className="font-display text-[13px] font-semibold text-dim-900">E-Factura</h3>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        {submission.atcud && (
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-dim-500">ATCUD</span>
-            <span className="font-mono text-[11px] text-dim-900 font-semibold">{submission.atcud}</span>
-          </div>
-        )}
-        {submission.efaturaRef && (
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-dim-500">Referência</span>
-            <span className="font-mono text-[11px] text-dim-900">{submission.efaturaRef}</span>
-          </div>
-        )}
-        {submission.submittedAt && (
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-dim-500">Enviado em</span>
-            <span className="font-mono text-[11px] text-dim-600">
-              {format(new Date(submission.submittedAt), "d MMM yyyy HH:mm", { locale: pt })}
-            </span>
-          </div>
-        )}
-        {submission.errorMessage && (
-          <p className="text-[11px] text-red-600 mt-1 p-2 bg-red-50 rounded-[8px]">
-            {submission.errorMessage}
-          </p>
-        )}
-        {submission.retryCount > 0 && (
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-dim-500">Tentativas</span>
-            <span className="font-mono text-[11px] text-dim-500">{submission.retryCount}</span>
-          </div>
-        )}
+      <div className="flex flex-col">
+        {docs.map((d) => <EFaturaDocRow key={d.id} doc={d} />)}
       </div>
 
       {canRetry && (

@@ -5,11 +5,15 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Building2, Bell, Plug, Shield,
   AlertCircle, Clock, Phone, Mail, Globe,
-  Key, Lock, Eye, EyeOff, ExternalLink, Receipt,
+  Key, Lock, Eye, EyeOff, ExternalLink,
 } from "lucide-react";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
 import { CARD, inputCls, Field } from "../../../components/settings/shared";
+import { EFaturaSettings } from "../../../components/settings/EFaturaSettings";
+import { PasswordInput } from "../../../components/ui/password-input";
+import { PasswordChecklist } from "../../../components/ui/password-checklist";
+import { PASSWORD_MAX_LENGTH, PASSWORD_RULE_SUMMARY, isValidPassword, passwordPolicyItems } from "../../../lib/password-policy";
 
 /* ── Types ───────────────────────────────────────────────── */
 
@@ -31,7 +35,7 @@ const DEFAULT_CLINIC: ClinicSettings = {
   phone:   "+238 9743583",
   email:   "capjacobvicente@gmail.com",
   website: "www.cap.cv",
-  nif:     "289959195",
+  nif:     "", // never prefill a tax id: it becomes the emitter of every fiscal document
   hours: [
     { day: "Segunda-feira", open: "08:00", close: "18:00", active: true  },
     { day: "Terça-feira",   open: "08:00", close: "18:00", active: true  },
@@ -323,135 +327,6 @@ function loadIntgConfig(): Record<string, Record<string, string>> {
   return {};
 }
 
-function EFaturaSection() {
-  const { addMessage } = useMessage();
-  const queryClient = useQueryClient();
-  const [saving, setSaving] = useState(false);
-  const [showKey, setShowKey] = useState(false);
-  const [vals, setVals] = useState({
-    enabled: false, sandbox: true,
-    apiKey: "", endpoint: "",
-  });
-
-  const { data: allSettings } = useQuery<Record<string, Record<string, string>>>({
-    queryKey: ["settings-all"],
-    queryFn: () => fetch("/api/settings").then(r => r.json()),
-    staleTime: 60_000,
-  });
-
-  // nif/nome are no longer stored here — Configurações → Clínica is the single source
-  const clinic = allSettings?.["clinic"] as unknown as { name?: string; nif?: string } | undefined;
-  const clinicReady = !!clinic?.name && !!clinic?.nif;
-
-  useEffect(() => {
-    const saved = allSettings?.["integration_efatura"];
-    if (!saved || !Object.keys(saved).length) return;
-    setVals({
-      enabled: saved.enabled === "true",
-      sandbox: saved.sandbox !== "false",
-      apiKey: saved.apiKey ?? "",
-      endpoint: saved.endpoint ?? "",
-    });
-  }, [allSettings]);
-
-  async function handleSave() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/settings/integration/efatura", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: vals.enabled ? "true" : "false",
-          sandbox: vals.sandbox ? "true" : "false",
-          apiKey: vals.apiKey,
-          endpoint: vals.endpoint,
-        }),
-      });
-      if (!res.ok) throw new Error();
-      queryClient.invalidateQueries({ queryKey: ["settings-all"] });
-      addMessage("Success", "Configuração E-Fatura guardada.");
-    } catch {
-      addMessage("Error", "Erro ao guardar configuração E-Fatura.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className={`${CARD} mt-6`}>
-      <div className="px-6 py-5 border-b border-dim-100 flex items-center gap-3">
-        <div className="w-9 h-9 bg-sky-50 rounded-[10px] flex items-center justify-center shrink-0">
-          <Receipt className="text-sky-600" style={{ width: 18, height: 18 }} />
-        </div>
-        <div>
-          <p className="text-[14px] font-semibold text-dim-900">E-Fatura CV</p>
-          <p className="text-[11px] text-dim-400">Submissão eletrónica de faturas — AT Cabo Verde</p>
-        </div>
-      </div>
-
-      <div className="px-6 py-5 flex flex-col gap-4">
-        <div className="flex items-center justify-between py-1">
-          <div>
-            <p className="text-[13px] font-semibold text-dim-800">Ativar integração</p>
-            <p className="text-[11px] text-dim-400">Submete automaticamente cada fatura emitida</p>
-          </div>
-          <Toggle checked={vals.enabled} onChange={v => setVals(p => ({ ...p, enabled: v }))} />
-        </div>
-        <div className="flex items-center justify-between py-1 border-t border-dim-100">
-          <div>
-            <p className="text-[13px] font-semibold text-dim-800">Modo sandbox</p>
-            <p className="text-[11px] text-dim-400">Usar ambiente de testes (sandbox.mw.efatura.cv)</p>
-          </div>
-          <Toggle checked={vals.sandbox} onChange={v => setVals(p => ({ ...p, sandbox: v }))} />
-        </div>
-
-        <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-[10px] border ${clinicReady ? "bg-dim-50 border-dim-100" : "bg-amber-50 border-amber-200"}`}>
-          {clinicReady ? (
-            <p className="text-[12px] text-dim-600">
-              NIF e nome usados na fatura: <strong className="text-dim-800">{clinic!.name}</strong> · <span className="font-mono">{clinic!.nif}</span>
-              <span className="text-dim-400"> — definidos em </span>
-              <button type="button" onClick={() => document.querySelector<HTMLButtonElement>('[data-settings-tab="clinic"]')?.click()} className="text-brand-600 hover:text-brand-800 font-semibold underline underline-offset-2">Clínica</button>
-            </p>
-          ) : (
-            <p className="text-[12px] text-amber-700">
-              NIF e nome da clínica ainda não estão configurados — vá a{" "}
-              <button type="button" onClick={() => document.querySelector<HTMLButtonElement>('[data-settings-tab="clinic"]')?.click()} className="font-semibold underline underline-offset-2">Clínica → Informação da Clínica</button>{" "}
-              antes de ativar a integração.
-            </p>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 pt-1 border-t border-dim-100">
-          <Field label="API Key">
-            <div className="relative">
-              <input type={showKey ? "text" : "password"} value={vals.apiKey} placeholder="••••••••"
-                onChange={e => setVals(p => ({ ...p, apiKey: e.target.value }))}
-                className={`${inputCls} pr-9`} autoComplete="off" />
-              <button type="button" onClick={() => setShowKey(s => !s)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-dim-400 hover:text-dim-700 transition-colors">
-                {showKey ? <EyeOff style={{ width: 13, height: 13 }} /> : <Eye style={{ width: 13, height: 13 }} />}
-              </button>
-            </div>
-          </Field>
-          <Field label="Endpoint produção">
-            <input type="url" value={vals.endpoint} placeholder="https://mw.efatura.cv"
-              onChange={e => setVals(p => ({ ...p, endpoint: e.target.value }))}
-              className={inputCls} />
-            <p className="text-[10px] text-dim-400 mt-1 flex items-center gap-1">
-              <ExternalLink style={{ width: 9, height: 9 }} />
-              Deixe em branco para usar o sandbox em testes
-            </p>
-          </Field>
-        </div>
-      </div>
-
-      <div className="px-6 py-4 border-t border-dim-100">
-        <SaveButton saving={saving} onClick={handleSave} />
-      </div>
-    </div>
-  );
-}
-
 function IntegrationsTab() {
   const { addMessage } = useMessage();
   const [statuses, setStatuses] = useState<Record<IntgKey, IntgStatus>>(loadIntgStatus);
@@ -597,7 +472,7 @@ function IntegrationsTab() {
         />
       )}
 
-      <EFaturaSection />
+      <EFaturaSettings />
     </>
   );
 }
@@ -677,11 +552,16 @@ function IntegrationConfigModal({
 /* ── Security Tab ─────────────────────────────────────────── */
 
 function SecurityTab() {
-  const [showPw, setShowPw] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const { addMessage } = useMessage();
+
+  const rules = [
+    ...passwordPolicyItems(newPassword),
+    { label: "Diferente da palavra-passe atual", met: newPassword.length > 0 && currentPassword.length > 0 && newPassword !== currentPassword },
+  ];
+  const confirmRule = [{ label: "As duas palavras-passe coincidem", met: confirmPassword.length > 0 && confirmPassword === newPassword }];
 
   const changePw = useMutation({
     mutationFn: async () => {
@@ -704,6 +584,7 @@ function SecurityTab() {
 
   function submitPasswordChange() {
     if (!currentPassword || !newPassword) { addMessage("Error", "Preencha todos os campos."); return; }
+    if (!isValidPassword(newPassword)) { addMessage("Error", `A nova palavra-passe deve ter ${PASSWORD_RULE_SUMMARY}.`); return; }
     if (newPassword !== confirmPassword) { addMessage("Error", "As palavras-passe novas não coincidem."); return; }
     changePw.mutate();
   }
@@ -716,18 +597,15 @@ function SecurityTab() {
         </div>
         <div className="px-5 py-5 flex flex-col gap-4 max-w-md">
           <Field label="Palavra-passe actual">
-            <div className="relative">
-              <input type={showPw ? "text" : "password"} className={inputCls} placeholder="••••••••" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" />
-              <button type="button" onClick={() => setShowPw(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-dim-400 hover:text-dim-700 transition-colors">
-                {showPw ? <EyeOff style={{ width: 14, height: 14 }} /> : <Eye style={{ width: 14, height: 14 }} />}
-              </button>
-            </div>
+            <PasswordInput className={inputCls} toggleLabel="palavra-passe atual" placeholder="••••••••" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" />
           </Field>
           <Field label="Nova palavra-passe">
-            <input type="password" className={inputCls} placeholder="Mín. 10 caracteres, maiúscula e número" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
+            <PasswordInput className={inputCls} toggleLabel="nova palavra-passe" placeholder="••••••••" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} />
+            <PasswordChecklist items={rules} className="mt-2.5" />
           </Field>
           <Field label="Confirmar nova palavra-passe">
-            <input type="password" className={inputCls} placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
+            <PasswordInput className={inputCls} toggleLabel="confirmação da palavra-passe" placeholder="••••••••" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} />
+            <PasswordChecklist items={confirmRule} className="mt-2.5" />
           </Field>
           <button
             onClick={submitPasswordChange}
