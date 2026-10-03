@@ -209,8 +209,10 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
   (add columns/tables first, remove them a release later). Prod's pre-deploy dump is the escape hatch.
 - A rollback also leaves the *new* `docker-compose.prod.yml` / nginx config in place (only images
   change). Config-breaking changes need a manual fix.
-- Backups are local to the VPS (last 7 pre-deploy dumps, prod only). There is no nightly or off-server
-  backup yet — needed before real patient data goes in (see Known gaps).
+- Backups are local to the VPS: the last 7 pre-deploy dumps (prod only) plus the nightly
+  `scripts/vps/backup.sh <staging|prod>` (cron, newest 14 kept, gzip-verified, failure leaves no file; restore
+  drilled on staging 2026-10-03). **There is still no off-server copy** — needed before real patient data goes
+  in (see Known gaps and VPS_CONFIG.md Phase 8).
 - SSH host keys aren't pinned in the workflows (`appleboy/ssh-action` accepts any host key). Pin with
   its `fingerprint:` input once the VPS exists if that matters.
 - No `COMPOSE_PARALLEL_LIMIT` / build retry: nothing is built on the VPS (the Prisma engine download
@@ -555,10 +557,11 @@ spec:
 
 ## 7. Backup Strategy
 
-🟡 **Only a pre-deploy dump exists.** `scripts/vps/deploy.sh` with `BACKUP=1` (production deploys) takes
-a local `pg_dump` before migrating and keeps the last 7 (§0.3). There is still no nightly job, no
-off-server copy (no S3 bucket) and no restoration-test job, so treat the rest of this section as a
-plan, not a running process.
+🟡 **Local only.** `scripts/vps/deploy.sh` with `BACKUP=1` (production deploys) takes a local `pg_dump`
+before migrating and keeps the last 7 (§0.3), and `scripts/vps/backup.sh <staging|prod>` (nightly cron,
+newest 14 kept) does the same on a schedule; a restore into a scratch DB was drilled on staging. There is
+still no off-server copy (no S3/B2 bucket) and no scheduled restoration-test job, so treat the S3 commands
+below as a plan, not a running process.
 
 ### 7.1 PostgreSQL
 

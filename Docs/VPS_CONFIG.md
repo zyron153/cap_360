@@ -102,12 +102,18 @@ Use a **dedicated CI key**, not `cap_vps`: `ssh-keygen -t ed25519 -N "" -f cap36
 
 ## Phase 8 — Backups (required before real patient data)
 
-- [ ] Nightly dump for prod, as `deploy` crontab (`crontab -e`) — adjust to staging while only staging exists:
+- [x] `scripts/vps/backup.sh <staging|prod>`: `pg_dump | gzip` into `./backups` (dir 700, files 600) via a `.tmp` + `gzip -t` + size check, so a failed
+  dump exits non-zero and leaves no file; keeps the newest 14 (`KEEP=`). Files are `nightly-<project>-<utc>.sql.gz` so `deploy.sh`'s own prune of its
+  pre-deploy dumps never touches them. Tested 2026-10-03 on staging, including the failure path.
+- [ ] Cron, as `deploy` (`crontab -e`) — staging now, add the prod line when prod exists:
   ```cron
-  0 2 * * * cd /opt/cap360-prod && IMAGE_TAG=$(cat .deployed-tag) docker compose -p cap360-prod --env-file .env.prod -f docker-compose.prod.yml exec -T postgres pg_dump -U cap cap | gzip > backups/nightly-$(date +\%F).sql.gz && find backups -name 'nightly-*' -mtime +14 -delete
+  15 2 * * * bash /opt/cap360-staging/scripts/vps/backup.sh staging >> /opt/cap360-staging/backups/backup.log 2>&1
+  15 3 * * * bash /opt/cap360-prod/scripts/vps/backup.sh prod >> /opt/cap360-prod/backups/backup.log 2>&1
   ```
-- [ ] Copy `backups/` **off the server** nightly (e.g. rclone → Backblaze B2, encrypted)
-- [ ] Do one restore drill into an empty scratch database (DEPLOYMENT.md §0.5)
+  The VPS clone needs the script first: `git fetch origin && git checkout --detach origin/master` once it is pushed (the next deploy does the same).
+- [ ] Copy `backups/` **off the server** nightly (e.g. rclone → Backblaze B2, encrypted) — **not done**; local-only backups die with the VPS
+- [x] Restore drill 2026-10-03 on staging: dump restored into a scratch DB → 38 tables and the admin row, then dropped. Repeat on prod
+  before real data (`gunzip -c <file> | docker compose … exec -T postgres psql -U cap -d <scratch> -v ON_ERROR_STOP=1`)
 
 ## Phase 9 — Domain `cap360.tech` + production HTTPS
 
@@ -156,4 +162,4 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
   :80 redirect to `return 301 https://$host:8443$request_uri;` (staging's :80 is host port 8080)
 - [x] `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://staging.cap360.tech:8443`
 - [x] Repo variable `STAGING_PUBLIC_APP_URL` = `https://staging.cap360.tech:8443` (baked into the web image → redeploy rebuilds it)
-- [ ] Redeploy staging, then `curl -I https://staging.cap360.tech:8443/health` → 200 and log in from a browser
+- [x] Redeploy staging, then `curl -I https://staging.cap360.tech:8443/health` → 200 and log in from a browser Verified 2026-10-03: TLS valid, login page 200, :8080 → 301 → :8443, admin login 200 with a Secure cookie. Note `https://…:8443/health` returns 307 (the old `tls.conf.example` copy has no `/health` block; deploy.sh probes 127.0.0.1:8080 so it's unaffected).
