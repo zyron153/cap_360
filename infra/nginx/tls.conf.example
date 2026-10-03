@@ -61,4 +61,10 @@ server {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_read_timeout 3600s;
   }
+
+  # Same probe as app.conf's, so the workflows' external `curl <URL>/health` reaches the API (not Next.js's 307)
+  location /health {
+    proxy_pass http://api/v1/health;
+    access_log off;
+  }
 }

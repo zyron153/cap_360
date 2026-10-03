@@ -1,13 +1,13 @@
 name: Deploy Production
 
-# Manual only, from `master`. Production is not live yet (no VPS/domain): when it is, add
-#   push:
-#     branches: [master]
-# below — the PRODUCTION environment's required reviewers will still gate every run, and the
+# Ships the `prod` branch: a push to `prod` (release = `git push origin master:prod`) or a manual
+# "Run workflow" on `prod`. The PRODUCTION environment's required reviewers gate every run, and the
 # `ci` job below is what proves the commit passed CI. Same flow as staging plus a DB backup before
 # migrating; separate directory, compose project name (cap360-prod) and volumes, so it never
 # touches the staging stack. Manual commands, rollback and the VPS checklist: Docs/DEPLOYMENT.md.
 on:
+  push:
+    branches: [prod]
   workflow_dispatch:
 
 # Never cancel a production deploy mid-flight; later runs queue behind it.
@@ -23,14 +23,14 @@ env:
   IMAGE_TAG: prod-${{ github.sha }}
 
 jobs:
-  # "Run workflow" lets you pick any branch; production only ever ships master.
+  # "Run workflow" lets you pick any branch; production only ever ships `prod`.
   guard:
-    name: Only master
+    name: Only prod
     runs-on: ubuntu-latest
     steps:
       - run: |
-          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
-            echo "::error::Production deploys must run from master (selected: $GITHUB_REF)"
+          if [ "$GITHUB_REF" != "refs/heads/prod" ]; then
+            echo "::error::Production deploys must run from prod (selected: $GITHUB_REF)"
             exit 1
           fi
 

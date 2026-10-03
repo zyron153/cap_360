@@ -87,8 +87,14 @@ Use a **dedicated CI key**, not `cap_vps`: `ssh-keygen -t ed25519 -N "" -f cap36
 
 - [x] Environment `STAGING` (created via gh 2026-10-03; CI key is `~/.ssh/cap360_ci` on the PC, authorized for `deploy`): `STAGING_VM_IP` = `179.198.220.184`, `STAGING_VM_USER` = `deploy`, `STAGING_SSH_PRIVATE_KEY`
 - [x] Repo variable `STAGING_PUBLIC_APP_URL` = `http://179.198.220.184:8080`
-- [ ] Environment `PRODUCTION` (required reviewers on) + `PRODUCTION_*` secrets + variable `PUBLIC_APP_URL` = `https://cap360.tech` (the repo variable currently still holds the old `http://127.0.0.1`)
-  — set it **before the first prod build**: the web image bakes it in, changing it later needs a rebuild
+- [x] Environment `PRODUCTION` created 2026-10-03: required reviewer `zyron153` (self-review allowed — solo), deployments limited to the `prod` branch; variable `PUBLIC_APP_URL` = `https://cap360.tech`
+- [ ] **Secrets `PRODUCTION_VM_IP`, `PRODUCTION_VM_USER`, `PRODUCTION_SSH_PRIVATE_KEY` — you set these** (the assistant's write was blocked as a secret-store write). Key: `~/.ssh/cap360_ci_prod` (already authorized for `deploy` on the VPS):
+  ```powershell
+  gh secret set PRODUCTION_VM_IP --env PRODUCTION --repo zyron153/cap_360 --body 179.198.220.184
+  gh secret set PRODUCTION_VM_USER --env PRODUCTION --repo zyron153/cap_360 --body deploy
+  Get-Content -Raw $HOME.sshcap360_ci_prod | gh secret set PRODUCTION_SSH_PRIVATE_KEY --env PRODUCTION --repo zyron153/cap_360
+  ```
+  (`PUBLIC_APP_URL` is baked into the web image, so it had to be right before the first prod build — it now is.)
 
 ## Phase 7 — First staging deploy
 
@@ -105,12 +111,12 @@ Use a **dedicated CI key**, not `cap_vps`: `ssh-keygen -t ed25519 -N "" -f cap36
 - [x] `scripts/vps/backup.sh <staging|prod>`: `pg_dump | gzip` into `./backups` (dir 700, files 600) via a `.tmp` + `gzip -t` + size check, so a failed
   dump exits non-zero and leaves no file; keeps the newest 14 (`KEEP=`). Files are `nightly-<project>-<utc>.sql.gz` so `deploy.sh`'s own prune of its
   pre-deploy dumps never touches them. Tested 2026-10-03 on staging, including the failure path.
-- [ ] Cron, as `deploy` (`crontab -e`) — staging now, add the prod line when prod exists:
+- [x] Cron, as `deploy` (`crontab -e`) — **staging installed 2026-10-03** (02:15 UTC, proven under real cron); add the prod line when prod exists:
   ```cron
   15 2 * * * bash /opt/cap360-staging/scripts/vps/backup.sh staging >> /opt/cap360-staging/backups/backup.log 2>&1
   15 3 * * * bash /opt/cap360-prod/scripts/vps/backup.sh prod >> /opt/cap360-prod/backups/backup.log 2>&1
   ```
-  The VPS clone needs the script first: `git fetch origin && git checkout --detach origin/master` once it is pushed (the next deploy does the same).
+  The staging clone is at `af19daf` (has the script); the next deploy re-checks out its own commit anyway.
 - [ ] Copy `backups/` **off the server** nightly (e.g. rclone → Backblaze B2, encrypted) — **not done**; local-only backups die with the VPS
 - [x] Restore drill 2026-10-03 on staging: dump restored into a scratch DB → 38 tables and the admin row, then dropped. Repeat on prod
   before real data (`gunzip -c <file> | docker compose … exec -T postgres psql -U cap -d <scratch> -v ON_ERROR_STOP=1`)
@@ -136,9 +142,11 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
   chmod +x pre/cap360.sh post/cap360.sh deploy/cap360.sh
   certbot renew --dry-run
   ```
-- [x] Prod clone done (Phase 5). Still to do: `.env.prod` with its **own** secrets,
-  `WEB_URL` / `ALLOWED_ORIGINS` = `https://cap360.tech`, no `HTTP_PORT`/`HTTPS_PORT` (defaults 80/443)
-- [ ] Seed the certs into the clone, then enable TLS (no edit to the tracked `app.conf` — keep it untouched so deploys' `git checkout` stays clean):
+- [x] Prod clone at `af19daf`; `.env.prod` written 2026-10-03 with its **own** generated secrets (hex), `WEB_URL` / `ALLOWED_ORIGINS` = `https://cap360.tech`, default ports 80/443.
+  `ADMIN_EMAIL` / `ADMIN_PASSWORD` are still empty — fill them just before the first seed (≥ 12 chars), then blank `ADMIN_PASSWORD` again.
+- [ ] **Back up prod `FIELD_ENCRYPTION_KEY` off the server now** (password manager) — losing it makes encrypted patient data unreadable. Read it yourself, don't paste it anywhere:
+  `ssh cap360 "grep ^FIELD_ENCRYPTION_KEY= /opt/cap360-prod/.env.prod"`
+- [x] (done 2026-10-03: cert in `infra/nginx/certs/`, `conf.d/tls.conf` from the example incl. its `/health` block) Seed the certs into the clone, then enable TLS (no edit to the tracked `app.conf` — keep it untouched so deploys' `git checkout` stays clean):
   ```bash
   cd /opt/cap360-prod && mkdir -p infra/nginx/certs
   cp /etc/letsencrypt/live/cap360.tech/{fullchain,privkey}.pem infra/nginx/certs/
@@ -146,7 +154,7 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
   ```
   The `tls.conf` carries the `cap360.tech` :80 → :443 redirect; `app.conf`'s default server still answers by IP, which is what
   `deploy.sh`'s health probe (`curl http://127.0.0.1/health`) needs.
-- [ ] First prod deploy (Run workflow → Deploy Production, approve), seed the admin, then
+- [ ] First prod deploy (`git push origin master:prod`, or Run workflow → Deploy Production on `prod`; approve), seed the admin, then
   `curl -I https://cap360.tech/health` → 200 and `curl -I http://cap360.tech` → 301
 - [ ] Once prod is live, allow only what's needed: if staging never gets TLS, close `8443`: `ufw delete allow 8080,8443/tcp && ufw allow 8080/tcp`
 - [ ] Pin the host key in the deploy workflows (`fingerprint:` input of `appleboy/ssh-action`): `ssh-keyscan -t ed25519 179.198.220.184 | ssh-keygen -lf -` (should match the ED25519 fingerprint in the table above)

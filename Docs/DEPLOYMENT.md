@@ -34,7 +34,7 @@ project name (hence own volumes and containers), own `.env.prod`, own image-tag 
 | Compose project (`-p`) | `cap360-staging` | `cap360-prod` |
 | nginx host ports | **8080** / 8443 (`HTTP_PORT` / `HTTPS_PORT` in its `.env.prod`) | 80 / 443 (defaults) |
 | Image tags | `ghcr.io/<owner>/cms-{api,web}:staging-<commit sha>` | `…:prod-<commit sha>` |
-| Trigger | push to `staging`, or manual | **manual only**, from `master` |
+| Trigger | push to `staging`, or manual | push to **`prod`**, or manual on `prod` (reviewer approval every run) |
 | GitHub environment | `STAGING` | `PRODUCTION` (required reviewers) |
 
 The compose file is the same `docker-compose.prod.yml` for both. Every command passes `-p
@@ -49,14 +49,15 @@ containers. Containers are never published except nginx; service health is read 
 | Pull request to `master` / `staging` / `develop` | `ci.yml` | Lint & Typecheck · Unit Tests (incl. migration drift check) · Dependency audit · Docker build check |
 | Push to `master` / `develop` | `ci.yml` | same, minus the Docker check |
 | Push to `staging` **or** "Run workflow" | `deploy-staging.yml` | `ci` (calls `ci.yml`) → build + push images → SSH deploy |
-| "Run workflow" on `master` | `deploy-production.yml` | `guard` (master only) → `ci` → build + push → **approval** → SSH deploy with DB backup |
+| Push to `prod` **or** "Run workflow" on `prod` | `deploy-production.yml` | `guard` (prod only) → `ci` → build + push → **approval** → SSH deploy with DB backup |
 
 Deploys are gated on CI: `ci.yml` is also a reusable workflow (`workflow_call`) that both deploy
 workflows run first, so a red CI blocks the deploy and a deploy only ever ships a commit that
 passed. A push to `staging` is not in `ci.yml`'s own `push` list because `deploy-staging.yml`
-already runs it. Production is `workflow_dispatch`-only because it isn't live; to make it fire on
-merge, add `push: branches: [master]` to `deploy-production.yml` (the `PRODUCTION` reviewers still
-approve every run) and drop `master` from `ci.yml`'s `push` list so CI doesn't run twice.
+already runs it. Production ships the **`prod`** branch: release with `git push origin master:prod` (fast-forward from a green
+`master`) or "Run workflow" on `prod`. The `guard` job refuses any other ref, the `PRODUCTION` environment only
+allows deployments from `prod`, and its required reviewer approves every run. `prod` is not in `ci.yml`'s own
+`push` list because `deploy-production.yml` already runs it.
 
 **Branch protection → required status checks:** `Lint & Typecheck`, `Unit Tests`, `Dependency
 audit`, `Docker build check`.
@@ -69,7 +70,7 @@ cancelled mid-rebuild or mid-SSH.
 | Where | Name | Notes |
 |---|---|---|
 | Environment `STAGING` (secrets) | `STAGING_VM_IP`, `STAGING_VM_USER`, `STAGING_SSH_PRIVATE_KEY` | Jobs must declare `environment:` or these resolve to empty strings |
-| Environment `PRODUCTION` (secrets) | `PRODUCTION_VM_IP`, `PRODUCTION_VM_USER`, `PRODUCTION_SSH_PRIVATE_KEY` | + **Required reviewers** = the manual approval gate |
+| Environment `PRODUCTION` (secrets) | `PRODUCTION_VM_IP`, `PRODUCTION_VM_USER`, `PRODUCTION_SSH_PRIVATE_KEY` | + **Required reviewers** = the manual approval gate (created 2026-10-03: reviewer `zyron153`, self-review allowed, branch policy `master` only). Required reviewers on environments need a **public** repo or a paid plan — making this repo private on GitHub Free silently drops the gate |
 | Repo variable | `STAGING_PUBLIC_APP_URL` | e.g. `http://<vps-ip>:8080` — baked into the staging **web image** at build time and used for the non-blocking external check |
 | Repo variable | `PUBLIC_APP_URL` | e.g. `http://<vps-ip>` (later `https://<domain>`) — same, for production |
 
@@ -196,7 +197,7 @@ curl -fsS http://127.0.0.1:8080/health
 
 `--no-deps` is deliberate: it skips the `migrate` service, whose older image may not know the newer
 migrations. To redeploy an older commit through the pipeline instead, "Run workflow" on that branch
-(staging) — production only deploys the tip of `master`.
+(staging) — production only deploys the tip of `prod`.
 
 **Prod database restore** (from a pre-deploy dump): stop the api first (`dc stop api web`), then
 `gunzip -c backups/<file>.sql.gz | dc exec -T postgres psql -U cap -d cap` into an **empty** database
@@ -440,7 +441,7 @@ deploy-staging.yml     push to staging + workflow_dispatch
   ci -> build (push cms-api/cms-web:staging-<sha> to GHCR) -> deploy (environment STAGING, SSH,
   scripts/vps/deploy.sh staging)
 
-deploy-production.yml  workflow_dispatch only (production isn't live), master only
+deploy-production.yml  push to prod + workflow_dispatch, `prod` only
   guard -> ci -> build (…:prod-<sha>) -> deploy (environment PRODUCTION = manual approval, SSH,
   BACKUP=1 scripts/vps/deploy.sh prod)
 ```
