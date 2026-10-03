@@ -18,25 +18,44 @@
     `EFaturaSubmission` após a reescrita e-Fatura direta) — UI de faturação por atualizar.
   - Docs atualizados: `FRONTEND-ROUTES.md` (secção «Error pages»).
 
-- **Troca de palavra-passe no primeiro login — correção do bloqueio + olho + regras visíveis,
-  2026-10-03.** Pedido: o ecrã `/change-password` rejeitava a palavra-passe temporária correta
-  ("Palavra-passe atual incorreta"); acrescentar botão de visibilidade e mostrar as regras da nova
-  palavra-passe antes de submeter.
-  - **Causa:** em dev, o `AUTH_BYPASS` do `SessionAuthGuard` ignorava o cookie de sessão e tratava todos
-    os pedidos como o admin semeado — a troca era verificada contra a palavra-passe do admin. Reproduzido
-    contra a API real (com a sessão do utilizador novo, `GET /staff/me` devolvia o admin).
-  - **Correção:** o bypass só se aplica quando não há sessão válida; uma sessão real tem sempre
-    prioridade (cookie obsoleto ou conta desativada continuam a cair no admin). Produção não é afetada.
-  - **UI:** botão de mostrar/ocultar em cada campo de palavra-passe (login, `/change-password`,
-    `/reset-password`, Definições → Alterar Palavra-passe) e lista de regras sempre visível que fica
-    verde à medida que se escreve (10+ caracteres, maiúscula, número, diferente da temporária/atual,
-    confirmação igual). Componentes partilhados: `password-input.tsx`, `password-checklist.tsx`,
-    `lib/password-policy.ts`.
-  - Verificação: 16 testes do guard (4 novos); integração `staff-temporary-password` 8/8 sem bypass;
-    e2e `staff-temporary-password.spec.ts` 2/2 (o segundo conclui a troca de ponta a ponta e
-    garante que a sessão é a do utilizador novo); `tsc` limpo em `apps/web`; verificado no browser.
-  - Docs atualizados: `API-SPEC.md` (nota do bypass + §7), `SECURITY.md` §2.1, `TESTING.md`,
-    `FRONTEND-ROUTES.md`, `TODO.md` (M8).
+- **Gestão de Acesso — o admin define a palavra-passe do utilizador (sem convite por email nem senha
+  temporária), 2026-10-03.** Percurso: pediu-se primeiro remover o convite por email (utilizador criado
+  com senha gerada + troca forçada no primeiro login); ao testar, a troca falhava em dev e, a seguir,
+  pediu-se para remover toda a lógica de senha temporária — o admin passa a escolher a palavra-passe e
+  a poder mudá-la depois.
+  - **Criação:** `POST /staff` exige `password` (mesma política de todas as palavras-passe,
+    `PasswordSchema`: 10–72 caracteres, maiúscula, número). O formulário «Adicionar Utilizador» tem
+    palavra-passe + confirmação, botão «Gerar» (palavra-passe forte aleatória gerada no browser com
+    `crypto.getRandomValues`, revelada para se poder copiar), «Copiar», um olho por campo e a lista de
+    regras sempre visível a ficar verde ao escrever. Só o hash argon2id é guardado; a API nunca gera
+    nem devolve palavras-passe. Sem troca forçada no primeiro login.
+  - **«Alterar senha»** (substitui «Redefinir senha»): `PATCH /staff/:id/password` + modal com os mesmos
+    campos. Termina **todas as sessões abertas** desse utilizador (`SessionService.destroyAllForStaff`,
+    varrimento de `session:*` por `staffId`, sem índice por utilizador que possa dessincronizar); se o
+    admin muda a sua própria palavra-passe, a sessão atual é poupada. A alteração própria (Definições) e
+    o reset por email não terminam outras sessões.
+  - **Removido:** o convite por email (`/staff/invite`, `/staff/invitations*`, `/public/invitations*`,
+    job `send-invite`, página `/activate`), e a senha temporária (gerador no servidor,
+    `Staff.mustChangePassword` — coluna apagada pela migração `20261004000200_drop_staff_must_change_password`
+    —, bloqueio `403 PASSWORD_CHANGE_REQUIRED` no guard, página `/change-password` e o redirect na app).
+    A tabela `staff_invitations` fica no schema como modelo legado, sem uso.
+  - **Bug apanhado pelo caminho:** em dev, o `AUTH_BYPASS` do `SessionAuthGuard` ignorava o cookie de
+    sessão e tratava tudo como o admin semeado, por isso a troca de palavra-passe de um utilizador novo
+    era verificada contra a do admin («Palavra-passe atual incorreta»). Agora uma sessão real tem sempre
+    prioridade sobre o bypass (sessão terminada/cookie obsoleto/conta desativada continuam a cair no
+    admin). Produção não é afetada.
+  - **Também:** botão mostrar/ocultar e lista de regras em login, `/reset-password` e Definições →
+    Alterar Palavra-passe (`password-input.tsx`, `password-checklist.tsx`, `new-password-fields.tsx`,
+    `lib/password-policy.ts`).
+  - **Dev:** a BD de dev não segue o histórico de migrações novo, por isso o SQL da migração foi aplicado
+    à mão (`prisma db execute`), como a outra sessão fez com as migrações e-Fatura.
+  - Verificação: 102 testes unitários nos módulos tocados; `staff-admin-password.integration-spec.ts`
+    8/8 sem `AUTH_BYPASS` (BD/Redis reais, incluindo o 401 da sessão terminada); e2e
+    `staff-admin-password.spec.ts` 1/1 (criar com «Gerar» → utilizador entra → «Alterar senha» → senha
+    antiga recusada, nova aceite); `tsc` e lint limpos nos ficheiros tocados; UI vista no browser.
+  - Docs atualizados: `API-SPEC.md` (§Auth + §7), `DATABASE-SCHEMA.md` §1.2/§1.3, `FRONTEND-ROUTES.md`,
+    `SECURITY.md` §2.1, `TESTING.md`, `TODO.md` (M8), `modules/M8-staff-resource-scheduler.md`.
+    `REVIEW.md` é um registo histórico e não foi alterado.
 
 - **CI/CD — deploy de staging/produção por GitHub Actions + rollback automático, 2026-10-03.** Pedido:
   replicar a pipeline do DOPE STUDIO ERP (deploy por git/SSH) com checks de PR, health check +
@@ -68,35 +87,6 @@
     revisores; valores reais das variáveis `STAGING_PUBLIC_APP_URL`/`PUBLIC_APP_URL` (hoje placeholders
     `127.0.0.1`); preparar a VPS (checklist em `DEPLOYMENT.md` §0.4); required checks na branch protection.
   - Docs: `DEPLOYMENT.md` §0/§4/§5/§9, `CONTRIBUTING.md`, `Docs/CLAUDE.md`, `ARCHITECTURE.md`.
-
-- **Gestão de Acesso — utilizadores criados com palavra-passe temporária, sem convite por email,
-  2026-10-02.** Pedido do utilizador: remover o convite por email; ao adicionar um utilizador criar e
-  atribuir a palavra-passe; forçar a troca no primeiro login.
-  - **Criação:** `POST /staff` cria o utilizador logo, com uma palavra-passe aleatória de 14
-    caracteres (`PasswordService.generateTemporary`, `crypto.randomInt`, sem caracteres ambíguos),
-    devolvida **uma só vez** ao admin (`Cache-Control: no-store`) num modal com botão Copiar; só o
-    hash argon2id é guardado. "Redefinir senha" (`POST /staff/:id/reset-password`) volta a emitir uma.
-  - **Troca forçada:** novo `Staff.mustChangePassword`. `SessionAuthGuard` responde
-    `403 PASSWORD_CHANGE_REQUIRED` a tudo menos `GET /staff/me` e `PATCH /staff/me/password`
-    (`@AllowDuringPasswordChange()`), lendo a flag da BD em cada pedido — por isso um reset também
-    corta uma sessão já aberta. O login devolve `staff.mustChangePassword` e leva a `/change-password`
-    (nova página, não pública); `(app)/password-change-gate.tsx` cobre quem abre um URL da app
-    diretamente. A nova palavra-passe tem de ser diferente da temporária.
-  - **Removido:** `/staff/invite`, `/staff/invitations*`, `/public/invitations*`, o job `send-invite`
-    e a página `/activate`. A tabela `staff_invitations` fica no schema como modelo legado (marcado),
-    para o `db:push --accept-data-loss` do CI não a apagar — pode ser removida mais tarde.
-  - **Utilizadores existentes** não são forçados a trocar; o botão "Redefinir senha" serve para isso.
-    Keycloak não é usado no login de staff, por isso a imposição é só pela flag na app.
-  - Verificação: 102 testes unitários nos módulos tocados (novos: gerador, serviço, guard, login);
-    novo `staff-temporary-password.integration-spec.ts` (8 testes, sem `AUTH_BYPASS`, contra BD/Redis
-    reais); novo e2e `staff-temporary-password.spec.ts`; fluxo da UI conduzido num browser real
-    (criar → modal → badge → redefinir). `tsc` limpo em `apps/api`; em `apps/web` só restam tipos
-    gerados obsoletos em `.next/` da página `/activate` removida.
-  - Também neste commit (alterações já pendentes, não relacionadas): o nome da clínica na sidebar
-    passa a vir de `usePermissions()` e os itens do menu ficam ocultos enquanto as permissões carregam.
-  - Docs atualizados: `API-SPEC.md` §7/§9, `DATABASE-SCHEMA.md` §1.2/§1.3, `FRONTEND-ROUTES.md`,
-    `SECURITY.md` §2.1, `TESTING.md`, `TODO.md` (M8), `modules/M8-staff-resource-scheduler.md`.
-    `REVIEW.md` é um registo histórico e não foi alterado.
 
 - **M6 — polimento geral do Financeiro (Faturas/Despesas/Entradas/Saldos), 2026-09-27.** Pedido do
   utilizador: "polish the Financeiro feature including Faturas and everything else". Uma survey

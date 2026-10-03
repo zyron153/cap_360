@@ -9,9 +9,8 @@
 > **Error format:** `{ "statusCode": 400, "message": "...", "error": "Bad Request" }`
 > **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) makes
 > requests with **no valid login session** run as the seeded admin, for local development. A valid
-> session cookie always wins over it — so logging in as someone else in dev really is that user
-> (including the temporary-password block below); a stale cookie or a deactivated account falls back
-> to the admin.
+> session cookie always wins over it — so logging in as someone else in dev really is that user;
+> a stale/ended session or a deactivated account falls back to the admin.
 
 This document reflects the routes and body shapes that actually exist in
 `apps/api/src/modules/*/*.controller.ts` and `packages/types/src/*.ts`. Field names are the real
@@ -27,7 +26,7 @@ recover one.
 
 ```
 POST /auth/login             body: { email, password }
-                              → 200 { staff: { id, email, fullName, role, mustChangePassword } }, sets cap_session cookie
+                              → 200 { staff: { id, email, fullName, role } }, sets cap_session cookie
                               → 401 wrong credentials or unknown email (identical message either way)
                               → 401 account locked (5 failed attempts / 15min → 15min lock, per email, in Redis)
                               throttled: 5 req/min per IP (tighter than the 300/min global default)
@@ -504,17 +503,17 @@ DELETE /services/:id       roles: admin
 
 ---
 
-## 7. Staff & Temporary Passwords (M8)
+## 7. Staff & Admin-set Passwords (M8)
 
 **Controller roles (default):** admin, receptionist, doctor, nurse
 
 ```
-GET    /staff/me                                    — resolves the caller's own staff record from the session (includes mustChangePassword); reachable while a temporary password is pending
-PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below; reachable while a temporary password is pending; 400 if newPassword === currentPassword; clears mustChangePassword
+GET    /staff/me                                    — resolves the caller's own staff record from the session
+PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below; 400 if newPassword === currentPassword
 GET    /staff                                       — active staff list
 GET    /staff/:id
-POST   /staff                     roles: admin       body: CreateStaffSchema (see below) — creates the user with a generated temporary password; 409 if the email exists
-POST   /staff/:id/reset-password  roles: admin       — replaces the password with a new generated temporary one; 200
+POST   /staff                     roles: admin       body: CreateStaffAccountSchema (see below) — creates the user with the password the admin chose; 201 with the created staff; 409 if the email exists
+PATCH  /staff/:id/password        roles: admin       body: { password } — sets that user's password ("Alterar senha") and ends their open sessions; 200 { sessionsEnded }; 404 if unknown
 PATCH  /staff/:id                 roles: admin
 ```
 
@@ -522,29 +521,31 @@ PATCH  /staff/:id                 roles: admin
 Create body:
 {
   "fullName": "string (2-150)", "email": "string", "role": "admin | doctor | nurse | receptionist | lab_tech | corporate_hr",
+  "password": "string — 10-72 chars, an uppercase letter and a digit (PasswordSchema)",
   "jobTitle": "string (optional)", "phone": "string (optional)", "specialtyCode": "string (optional)",
   "companyId": "uuid (optional, corporate_hr only)",
   "availability": [ { "dayOfWeek": 0-6, "startTime": "HH:MM", "endTime": "HH:MM" } ]
 }
-
-POST /staff and POST /staff/:id/reset-password both respond (Cache-Control: no-store):
-{ "staffId": "uuid", "fullName": "string", "email": "string", "temporaryPassword": "string" }
 ```
 
-**Temporary passwords replace the old email-invitation flow** (removed — no email is sent, there is
-no `/staff/invite`, `/staff/invitations*` or `/public/invitations*`). `temporaryPassword` is 14
-random characters (`PasswordService.generateTemporary`, `crypto.randomInt`: upper + lower + digit +
-symbol, no look-alike characters) returned **once** to the admin; only its argon2id hash is stored.
-The account is flagged `Staff.mustChangePassword = true`, and `SessionAuthGuard` answers every
-authenticated request from such an account with `403 { code: "PASSWORD_CHANGE_REQUIRED" }` except
-routes marked `@AllowDuringPasswordChange()` (`GET /staff/me`, `PATCH /staff/me/password`). The flag
-is read from the DB on every request, so an admin reset also locks out a session the user already
-had open. `POST /auth/login` returns `staff.mustChangePassword` so the web app can redirect to
-`/change-password`. Changing the password (or completing the email reset flow under Authentication above) clears the
-flag. The dev `AUTH_BYPASS` doesn't skip this: it only applies when there is no valid session, so a
-logged-in user on a temporary password is still blocked in dev. ❌ No MFA/TOTP of any kind exists — that was a
-Keycloak feature (never actually enforced for pre-existing accounts even then) and has no
-replacement.
+**The admin chooses the password** — when creating a user and later with "Alterar senha" in Gestão de
+Acesso. There is no email invitation (removed: no `/staff/invite`, `/staff/invitations*` or
+`/public/invitations*`), no server-generated password and no forced change on first login (a
+temporary-password / `mustChangePassword` design existed briefly and was removed; the column is
+dropped by migration `20261004000200_drop_staff_must_change_password`). Only the argon2id hash is
+stored; the plaintext exists in the request body and nowhere else. The web form's "Gerar" button
+generates a random password in the browser (`generatePassword` in `apps/web/lib/password-policy.ts`)
+that the admin can copy and pass on.
+
+`PATCH /staff/:id/password` ends every open session of that user (`SessionService.destroyAllForStaff`,
+which scans `session:*` for the user's `staffId` — no per-user index to drift), so whoever still holds
+the old password, or a stolen session, is logged out at once and has to sign in with the new one. When
+an admin changes **their own** password, their current session is spared. The self-service routes
+(`PATCH /staff/me/password`, and the email reset flow under Authentication above) don't end other
+sessions. In dev, the `AUTH_BYPASS` admin fallback applies to an ended session, so a revoked session
+looks like the admin rather than a 401 — the 401 is covered by the integration spec, which runs
+without the bypass. ❌ No MFA/TOTP of any kind exists — that was a Keycloak feature (never actually
+enforced for pre-existing accounts even then) and has no replacement.
 
 There is no `POST /staff/:id/shifts` or `POST /staff/:id/leave` endpoint — `StaffShift` and
 `LeaveRequest` rows exist in the schema and are honoured by the appointments-availability logic,

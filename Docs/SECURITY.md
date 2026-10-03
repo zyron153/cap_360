@@ -33,18 +33,20 @@
 
 - ✅ **Password hashing:** argon2id (`PasswordService`, via the `argon2` npm package's native
   binding) — no plaintext or reversibly-encrypted password is ever stored
-- ✅ **Password policy:** min 10 chars, 1 uppercase, 1 digit (`ChangePasswordSchema`/
-  `ResetPasswordSchema`, enforced by Zod)
-- ✅ **Temporary passwords (no email invitations):** an admin creating a user, or using "Redefinir
-  senha", gets a random 14-character password (`PasswordService.generateTemporary`, `crypto.randomInt`)
-  returned once in the response (`Cache-Control: no-store`) — never stored in plaintext or logged
-  (the audit interceptor records method/URL only, not bodies). The account is flagged
-  `Staff.mustChangePassword`, and `SessionAuthGuard` refuses every authenticated route except
-  `GET /staff/me` and `PATCH /staff/me/password` (`403 PASSWORD_CHANGE_REQUIRED`), re-reading the
-  flag from the DB on each request so an admin reset also cuts off an already-open session. The new
-  password must differ from the temporary one. Trade-off: the admin sees the plaintext once and
-  has to relay it themselves. The dev `AUTH_BYPASS` only applies when there is no valid session (a
-  real login cookie always wins), so it doesn't skip this enforcement for a logged-in user
+- ✅ **Password policy:** min 10 chars, 1 uppercase, 1 digit (`PasswordSchema` in
+  `packages/types/src/auth.ts`, shared by `ChangePasswordSchema`, `ResetPasswordSchema` and the admin
+  routes, enforced by Zod; the web UI mirrors it to show the rules up front)
+- ✅ **Admin-set passwords (no email invitations):** an admin chooses a user's password when creating
+  the account (`POST /staff`) and can change it later (`PATCH /staff/:id/password`, "Alterar senha").
+  Only the argon2id hash is stored; the plaintext exists only in the request body (the audit
+  interceptor records method/URL, not bodies) — the API never returns or generates passwords, and the
+  "Gerar" button creates one in the browser with `crypto.getRandomValues`. An admin password change ends
+  **all of that user's open sessions** (`SessionService.destroyAllForStaff`; the admin's own session is
+  spared when they change their own password), so a compromised old password or a stolen session stops
+  working immediately. Trade-offs: there is no forced change on first login, so the admin knows the
+  user's initial password until the user changes it themselves (Settings → Alterar Palavra-passe or
+  the forgot-password email); and the self-service change / email reset don't end other sessions. The
+  dev `AUTH_BYPASS` only applies when there is no valid session (a real login cookie always wins)
 - ✅ **Brute-force protection, real and two-layered:**
   - Per-IP: `POST /auth/login` and `POST /auth/forgot-password` are throttled to 5 req/min
     (stricter than the global 300/min default) via `@nestjs/throttler`

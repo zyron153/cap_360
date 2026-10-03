@@ -9,7 +9,7 @@
 
 Manages doctor and staff shifts, room/equipment calendars, and leave requests. Feeds availability data to the appointment booking engine (M1) so patients only see slots when a doctor and room are both free.
 
-> **Implementation status:** staff profiles/temporary-password onboarding and per-staff **weekly availability
+> **Implementation status:** staff profiles/admin-set-password onboarding and per-staff **weekly availability
 > templates** are real and drive the booking engine. ✅ **2026-09-27:** date-specific **shift
 > overrides** are now wired up end to end — CRUD endpoints, a per-date override of the weekly
 > template in both `getAvailability()`/`create()`, and a drag-to-assign calendar UI (see §2.3). ❌
@@ -33,16 +33,15 @@ Each staff member has (`Staff` model):
 - 🟡 Active/inactive — implemented as a nullable `deletedAt` soft-delete timestamp, not a boolean
   flag
 - ✅ Default weekly availability template (relation to `StaffAvailability`, see §2.2)
-- ✅ `passwordHash` — argon2id, issued as a temporary password when an admin creates the user (or
-  resets it) and replaced by the user's own via the forced first-login change or a later
-  forgot/reset/change-password flow; see `SECURITY.md` §2 (Keycloak was removed 2026-08-31)
-- ✅ **Temporary-password onboarding (not detailed in the original doc; replaced the email-invitation
-  flow):** `POST /staff` (Gestão de Acesso → Utilizadores → Adicionar Utilizador) creates the `Staff`
-  row immediately with a generated one-time password, shown to the admin once in a modal — no email
-  is sent. `Staff.mustChangePassword` stays true until the user picks their own password at
-  `/change-password`; until then the API refuses everything but reading their profile and changing
-  the password. "Redefinir senha" (`POST /staff/:id/reset-password`) re-issues one for an existing
-  user. Details in `API-SPEC.md` §7
+- ✅ `passwordHash` — argon2id, chosen by the admin when they create the user and changeable later by
+  the admin ("Alterar senha"), by the user (Settings → Alterar Palavra-passe) or via the
+  forgot/reset-password email flow; see `SECURITY.md` §2 (Keycloak was removed 2026-08-31)
+- ✅ **Admin-set passwords (not detailed in the original doc; replaced the email-invitation flow):**
+  `POST /staff` (Gestão de Acesso → Utilizadores → Adicionar Utilizador) creates the `Staff` row
+  immediately with the password the admin typed — or generated with the form's "Gerar" button and
+  copied with "Copiar" — and no email is sent; the user can log in straight away, with no forced
+  change. "Alterar senha" on a user's row (`PATCH /staff/:id/password`) sets a new password and ends
+  that user's open sessions. Details in `API-SPEC.md` §7
 
 ### 2.2 Weekly Availability Templates
 
@@ -123,7 +122,7 @@ See `DATABASE-SCHEMA.md` → sections 1.2 (`staff`), 1.3 (`staff_invitations`, l
 
 ## 5. API Endpoints
 
-See `API-SPEC.md` → Section 7 (Staff & Temporary Passwords)
+See `API-SPEC.md` → Section 7 (Staff & Admin-set Passwords)
 
 ---
 
@@ -131,7 +130,7 @@ See `API-SPEC.md` → Section 7 (Staff & Temporary Passwords)
 
 | Screen | Role | Description |
 |---|---|---|
-| Staff List | Admin | ✅ All staff with role, status, temporary-password badge, create / edit / reset password / deactivate actions |
+| Staff List | Admin | ✅ All staff with role, status, create (with password) / edit / change password / deactivate actions |
 | Shift Planner | Admin | ✅ "Turnos" tab on the Staff page, drag-to-assign calendar (§2.3) |
 | My Schedule | Doctor / Nurse | ✅ Personal appointment view; no shift data to show (§2.3) |
 | Leave Requests | Admin | ❌ No backend — nothing can create or approve a leave request (§2.4) |

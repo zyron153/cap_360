@@ -21,9 +21,11 @@ Next.js App Router routes for the `apps/web` application.
 | Path | File | Description |
 |---|---|---|
 | `/login` | `(auth)/login/page.tsx` | Real email + password form (show/hide button on the password field) — posts to `/api/auth/login` |
-| `/change-password` | `(auth)/change-password/page.tsx` | First-login screen for accounts with an admin-issued temporary password — login redirects here when `staff.mustChangePassword`; `(app)/password-change-gate.tsx` redirects any in-app URL here too. **Not public:** needs the session issued at login (the middleware doesn't list it in `PUBLIC_PATHS`). Calls `PATCH /staff/me/password`, then hard-navigates to `?next=` (same-origin paths only). Every field has a show/hide button, and the password rules (10+ characters, uppercase, digit, differs from the temporary one, confirmation matches) are listed up front and tick off live as the user types |
 | `/forgot-password` | `(auth)/forgot-password/page.tsx` | Not in the original doc — added 2026-08-31 with the Keycloak removal |
-| `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email; same show/hide buttons and live rules list as `/change-password`. The same pair also backs Settings → Alterar Palavra-passe. Shared pieces: `components/ui/password-input.tsx`, `components/ui/password-checklist.tsx`, `lib/password-policy.ts` (mirrors the API's policy — the API stays the source of truth) |
+| `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email; every password field has a show/hide button and the new-password rules (10+ characters, uppercase, digit, confirmation matches) are listed up front and tick off live. The same pieces back Settings → Alterar Palavra-passe and, in Gestão de Acesso, the Add User form and "Alterar senha" modal (`components/ui/new-password-fields.tsx`: password + confirm + "Gerar"/"Copiar"). Shared: `components/ui/password-input.tsx`, `components/ui/password-checklist.tsx`, `lib/password-policy.ts` (mirrors the API's policy — the API stays the source of truth) |
+
+> There is no `/change-password` or `/activate` page: users are created with a password the admin sets
+> (no email invitation) and aren't forced to change it on first login.
 
 ### Error pages
 

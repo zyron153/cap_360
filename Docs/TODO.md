@@ -201,7 +201,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Auth flow in Next.js (`middleware.ts`, checks the session cookie directly — no more
   Authorization-header translation, since the API now reads the cookie itself)
 - [x] API client in Next.js (`/api/*` rewrite proxy to the NestJS API)
-- [x] Integration test suite against a real dev DB (`supertest`, `apps/api/test/integration/`) — 4 specs / 9 tests covering booking conflict, patient erasure, invoice payment, staff temporary-password→forced change→login; see `Docs/TESTING.md` §4
+- [x] Integration test suite against a real dev DB (`supertest`, `apps/api/test/integration/`) — 4 specs / 9 tests covering booking conflict, patient erasure, invoice payment, staff admin-set password→login→"Alterar senha" (sessions ended); see `Docs/TESTING.md` §4
 - [x] Sentry integration — wired in both `apps/api/src/main.ts` and `apps/web`'s `instrumentation(-client).ts`, no-op until `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN` are set (no real DSN configured yet)
 
 ---
@@ -347,21 +347,24 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
 ### M8 — Staff & Resource Scheduler
 
 **Backend**
-- [x] Staff CRUD, temporary-password onboarding, weekly recurring availability
+- [x] Staff CRUD, admin-set passwords, weekly recurring availability
 - [x] `StaffShift`, `LeaveRequest` models with repository methods
-- [x] ~~Invitation activation hashes the invitee's own chosen password~~ — replaced 2026-10-02: the
+- [x] ~~Invitation activation hashes the invitee's own chosen password~~ — replaced 2026-10-02/03: the
   email-invitation flow is removed (no `/staff/invite`, `/staff/invitations*`, `/public/invitations*`,
   `send-invite` job or `/activate` page; the `staff_invitations` table stays only as a legacy,
-  unused model). `POST /staff` creates the user immediately with a generated one-time password
-  (argon2id-hashed, returned once to the admin); `Staff.mustChangePassword` makes `SessionAuthGuard`
-  refuse everything except `GET /staff/me` and `PATCH /staff/me/password` until the user sets their
-  own; `POST /staff/:id/reset-password` re-issues one (and cuts off an already-open session). See
-  `API-SPEC.md` §7.
-- [x] Fix (2026-10-03): the first-login password change always failed with "Palavra-passe atual
-  incorreta" in dev — `SessionAuthGuard`'s `AUTH_BYPASS` branch ignored the login cookie and ran every
-  request as the seeded admin, so the change was verified against the admin's password. The bypass now
-  applies only when there is no valid session (a stale cookie or deactivated account still falls back to
-  the admin); production is unaffected. Covered by new guard unit tests and the e2e spec's full-change test.
+  unused model). **The admin chooses the password:** `POST /staff` takes a `password` (same policy as
+  every other password, `PasswordSchema`) and `PATCH /staff/:id/password` ("Alterar senha") changes it
+  later; only the argon2id hash is stored, the API never generates or returns one, and there is no
+  forced change on first login. A password change by an admin ends all of that user's open sessions
+  (`SessionService.destroyAllForStaff`, a `session:*` scan; the admin's own session is spared when
+  they change their own). A temporary-password / `Staff.mustChangePassword` design shipped briefly
+  and was removed (column dropped by migration `20261004000200_drop_staff_must_change_password`).
+  See `API-SPEC.md` §7.
+- [x] Fix (2026-10-03): a freshly created user's "change my password" always failed with "Palavra-passe
+  atual incorreta" in dev — `SessionAuthGuard`'s `AUTH_BYPASS` branch ignored the login cookie and ran
+  every request as the seeded admin, so the change was verified against the admin's password. The
+  bypass now applies only when there is no valid session (a stale/ended session or deactivated account
+  still falls back to the admin); production is unaffected. Covered by guard unit tests.
 - [x] Room/equipment conflict detection (see M1 — same underlying fix)
 - [x] Staff deactivation — `DELETE /staff/:id` (admin-only, self-deactivation blocked), soft-deletes via the
   `deletedAt` column that already existed and was already used by every staff read path but had no write
@@ -370,7 +373,7 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
 - [x] ~~Leave request submission/approval endpoints (see M1 note — schema and availability-logic support exist, no way to create one via the API)~~ — corrected: same duplicate/contradictory line as M1's own corrected copy above; `POST /staff/me/leave-requests` etc. all exist
 
 **Frontend**
-- [x] Staff identity lifecycle (create with temporary password/edit/reset password/deactivate) consolidated into **Gestão de Acesso →
+- [x] Staff identity lifecycle (create with an admin-set password/edit/change password/deactivate) consolidated into **Gestão de Acesso →
   Utilizadores** as the one canonical place — the Staff page's own "Novo Colaborador"/"Editar"
   actions and Settings' separate "Utilizadores" tab (a near-duplicate, independently-built) are
   both removed. Staff page (`Equipa & Turnos`) is now a read-only roster of the same data, plus
@@ -380,7 +383,7 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   all), **Perfis** (the existing role-permission matrix, simplified to the 5 real `StaffRole` values
   — dropped the old "create an arbitrary custom profile" flow, which produced profiles that could
   never actually be assigned to anyone since `Staff.role` is a fixed Prisma enum), and
-  **Utilizadores** (the consolidated lifecycle above; adding a user now shows the one-time temporary password in a copy modal, rows still on a temporary password get a "Senha temporária" badge, and "Redefinir senha" re-issues one).
+  **Utilizadores** (the consolidated lifecycle above; the Add User form asks for the password + confirmation with a "Gerar" button (random strong password, revealed so it can be copied with "Copiar"), a show/hide eye per field and the password rules listed up front, ticking off live; each row has "Alterar senha", which opens a modal with the same fields).
   Settings' own duplicate "Gestão de Acesso" tab (`components/settings/AccessTab.tsx`, a
   byte-for-byte copy of the same Perfis logic) is deleted outright.
 - [x] Shift overrides — `StaffShift` was previously dead code: no CRUD endpoints anywhere, and its

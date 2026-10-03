@@ -146,14 +146,17 @@ coverage:
   forged POSTs rejected with nothing stored, a signed message stored as ciphertext and a retry
   deduplicated, thread served decrypted via the inbox API, resolve then reopen on the next inbound.
   Temporarily swaps in test credentials for the `integration_whatsapp` setting and restores it after.
-- **`staff-temporary-password.integration-spec.ts`** — the one spec that deliberately skips
-  `AUTH_BYPASS`: real admin login → `POST /staff` returns a one-time temporary password (only the
-  hash is stored) → the new user's real login reports `mustChangePassword` → every route except
-  `GET /staff/me` / `PATCH /staff/me/password` answers `403 PASSWORD_CHANGE_REQUIRED` → a "new"
-  password equal to the temporary one is refused → changing it lifts the block on the same session →
-  an admin "Redefinir senha" re-flags the account and cuts off the user's open session → a
-  non-admin can't create users or reset passwords. Uses 4 logins on purpose: `/auth/login` is
-  throttled to 5/min per IP, so the spec reuses sessions rather than logging in again.
+- **`staff-admin-password.integration-spec.ts`** — the one spec that deliberately skips
+  `AUTH_BYPASS`: real admin login → `POST /staff` with a policy-breaking or missing password is a
+  400 and creates nothing → with a valid one the user is created and only an argon2id hash is stored
+  (never in the response) → a duplicate email is a 409 → the new user logs in with that password and
+  goes straight into the app (no forced change) → `PATCH /staff/:id/password` with a weak password is
+  a 400 and leaves their session alone → with a valid one it returns `{ sessionsEnded: 1 }`, the
+  user's open session gets a 401, the old password no longer logs in and the new one does → an unknown
+  id is a 404 → a non-admin can't create users or change another user's password. Uses 4 logins on
+  purpose: `/auth/login` is throttled to 5/min per IP, so the spec reuses sessions rather than
+  logging in again. (Sparing an admin's own session is covered by the unit tests, since changing the
+  seeded admin's password here would break every other spec's login.)
 
 Note on the M1 §2.4 reminder-cancellation gap this section used to flag as unfixed: it was closed
 in the roadmap's Phase 1 (`appointments.service.ts`'s `cancelPendingReminders` now runs from both
@@ -197,17 +200,20 @@ status-transition UI on `/appointments` (Confirmar → Check-in feito → Conclu
 call) to its auto-created invoice, then paying it off through the "Registar Pagamento" form itself
 rather than the API.
 
-#### Temporary Password → First Login → /change-password — ✅ `apps/web/e2e/staff-temporary-password.spec.ts`
-Replaced `staff-invitation.spec.ts` when the email-invitation flow was removed. Creates a user via
-`POST /staff`, then drives the real login form with the temporary password and asserts the redirect
-to `/change-password`, the rules list shown up front (and ticking live as the new password is typed),
-the per-field show/hide buttons, and that screen's validation (new ≠ temporary, policy, confirmation
-match). A second test completes the change end to end and asserts `/api/staff/me` then reports the
-new user with `mustChangePassword: false` — a regression guard for a real bug: the dev `AUTH_BYPASS`
-used to ignore the login cookie, so the change was checked against the seeded admin's password and
-always failed with "Palavra-passe atual incorreta" (fixed in `SessionAuthGuard`, which now prefers a
-valid session over the bypass). The 403 enforcement and admin reset are covered by
-`staff-temporary-password.integration-spec.ts` (§4), which runs without the bypass.
+#### Admin Sets a User's Password → Login → "Alterar senha" — ✅ `apps/web/e2e/staff-admin-password.spec.ts`
+Replaced `staff-invitation.spec.ts` (and the short-lived temporary-password spec) when the
+email-invitation flow was removed. Drives Gestão de Acesso through the real UI: the Add User form
+lists the password rules up front (all unmet), "Gerar" fills a policy-compliant password, reveals it
+and ticks the rules, and creating the user adds the row; the new user then logs in from a separate
+browser context and lands straight on `/dashboard`; the admin's "Alterar senha" modal rejects a weak
+password, accepts a valid one and reports it; finally the old password is rejected on the login page
+and the new one works. The dev stack runs with `AUTH_BYPASS`, which treats a browser with no session
+as the seeded admin (so `page` is the admin) — and since a revoked session would just fall back to
+that admin, the 401 on the user's open session after a password change is asserted in
+`staff-admin-password.integration-spec.ts` (§4), which runs without the bypass. The spec's first
+incarnation caught a real bug: the bypass used to ignore the login cookie, so a freshly created user's
+"change my password" was checked against the admin's password (fixed in `SessionAuthGuard`, which now
+prefers a valid session over the bypass).
 
 #### Manual Invoice Creation + Payment — ✅ `apps/web/e2e/manual-invoice-payment.spec.ts`
 The one invoice-lifecycle path the other two Financeiro specs don't touch: creating an invoice by
