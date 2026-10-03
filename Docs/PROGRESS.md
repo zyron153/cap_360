@@ -5,6 +5,13 @@
 
 ## Done
 
+- **Nota para mais tarde — proteção do repositório e verificação de vulnerabilidades, 2026-10-03.**
+  Ainda **não** está configurado: branch protection/rulesets, Dependabot (`.github/dependabot.yml`),
+  secret scanning, CodeQL e scan de imagens; o `pnpm audit` do CI é só informativo (`|| true`) e a baseline
+  tem 0 critical / 32 high por tratar. Proteger só a `master` não afeta o deploy de staging (corre num push
+  a `staging` ou manualmente); proteger a própria `staging` obriga a que o deploy venha de um PR.
+  Checklist em `TODO.md` → DevOps → «Repository protection & vulnerability checks».
+
 - **Página 404 + botão para o login, 2026-10-03.** Pedido: aceder ao dashboard sem sessão válida
   rebentava com `todayAppts.filter is not a function` (a API devolve o objeto de erro 401, não uma
   lista). Agora aparece uma página 404 com o botão «Ir para o login».

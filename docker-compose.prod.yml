@@ -61,7 +61,9 @@ services:
   seed:
     image: ghcr.io/${GHCR_OWNER:?}/cms-api:${IMAGE_TAG:-latest}
     working_dir: /app/packages/database
-    command: ["npx", "ts-node", "src/seed.ts"]
+    # --compiler-options: without it ts-node (module node16 default) hands the .ts to Node's ESM loader and dies
+    # with ERR_UNKNOWN_FILE_EXTENSION on node:20
+    command: ["npx", "ts-node", "--compiler-options", '{"module":"commonjs"}', "src/seed.ts"]
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://cap:${POSTGRES_PASSWORD:?}@postgres:5432/cap

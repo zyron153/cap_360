@@ -10,7 +10,7 @@
 | | |
 |---|---|
 | Host | `179.198.220.184`  (host key ED25519 `SHA256:9Y956mq+VHByw0J4sGLAR3uDlno50ajTlOsO3RnmRa8`) |
-| Domain | `cap360.tech` (Hostinger free domain, claimed 2026-10-03). **Prod = `https://cap360.tech`**; staging stays on `http://179.198.220.184:8080` for now. DNS points at the VPS and a Let's Encrypt cert exists on it (expires 2027-01-01) — Phase 9 |
+| Domain | `cap360.tech` (Hostinger free domain, claimed 2026-10-03). **Prod = `https://cap360.tech`**; **staging = `https://staging.cap360.tech:8443`** (Phase 9b; until then `http://179.198.220.184:8080` — API works, browser sessions don't, see 9b). DNS points at the VPS and a Let's Encrypt cert exists on it (expires 2027-01-01) — Phase 9 |
 | First login | `ssh -i ~/.ssh/cap_vps root@179.198.220.184` |
 | Day-to-day login (after phase 2) | `ssh -i ~/.ssh/cap_vps deploy@179.198.220.184` |
 | Private key | `C:\Users\emerson.silva\.ssh\cap_vps` — **never** copy it into the repo, chat, or a form |
@@ -92,13 +92,13 @@ Use a **dedicated CI key**, not `cap_vps`: `ssh-keygen -t ed25519 -N "" -f cap36
 
 ## Phase 7 — First staging deploy
 
-- [ ] `cd /opt/cap360-staging && cp .env.prod.example .env.prod && chmod 600 .env.prod`, then fill: `GHCR_OWNER=zyron153`,
+- [x] (2026-10-03: written on the VPS with generated secrets; `ADMIN_PASSWORD` still empty — the seed needs ≥ 12 chars) `cd /opt/cap360-staging && cp .env.prod.example .env.prod && chmod 600 .env.prod`, then fill: `GHCR_OWNER=zyron153`,
   `HTTP_PORT=8080`, `HTTPS_PORT=8443`, `WEB_URL` / `ALLOWED_ORIGINS` = `http://179.198.220.184:8080`, fresh
-  `POSTGRES_PASSWORD` (`openssl rand -base64 32`), fresh `FIELD_ENCRYPTION_KEY` (`openssl rand -hex 32`), `ADMIN_EMAIL`/`ADMIN_PASSWORD`
+  `POSTGRES_PASSWORD` (`openssl rand -hex 24` — hex, it goes into a URL), fresh `FIELD_ENCRYPTION_KEY` (`openssl rand -hex 32`), `ADMIN_EMAIL`/`ADMIN_PASSWORD`
 - [ ] **Back up `FIELD_ENCRYPTION_KEY` off the server** (password manager) — losing it makes encrypted patient data unreadable
-- [ ] Push to `staging` (or Run workflow → Deploy Staging); run is green
-- [ ] Create the first admin (DEPLOYMENT.md §0.4 `run --rm seed`), then delete `ADMIN_PASSWORD` from `.env.prod`
-- [ ] `curl -i http://179.198.220.184:8080/health` → 200 and the login page loads in a browser
+- [x] Run workflow → Deploy Staging from `master`; green (2026-10-03, images `staging-5de077f`, all containers healthy)
+- [x] First admin `admin@cap360.tech` created, `ADMIN_PASSWORD` blanked in `.env.prod`. The `seed` service failed with `ERR_UNKNOWN_FILE_EXTENSION` (ts-node vs node:20 ESM loader) — fixed in `docker-compose.prod.yml` (`--compiler-options {"module":"commonjs"}`); that fix is **not yet pushed**, so the VPS clone still has the old line until the next deploy
+- [x] `/health` → 200 and `POST /v1/auth/login` with the admin → 200 (verified by curl). **A browser can't keep the session over plain http**: the `cap_session` cookie is `Secure` whenever `NODE_ENV=production` (`session.service.ts:22`), so staging needs HTTPS → Phase 9b
 
 ## Phase 8 — Backups (required before real patient data)
 
@@ -111,9 +111,8 @@ Use a **dedicated CI key**, not `cap_vps`: `ssh-keygen -t ed25519 -N "" -f cap36
 
 ## Phase 9 — Domain `cap360.tech` + production HTTPS
 
-Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging keeps `http://179.198.220.184:8080` — it carries no real
-data, and its own hostname would need a `:8443` cert + a rebuild (the web image bakes in its URL). Add `staging.cap360.tech`
-later if a public HTTPS staging is needed (Meta's WhatsApp webhook is the likely reason).
+Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https://staging.cap360.tech:8443`** (Phase 9b): its own hostname keeps the `cap_session` cookie separate from prod
+(cookies ignore ports, so `cap360.tech:8443` would collide with prod).
 
 - [x] certbot 2.9.0 installed on the VPS (`certbot.timer` active); ports 80/443 free
 - [x] **DNS** — hPanel → Domains → `cap360.tech` → DNS / Nameservers (must be on Hostinger's nameservers). Add
@@ -145,3 +144,16 @@ later if a public HTTPS staging is needed (Meta's WhatsApp webhook is the likely
   `curl -I https://cap360.tech/health` → 200 and `curl -I http://cap360.tech` → 301
 - [ ] Once prod is live, allow only what's needed: if staging never gets TLS, close `8443`: `ufw delete allow 8080,8443/tcp && ufw allow 8080/tcp`
 - [ ] Pin the host key in the deploy workflows (`fingerprint:` input of `appleboy/ssh-action`): `ssh-keyscan -t ed25519 179.198.220.184 | ssh-keygen -lf -` (should match the ED25519 fingerprint in the table above)
+
+## Phase 9b — Staging over HTTPS (`staging.cap360.tech:8443`)
+
+- [ ] **DNS** (you, hPanel → DNS): `A  staging  179.198.220.184`, TTL 300; no AAAA
+- [ ] Cert: `certbot certonly --standalone -d staging.cap360.tech --register-unsafely-without-email --agree-tos`
+- [ ] Extend `/etc/letsencrypt/renewal-hooks/deploy/cap360.sh` to copy per lineage: `cap360.tech` → `/opt/cap360-prod/infra/nginx/certs`,
+  `staging.cap360.tech` → `/opt/cap360-staging/infra/nginx/certs`; then `certbot renew --dry-run`
+- [ ] Staging clone: copy the cert into `infra/nginx/certs/`, then
+  `sed 's/YOUR_DOMAIN/staging.cap360.tech/g' infra/nginx/tls.conf.example > infra/nginx/conf.d/tls.conf` and change that file's
+  :80 redirect to `return 301 https://$host:8443$request_uri;` (staging's :80 is host port 8080)
+- [ ] `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://staging.cap360.tech:8443`
+- [ ] Repo variable `STAGING_PUBLIC_APP_URL` = `https://staging.cap360.tech:8443` (baked into the web image → redeploy rebuilds it)
+- [ ] Redeploy staging, then `curl -I https://staging.cap360.tech:8443/health` → 200 and log in from a browser

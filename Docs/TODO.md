@@ -467,6 +467,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 - [x] ~~Helmet headers in `main.ts`~~ — corrected: `app.use(helmet())` is already the second line of `bootstrap()`; this line was stale
 - [ ] OWASP ZAP scan in CI
 - [ ] Quarterly penetration test plan
+- [ ] Branch protection, Dependabot/secret scanning/CodeQL and triage of the 32 high `pnpm audit` findings — see "Repository protection & vulnerability checks" under DevOps below
 
 See `SECURITY.md` for the full, section-by-section implementation status.
 
@@ -515,6 +516,32 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [ ] Sentry, Grafana/Prometheus, Loki — not set up
 - [ ] Automated PostgreSQL backups
 - [ ] Uptime monitoring
+
+### Repository protection & vulnerability checks — TODO, not done yet (noted 2026-10-03)
+Nothing below is configured: GitHub has no branch protection, `.github/dependabot.yml` doesn't exist and
+CodeQL / secret scanning aren't set up. Do this before real patient data goes live (and before more
+people get push access).
+- [ ] **Branch protection / rulesets** (GitHub → Settings → Rules) on `master`: require a PR + at least one
+  review, require the `ci.yml` checks to pass (`Lint & Typecheck`, `Unit Tests`, `Dependency audit`,
+  `Docker build check`), block force-push and deletion, require up-to-date branches. Consider the same for
+  `staging`. **Effect on deployments:** protecting `master` alone changes nothing for staging — `deploy-staging.yml`
+  runs on a push to `staging` or a manual "Run workflow", and `deploy-production.yml` is manual-only (gated by
+  the `PRODUCTION` environment's required reviewers). Protecting `staging` itself means a deploy must come from a PR
+  merge into it (or a manual run), not a direct push — set that up first so the deploy flow isn't surprised.
+  Note `ci.yml` only runs its `pull_request` jobs for PRs targeting `master`/`staging`/`develop`, so those
+  are the branches a required-checks rule can use.
+- [ ] **Vulnerability checks:**
+  - triage the dependency-audit baseline (0 critical / **32 high** prod findings at 2026-10-03, see PROGRESS.md):
+    upgrade, replace, or write down why each is accepted; the CI `pnpm audit` step is `|| true` (report only) —
+    make it fail on new high/critical findings once the baseline is clean
+  - enable Dependabot alerts + security updates and add `.github/dependabot.yml` (npm workspaces, GitHub Actions,
+    Dockerfiles)
+  - enable GitHub secret scanning + push protection, and run a one-off history scan (gitleaks/trufflehog)
+    for anything that was ever committed (`.env*`, keys, certificates)
+  - enable CodeQL code scanning (JS/TS) and add an image scan (Trivy/Grype) to the Docker build check
+  - the existing "OWASP ZAP scan in CI" item under Security above belongs with these
+  - review what the repo exposes: `Docs/VPS_CONFIG.md` holds the VPS IP and domain layout — confirm the repo is
+    private, or move that file out of git
 
 ---
 
