@@ -1,7 +1,11 @@
-# Production stack. Secrets come from the server's environment / an untracked .env.prod:
-#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+# Stack for BOTH staging and production (one clone + one .env.prod per environment, see
+# Docs/DEPLOYMENT.md). Secrets come from the server's untracked .env.prod. Deploys go through
+# scripts/vps/deploy.sh, which sets IMAGE_TAG itself; by hand:
+#   IMAGE_TAG=$(cat .deployed-tag) docker compose -p cap360-<staging|prod> --env-file .env.prod -f docker-compose.prod.yml ps
 # Required in .env.prod: POSTGRES_PASSWORD, FIELD_ENCRYPTION_KEY, ALLOWED_ORIGINS, WEB_URL,
-# IMAGE_TAG, GHCR_OWNER; first deploy also ADMIN_EMAIL + ADMIN_PASSWORD (then `run --rm seed`).
+# GHCR_OWNER; first deploy also ADMIN_EMAIL + ADMIN_PASSWORD (then `run --rm seed`).
+# Optional: HTTP_PORT / HTTPS_PORT (host ports for nginx; staging shares the VPS with prod, so it
+# uses 8080 / 8443).
 x-api-env: &api-env
   NODE_ENV: production
   DATABASE_URL: postgresql://cap:${POSTGRES_PASSWORD:?}@postgres:5432/cap
@@ -39,14 +43,14 @@ services:
       timeout: 5s
       retries: 5
 
-  # Schema sync + audit_log trigger. `db push` WITHOUT --accept-data-loss: a destructive schema
-  # change aborts the deploy instead of silently dropping data.
+  # Applies committed migrations (`migrate deploy`, never `db push`) + the audit_log trigger.
+  # `db execute` needs an explicit --schema (it does not auto-detect one, unlike `migrate`).
   migrate:
     image: ghcr.io/${GHCR_OWNER:?}/cms-api:${IMAGE_TAG:-latest}
     working_dir: /app/packages/database
     command: >
-      sh -c "npx prisma db push --skip-generate &&
-             npx prisma db execute --file prisma/manual-sql/audit-log-immutable.sql"
+      sh -c "npx prisma migrate deploy &&
+             npx prisma db execute --schema prisma/schema.prisma --file prisma/manual-sql/audit-log-immutable.sql"
     environment:
       DATABASE_URL: postgresql://cap:${POSTGRES_PASSWORD:?}@postgres:5432/cap
     depends_on:
@@ -75,24 +79,32 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+    # 127.0.0.1, not localhost: alpine's wget resolves localhost to ::1 first
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/v1/health"]
       interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   web:
     image: ghcr.io/${GHCR_OWNER:?}/cms-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro

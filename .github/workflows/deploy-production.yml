@@ -1,0 +1,116 @@
+name: Deploy Production
+
+# Manual only, from `master`. Production is not live yet (no VPS/domain): when it is, add
+#   push:
+#     branches: [master]
+# below — the PRODUCTION environment's required reviewers will still gate every run, and the
+# `ci` job below is what proves the commit passed CI. Same flow as staging plus a DB backup before
+# migrating; separate directory, compose project name (cap360-prod) and volumes, so it never
+# touches the staging stack. Manual commands, rollback and the VPS checklist: Docs/DEPLOYMENT.md.
+on:
+  workflow_dispatch:
+
+# Never cancel a production deploy mid-flight; later runs queue behind it.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/cms
+  IMAGE_TAG: prod-${{ github.sha }}
+
+jobs:
+  # "Run workflow" lets you pick any branch; production only ever ships master.
+  guard:
+    name: Only master
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
+            echo "::error::Production deploys must run from master (selected: $GITHUB_REF)"
+            exit 1
+          fi
+
+  ci:
+    name: CI
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build & push images
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_TAG }}
+          # links the GHCR package to this repo, so GITHUB_TOKEN keeps push access on later runs
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build & push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_APP_URL }}
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-web:${{ env.IMAGE_TAG }}
+          # links the GHCR package to this repo, so GITHUB_TOKEN keeps push access on later runs
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Required reviewers on this environment are the manual approval gate; its secrets also
+    # resolve to empty strings without this line.
+    environment: PRODUCTION
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_VM_IP }}
+          username: ${{ secrets.PRODUCTION_VM_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd /opt/cap360-prod
+
+            git fetch --prune origin
+            git checkout --detach ${{ github.sha }}
+
+            # BACKUP=1: pg_dump into ./backups first; a failed backup aborts before anything changes.
+            # Migrations are `prisma migrate deploy` only, and are NOT rolled back on failure, so
+            # they must stay backward compatible with the previous release.
+            BACKUP=1 bash scripts/vps/deploy.sh prod ${{ env.IMAGE_TAG }}
+
+      - name: External check (non-blocking)
+        continue-on-error: true
+        run: curl -fsS --max-time 15 "${{ vars.PUBLIC_APP_URL }}/health"

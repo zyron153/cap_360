@@ -391,8 +391,8 @@ Per-page `staleTime` overrides: appointments calendar `60_000` ms; billing detai
 | `(status, createdAt)` | invoices | BFF billing-summary: `WHERE status = ? AND createdAt >= ?` |
 | `(patientId, status)` | invoices | Patient invoice timeline |
 
-> Activate with `pnpm --filter @cap/database exec prisma db push --skip-generate` — this project
-> uses `db push`, not `prisma migrate dev`, for day-to-day schema changes (see `DEPLOYMENT.md` §4).
+> These indexes are part of the baseline migration (`prisma/migrations/20261003000000_baseline`);
+> future schema changes go through `prisma migrate dev` (see `DEPLOYMENT.md` §4).
 
 **Lean repository methods** to avoid over-fetching:
 

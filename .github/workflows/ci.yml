@@ -1,16 +1,27 @@
 name: CI
 
+# PR checks + the gate for deploys: deploy-staging.yml / deploy-production.yml call this workflow
+# first (workflow_call) and only build/deploy if it passes. A push to `staging` is therefore NOT
+# listed under `push` — deploy-staging.yml already runs this on that push.
 on:
   push:
-    branches: [master, staging, develop]
+    branches: [master, develop]
   pull_request:
     branches: [master, staging, develop]
+  workflow_call:
+
+# Only PR runs are cancelled when superseded; a deploy's CI run must always finish.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 env:
-  NODE_VERSION: "20"
-  PNPM_VERSION: "9"
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/cms
+  # pnpm 11 (package.json "packageManager") needs Node >= 22.13. The Docker images still run on
+  # Node 20 (engines: >=20) — see Docs/DEPLOYMENT.md.
+  NODE_VERSION: "22"
 
 jobs:
   # ─── Lint & Typecheck ─────────────────────────────────────────────────────
@@ -20,9 +31,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # No `version:` — pnpm/action-setup reads package.json "packageManager" (setting both errors).
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -37,7 +47,45 @@ jobs:
       - name: Lint
         run: pnpm turbo run lint
 
-  # ─── Unit Tests ───────────────────────────────────────────────────────────
+  # ─── Dependency audit ─────────────────────────────────────────────────────
+  # Critical advisories in production deps are zero today, so that is a hard gate. High is gated
+  # on a baseline (32 when measured 2026-10-03) so it can only go down: lower
+  # AUDIT_BASELINE_HIGH as advisories get fixed, and make it 0 to hard-gate High as well.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    env:
+      AUDIT_BASELINE_CRITICAL: 0
+      AUDIT_BASELINE_HIGH: 32
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: pnpm audit (prod deps)
+        run: |
+          pnpm audit --prod --json > audit.json || true
+          pnpm audit --prod || true
+          # shellcheck disable=SC2016  # the JS is deliberately single-quoted (backticks are JS template literals)
+          node -e '
+            const v = require("./audit.json").metadata.vulnerabilities;
+            const rows = ["critical","high","moderate","low"].map(k => `| ${k} | ${v[k]} |`).join("\n");
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              `### pnpm audit — production dependencies\n\n| level | count |\n|---|---|\n${rows}\n`);
+            const baseC = +process.env.AUDIT_BASELINE_CRITICAL, baseH = +process.env.AUDIT_BASELINE_HIGH;
+            if (v.critical > baseC || v.high > baseH) {
+              console.log(`::error::advisories regressed — critical ${v.critical}/${baseC}, high ${v.high}/${baseH}`);
+              process.exit(1);
+            }
+            console.log(`ok — critical ${v.critical}/${baseC}, high ${v.high}/${baseH}`);
+          '
+
+  # ─── Unit tests (+ migration drift check) ─────────────────────────────────
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
@@ -74,8 +122,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
@@ -87,118 +133,45 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --filter @cap/database run db:generate
 
-      - name: Push schema (test DB)
-        # This project uses `prisma db push` for schema sync, not `migrate deploy` — the checked-in
-        # migrations predate most of schema.prisma and would leave the test DB badly out of date.
-        run: pnpm --filter @cap/database run db:push
+      # Same command production runs. Then diff the migrated DB against schema.prisma: a change to
+      # schema.prisma without a matching migration (what left the old migrations stale) fails here.
+      - name: Apply migrations (test DB)
+        run: pnpm --filter @cap/database run db:migrate:prod
+
+      - name: Check migrations match schema.prisma
+        run: pnpm --filter @cap/database exec prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
 
       - name: Run tests
         run: pnpm turbo run test
 
-  # ─── Build Docker Images ──────────────────────────────────────────────────
-  build:
-    name: Build & Push Images
-    needs: [quality, test]
+  # ─── Docker build check (PRs only; deploy workflows build + push on their own) ─────────
+  docker-check:
+    name: Docker build check
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/staging')
-    permissions:
-      contents: read
-      packages: write
-
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, web]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # master -> tagged "latest" and built against the prod API URL; staging -> tagged
-      # "staging" and built against the staging API URL (baked into the web bundle at build time).
-      - name: Set per-branch values
-        id: vars
-        run: |
-          if [ "${{ github.ref }}" = "refs/heads/master" ]; then
-            echo "extra_tag=latest" >> "$GITHUB_OUTPUT"
-            echo "api_url=${{ vars.PUBLIC_APP_URL }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "extra_tag=staging" >> "$GITHUB_OUTPUT"
-            echo "api_url=${{ vars.STAGING_PUBLIC_APP_URL }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build & Push API image
+      # context is the repo root: the Dockerfiles COPY the whole workspace (packages/, apps/*).
+      - name: Build ${{ matrix.service }} image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: infra/docker/api.Dockerfile
-          push: true
-          tags: ${{ env.IMAGE_PREFIX }}-api:${{ github.sha }},${{ env.IMAGE_PREFIX }}-api:${{ steps.vars.outputs.extra_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          file: infra/docker/${{ matrix.service }}.Dockerfile
+          load: true
+          push: false
+          tags: cms-${{ matrix.service }}:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
 
-      - name: Build & Push Web image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: infra/docker/web.Dockerfile
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ steps.vars.outputs.api_url }}
-          push: true
-          tags: ${{ env.IMAGE_PREFIX }}-web:${{ github.sha }},${{ env.IMAGE_PREFIX }}-web:${{ steps.vars.outputs.extra_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ─── Deploy to Staging (auto, no manual gate) ──────────────────────────────
-  # Same single-host Compose runbook as production, on its own VPS. Secrets: STAGING_DEPLOY_HOST,
-  # STAGING_DEPLOY_USER, STAGING_DEPLOY_SSH_KEY, STAGING_DEPLOY_PATH; vars: STAGING_PUBLIC_APP_URL.
-  deploy-staging:
-    name: Deploy to Staging
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/staging'
-    environment: staging
-
-    steps:
-      - uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.STAGING_DEPLOY_SSH_KEY }}
-
-      - name: Deploy
+      # Docs/DEPLOYMENT.md lesson: dev .env files once leaked into the images via a bad .dockerignore.
+      - name: Fail if the image contains .env files
         run: |
-          ssh -o StrictHostKeyChecking=accept-new ${{ secrets.STAGING_DEPLOY_USER }}@${{ secrets.STAGING_DEPLOY_HOST }}             "cd ${{ secrets.STAGING_DEPLOY_PATH }} && git pull --ff-only &&              sed -i '/^IMAGE_TAG=/d' .env.prod && echo IMAGE_TAG=${{ github.sha }} >> .env.prod &&              docker compose --env-file .env.prod -f docker-compose.prod.yml pull &&              docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --remove-orphans"
-
-      - name: Smoke test
-        run: |
-          sleep 30
-          curl -fsS "${{ vars.STAGING_PUBLIC_APP_URL }}/v1/health" || exit 1
-
-  # ─── Deploy to Production (manual approval via the `production` environment) ──────
-  # Assumes a single Docker host with this repo checked out at $DEPLOY_PATH and an untracked
-  # .env.prod next to docker-compose.prod.yml. Secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY,
-  # DEPLOY_PATH; vars: PUBLIC_APP_URL. The `migrate` service runs `db push` (no data-loss flag) and
-  # the audit_log trigger before the API starts, so a destructive schema change fails the deploy.
-  deploy-production:
-    name: Deploy to Production
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
-    environment: production
-
-    steps:
-      - uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-
-      - name: Deploy
-        run: |
-          ssh -o StrictHostKeyChecking=accept-new ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}             "cd ${{ secrets.DEPLOY_PATH }} && git pull --ff-only &&              sed -i '/^IMAGE_TAG=/d' .env.prod && echo IMAGE_TAG=${{ github.sha }} >> .env.prod &&              docker compose --env-file .env.prod -f docker-compose.prod.yml pull &&              docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --remove-orphans"
-
-      - name: Smoke test
-        run: |
-          sleep 30
-          curl -fsS "${{ vars.PUBLIC_APP_URL }}/v1/health" || exit 1
+          leaked=$(docker run --rm --entrypoint sh cms-${{ matrix.service }}:ci -c 'find /app -name ".env*" -not -name ".env.example" -not -path "*/node_modules/*"')
+          if [ -n "$leaked" ]; then echo "::error::.env files in image:"; echo "$leaked"; exit 1; fi

@@ -1,9 +1,40 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-10-02.
+> Snapshot overwritten each session. Última atualização: 2026-10-03.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **CI/CD — deploy de staging/produção por GitHub Actions + rollback automático, 2026-10-03.** Pedido:
+  replicar a pipeline do DOPE STUDIO ERP (deploy por git/SSH) com checks de PR, health check +
+  rollback e deploy de produção. Adaptado a este repo (imagens no GHCR, Postgres, NestJS/Next) em vez
+  de copiar a referência, que constrói na VPS.
+  - **Workflows:** `ci.yml` (Lint & Typecheck, Unit Tests, Dependency audit, Docker build check; também
+    `workflow_call`), `deploy-staging.yml` (push a `staging` + manual: ci → build → SSH),
+    `deploy-production.yml` (só manual e só a partir de `master`; ambiente `PRODUCTION` com aprovação).
+    Imagens com tag `<env>-<sha>` — antes a tag `<sha>` era partilhada e o bundle web (que embute
+    `NEXT_PUBLIC_API_URL`) de staging e prod podia misturar-se.
+  - **`scripts/vps/deploy.sh`:** pull → postgres/redis → backup `pg_dump` (só prod) → `migrate deploy`
+    **antes** de recriar → `up -d` → restart do nginx → health check ≤180 s (containers + `/health` via
+    nginx, na VPS) → rollback automático das imagens e exit 1 se falhar. Staging e prod na mesma VPS:
+    `/opt/cap360-{staging,prod}`, projetos compose `cap360-staging|prod`, nginx do staging em 8080/8443
+    (`HTTP_PORT`/`HTTPS_PORT` no `.env.prod`).
+  - **Migrações:** o histórico antigo (2 ficheiros obsoletos) foi substituído por uma baseline
+    (`20261003000000_baseline`, sem drift face ao `schema.prisma`); o CI aplica `migrate deploy` e falha se
+    o schema divergir das migrações; `prisma/migrations/` deixou de estar no `.gitignore`. Bug que o
+    serviço `migrate` tinha desde sempre: `prisma db execute` precisa de `--schema`, por isso todos os
+    deploys falhavam nesse passo.
+  - **Outros:** nginx com `Host $http_host` (os redirects do Next perdiam a porta 8080), healthchecks em
+    `127.0.0.1` + healthcheck do web, CI em Node 22 (pnpm 11 exige ≥ 22.13; as imagens continuam em
+    Node 20), baseline do audit 0 critical / 32 high.
+  - **Verificação:** actionlint, shellcheck, `docker compose config`, typecheck, lint e testes unitários
+    limpos; `deploy.sh` ensaiado localmente (sucesso + release com API doente → rollback, exit 1).
+    **Por executar:** os workflows no GitHub, push/pull GHCR, SSH, aprovação `PRODUCTION`, backup — não
+    existe VPS.
+  - **Falta (utilizador):** ambiente `PRODUCTION` + secrets `PRODUCTION_VM_IP/VM_USER/SSH_PRIVATE_KEY` +
+    revisores; valores reais das variáveis `STAGING_PUBLIC_APP_URL`/`PUBLIC_APP_URL` (hoje placeholders
+    `127.0.0.1`); preparar a VPS (checklist em `DEPLOYMENT.md` §0.4); required checks na branch protection.
+  - Docs: `DEPLOYMENT.md` §0/§4/§5/§9, `CONTRIBUTING.md`, `Docs/CLAUDE.md`, `ARCHITECTURE.md`.
 
 - **Gestão de Acesso — utilizadores criados com palavra-passe temporária, sem convite por email,
   2026-10-02.** Pedido do utilizador: remover o convite por email; ao adicionar um utilizador criar e
