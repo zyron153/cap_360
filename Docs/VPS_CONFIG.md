@@ -147,13 +147,13 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
 
 ## Phase 9b — Staging over HTTPS (`staging.cap360.tech:8443`)
 
-- [ ] **DNS** (you, hPanel → DNS): `A  staging  179.198.220.184`, TTL 300; no AAAA
-- [ ] Cert: `certbot certonly --standalone -d staging.cap360.tech --register-unsafely-without-email --agree-tos`
-- [ ] Extend `/etc/letsencrypt/renewal-hooks/deploy/cap360.sh` to copy per lineage: `cap360.tech` → `/opt/cap360-prod/infra/nginx/certs`,
+- [x] **DNS** (you, hPanel → DNS): `A  staging  179.198.220.184`, TTL 300; no AAAA
+- [x] Cert: `certbot certonly --standalone -d staging.cap360.tech --register-unsafely-without-email --agree-tos`
+- [x] Extend `/etc/letsencrypt/renewal-hooks/deploy/cap360.sh` to copy per lineage: `cap360.tech` → `/opt/cap360-prod/infra/nginx/certs`,
   `staging.cap360.tech` → `/opt/cap360-staging/infra/nginx/certs`; then `certbot renew --dry-run`
-- [ ] Staging clone: copy the cert into `infra/nginx/certs/`, then
+- [x] Staging clone: copy the cert into `infra/nginx/certs/`, then
   `sed 's/YOUR_DOMAIN/staging.cap360.tech/g' infra/nginx/tls.conf.example > infra/nginx/conf.d/tls.conf` and change that file's
   :80 redirect to `return 301 https://$host:8443$request_uri;` (staging's :80 is host port 8080)
-- [ ] `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://staging.cap360.tech:8443`
-- [ ] Repo variable `STAGING_PUBLIC_APP_URL` = `https://staging.cap360.tech:8443` (baked into the web image → redeploy rebuilds it)
+- [x] `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://staging.cap360.tech:8443`
+- [x] Repo variable `STAGING_PUBLIC_APP_URL` = `https://staging.cap360.tech:8443` (baked into the web image → redeploy rebuilds it)
 - [ ] Redeploy staging, then `curl -I https://staging.cap360.tech:8443/health` → 200 and log in from a browser

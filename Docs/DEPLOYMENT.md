@@ -216,6 +216,12 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
 - No `COMPOSE_PARALLEL_LIMIT` / build retry: nothing is built on the VPS (the Prisma engine download
   happens in the GitHub runner's `docker build`; re-run the workflow if it flakes).
 - CI runs Node 22 (pnpm 11 in `package.json` needs ≥ 22.13) while the Docker images run Node 20.
+- **The `Dependency audit` gate drifts with the advisory feed**, and it blocks deploys (they gate on `ci`): on
+  2026-10-03 the first staging run passed at 32 high and the next one, an hour later, failed at 33. Fixed by
+  pinning `multer: ">=2.3.0"` under `overrides:` in `pnpm-workspace.yaml` (`@nestjs/platform-express` 10 pins
+  2.0.2; highs 33 → 27, 643 API tests pass). Multer's upload path (`FileInterceptor` in the patients and
+  financeiro controllers) has no automated test — smoke-test an upload after the next deploy. `AUDIT_BASELINE_HIGH`
+  stays at 32 to leave headroom; when a deploy goes red on it, check which advisory is new before raising it.
 
 ### 0.7 Domain and HTTPS — `cap360.tech` (prod)
 Domain `cap360.tech` was claimed on 2026-10-03; **prod = `https://cap360.tech`**, staging stays on
