@@ -218,7 +218,10 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
 - CI runs Node 22 (pnpm 11 in `package.json` needs ≥ 22.13) while the Docker images run Node 20.
 - **The `Dependency audit` gate drifts with the advisory feed**, and it blocks deploys (they gate on `ci`): on
   2026-10-03 the first staging run passed at 32 high and the next one, an hour later, failed at 33. Fixed by
-  pinning `multer: ">=2.3.0"` under `overrides:` in `pnpm-workspace.yaml` (`@nestjs/platform-express` 10 pins
+  pinning `multer: ">=2.3.0"` in **both** `pnpm-workspace.yaml` (`overrides:`, read by pnpm 11) and `package.json`
+  (`pnpm.overrides`, read by pnpm 9 — the Dockerfiles install with pnpm 9 and fail `--frozen-lockfile` with
+  `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` if the two disagree or one is missing; the first attempt put it in the
+  workspace file only and broke the image build). `@nestjs/platform-express` 10 pins
   2.0.2; highs 33 → 27, 643 API tests pass). Multer's upload path (`FileInterceptor` in the patients and
   financeiro controllers) has no automated test — smoke-test an upload after the next deploy. `AUDIT_BASELINE_HIGH`
   stays at 32 to leave headroom; when a deploy goes red on it, check which advisory is new before raising it.

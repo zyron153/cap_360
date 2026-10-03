@@ -12,5 +12,6 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
 overrides:
-  # @nestjs/platform-express 10 pins multer 2.0.2 (several high advisories, fixed in >=2.3.0); same 2.x API
+  # @nestjs/platform-express 10 pins multer 2.0.2 (several high advisories, fixed in >=2.3.0); same 2.x API.
+  # Also in package.json pnpm.overrides: the Docker images install with pnpm 9, which ignores this file.
   multer: ">=2.3.0"
