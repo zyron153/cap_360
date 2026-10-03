@@ -41,6 +41,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Typecheck/lint resolve Prisma types from the generated client (gitignored, so a fresh
+      # checkout has none: ~120 "implicit any" / missing-export errors without this).
+      - name: Generate Prisma client
+        run: pnpm --filter @cap/database run db:generate
+
       - name: Typecheck
         run: pnpm turbo run typecheck
 
@@ -62,10 +67,10 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
+      # No `cache: pnpm`: this job never installs, so there is no store and the post-step fails.
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
 
       - name: pnpm audit (prod deps)
         run: |
