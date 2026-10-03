@@ -512,9 +512,12 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### DevOps
 - [ ] Pre-deploy blockers found 2026-09-25 (see PROGRESS.md): prod compose + real CI deploy, API Dockerfile fixes, `NEXT_PUBLIC_API_URL` build arg, audit-log trigger SQL step, real admin bootstrap + seed production guard, boot-time env validation, drop `--accept-data-loss` from CI `db:push`
-- [ ] Staging/production environments — not live
+- [x] Staging live 2026-10-03 on the Hostinger VPS: https://staging.cap360.tech:8443 (see VPS_CONFIG.md)
+- [ ] Production — environment `PRODUCTION` (reviewer, `prod` branch only), secrets, `/opt/cap360-prod` (`.env.prod`, cert, `tls.conf`) are ready and the first run was triggered 2026-10-03; still to do: approve it, seed the prod admin (>= 12-char password), back up prod `FIELD_ENCRYPTION_KEY` off the server, add the prod backup cron
+- [ ] VPS follow-ups: confirm Hostinger weekly snapshots are on; pin the SSH host key in the deploy workflows (`fingerprint:`); close `8443` in ufw if staging stops needing it; the GHCR read PAT on the VPS expires (renew it); smoke-test a file upload after the multer 2.4 bump (`FileInterceptor` has no automated test)
 - [ ] Sentry, Grafana/Prometheus, Loki — not set up
-- [ ] Automated PostgreSQL backups
+- [x] Nightly local PostgreSQL backups: `scripts/vps/backup.sh` (cron on staging, restore drilled 2026-10-03)
+- [ ] Off-server encrypted copy of the backups (e.g. rclone to Backblaze B2) and a restore drill on prod — required before real patient data
 - [ ] Uptime monitoring
 
 ### Repository protection & vulnerability checks — TODO, not done yet (noted 2026-10-03)
@@ -525,15 +528,16 @@ people get push access).
   review, require the `ci.yml` checks to pass (`Lint & Typecheck`, `Unit Tests`, `Dependency audit`,
   `Docker build check`), block force-push and deletion, require up-to-date branches. Consider the same for
   `staging`. **Effect on deployments:** protecting `master` alone changes nothing for staging — `deploy-staging.yml`
-  runs on a push to `staging` or a manual "Run workflow", and `deploy-production.yml` is manual-only (gated by
-  the `PRODUCTION` environment's required reviewers). Protecting `staging` itself means a deploy must come from a PR
+  runs on a push to `staging` or a manual "Run workflow", and `deploy-production.yml` runs on a push to `prod` or a manual run on `prod`
+  (gated by the `PRODUCTION` environment's required reviewers, which need a public repo or a paid plan). Protecting `staging` itself means a deploy must come from a PR
   merge into it (or a manual run), not a direct push — set that up first so the deploy flow isn't surprised.
   Note `ci.yml` only runs its `pull_request` jobs for PRs targeting `master`/`staging`/`develop`, so those
   are the branches a required-checks rule can use.
 - [ ] **Vulnerability checks:**
   - triage the dependency-audit baseline (0 critical / **32 high** prod findings at 2026-10-03, see PROGRESS.md):
-    upgrade, replace, or write down why each is accepted; the CI `pnpm audit` step is `|| true` (report only) —
-    make it fail on new high/critical findings once the baseline is clean
+    upgrade, replace, or write down why each is accepted; the CI `pnpm audit` step is already a ratchet (fails above
+    `AUDIT_BASELINE_HIGH`=32 / critical 0; the multer override took the real count to 27) — lower the baseline as
+    advisories are fixed, down to 0
   - enable Dependabot alerts + security updates and add `.github/dependabot.yml` (npm workspaces, GitHub Actions,
     Dockerfiles)
   - enable GitHub secret scanning + push protection, and run a one-off history scan (gitleaks/trufflehog)

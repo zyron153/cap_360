@@ -50,15 +50,15 @@ Mais Saúde 360 is a cloud-native, multi-tenant Healthcare ERP/CRM. The architec
 | Cache / Queue | Redis 7 | Session store; BullMQ job queue; rate limiting |
 | File Storage | Cloudflare R2 (or AWS S3) | S3-compatible; GDPR-eligible; cost-efficient |
 | Search | PostgreSQL Full-Text Search (pg_trgm) | 🟡 Planned, but the actual implementation is simpler: plain case-insensitive `contains` matching, no `pg_trgm` extension or GIN index (see `modules/M2-patient-crm.md` §2.4) |
-| Backups | pg_dump → R2/S3 (daily) | 30-day retention; automated via cron |
+| Backups | pg_dump → R2/S3 (daily) | 30-day retention; automated via cron. 🟡 Today: nightly `scripts/vps/backup.sh` into `backups/` on the VPS (14 kept, cron); no off-server copy yet |
 
 ### 2.4 Infrastructure & DevOps
 
 | Component | Technology | Rationale |
 |---|---|---|
 | Containerisation | Docker + Docker Compose | Reproducible environments |
-| Orchestration | Kubernetes (K3s or EKS) | Rolling deploys; horizontal scaling |
-| Hosting | Hetzner Cloud (EU) or AWS eu-west-1 | EU data compliance; Hetzner for cost savings |
+| Orchestration | Kubernetes (K3s or EKS) | Rolling deploys; horizontal scaling. ❌ Not used: Docker Compose on a single VPS (staging + prod stacks), deploys by `scripts/vps/deploy.sh` |
+| Hosting | Hetzner Cloud (EU) or AWS eu-west-1 | EU data compliance; Hetzner for cost savings. ❌ Actual (2026-10-03): one Hostinger KVM 2 VPS in Düsseldorf, Ubuntu 24.04 — see DEPLOYMENT.md §0 and VPS_CONFIG.md |
 | CI/CD | GitHub Actions | Build → test → deploy pipeline |
 | Secrets | HashiCorp Vault or AWS Secrets Manager | Centralised secret rotation |
 | Monitoring | Grafana + Prometheus | Metrics; alerting |

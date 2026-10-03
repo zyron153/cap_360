@@ -48,6 +48,9 @@ then green. New business logic in `apps/api/src/modules/**/*.service.ts` should 
   experiments only — a DB touched by it needs `db:reset` before `db:migrate` works again. A new
   `@relation` field needs the inverse array field added on the referenced model too, or Prisma's
   schema validation fails.
+- Branches and deploys: open PRs against `master` (CI runs). A push to `staging` deploys staging. Production ships from the
+  `prod` branch: `git push origin master:prod` (fast-forward from a green `master`) or a manual run on `prod`; the
+  `PRODUCTION` environment's reviewer approves every run. See `Docs/DEPLOYMENT.md` §0.1.
 - Existing local DB created with the old `db push` flow? One-time: `pnpm --filter @cap/database run
   db:reset` (destroys local data), then `db:seed`.
 - Commit messages: no fixed format enforced, but explain *why*, not just *what*, for anything

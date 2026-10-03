@@ -39,7 +39,7 @@
 | **Environment example files** | ✅ **RESOLVED** | Root `.env.example` and per-app `.env` templates created |
 | **UI wireframes / screens** | ✅ **REPLACED** | All 12 sidebar screens implemented as working Next.js pages |
 | **BSP / WhatsApp credentials** | ⚠️ PENDING | 360dialog or Twilio account not yet set up |
-| **Domain names / DNS** | ⚠️ PENDING | api.maissaudecv.com, app.maissaudecv.com not confirmed |
+| **Domain names / DNS** | ✅ DONE | `cap360.tech` claimed 2026-10-03 (the maissaudecv.com names below are obsolete): prod `https://cap360.tech`, staging `https://staging.cap360.tech:8443` |
 
 ---
 
@@ -274,9 +274,9 @@ These require action from the clinic owner or project manager before certain fea
 | Africa's Talking account | SMS fallback | ⚠️ Not started | Create account, top up credits |
 | Google Maps API key | Home visits (M9) | ⚠️ Not started | Enable Maps + Places APIs, restrict key |
 | Cloudflare R2 account | File storage | ⚠️ Not started | Create bucket `maissaude-files`, configure CORS |
-| Domain DNS configuration | All public URLs | ⚠️ Not started | Point api/app subdomains to server |
+| Domain DNS configuration | All public URLs | ✅ Done 2026-10-03 | `A @` and `A staging` to the VPS (no api/app subdomains: one origin, nginx routes `/v1`) |
 | Keycloak hosting | Auth for all apps | ⚠️ Not started | Can self-host on same server as API |
-| SSL certificates | All public URLs | ⚠️ Not started | Auto-managed via cert-manager (Let's Encrypt) |
+| SSL certificates | All public URLs | ✅ Done 2026-10-03 | Let's Encrypt via certbot on the VPS (no cert-manager/K8s); auto-renewal with hooks, see VPS_CONFIG.md Phase 9 |
 
 > **Note:** Items marked "Not started" do not block local development — they can be mocked. They **do** block staging and production deployment.
 

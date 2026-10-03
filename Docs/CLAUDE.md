@@ -26,6 +26,7 @@ aspirational designs, several written for the pre-rebrand client.
 | Security posture, encryption, audit, LGPD | [SECURITY.md](SECURITY.md) |
 | Test strategy and what really exists | [TESTING.md](TESTING.md) |
 | Local dev / staging / prod, CI/CD | [DEPLOYMENT.md](DEPLOYMENT.md) |
+| First-VPS setup checklist (Hostinger, domain, TLS, backups, prod prep) | [VPS_CONFIG.md](VPS_CONFIG.md) |
 | Next.js route map | [FRONTEND-ROUTES.md](FRONTEND-ROUTES.md) |
 | Performance instrumentation + optimization passes | [PERFORMANCE_UPGRADES.md](PERFORMANCE_UPGRADES.md) |
 | Visual design system | [DESIGN-PHILOSOPHY.md](DESIGN-PHILOSOPHY.md) |

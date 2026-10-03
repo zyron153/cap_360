@@ -1,6 +1,6 @@
 # CAP 360 — Deployment Guide
 
-> **Version:** 1.1 · **Date:** updated 2026-08-30 against the current implementation
+> **Version:** 1.3 · **Date:** updated 2026-10-03 (VPS live, domain + TLS, `prod` branch, backups); the rest against the implementation of 2026-08-30
 > Covers: local development, staging, and production environments.
 
 > **Implementation status:** local development (docker-compose + `pnpm dev`) is real, with several
@@ -641,7 +641,7 @@ Never commit `.env.production` to the repository. Use `1Password` or `Vault` for
 
 ---
 
-*CAP 360 · Deployment Guide v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
+*CAP 360 · Deployment Guide v1.3 · updated 2026-10-03 — VPS, cap360.tech + TLS, prod branch, nightly backups*
 
 ## e-Fatura (DNRE) — go-live checklist
 

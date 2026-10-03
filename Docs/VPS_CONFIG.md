@@ -1,6 +1,9 @@
 # CAP 360 — VPS Configuration Checklist
 
-> **Date:** 2026-10-03 (phases 0–4 applied the same day; root login is key-only, password SSH disabled, ufw + fail2ban active, Docker 29 + Compose v5 installed, `deploy` user + `/opt/cap360-{staging,prod}` created) · Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe), Ubuntu 24.04, Düsseldorf.
+> **Date:** 2026-10-03 · Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe), Ubuntu 24.04, Düsseldorf.
+> **Status:** VPS hardened (key-only SSH, ufw, fail2ban, unattended-upgrades, Docker 29 + Compose v5); `cap360.tech` + Let's Encrypt;
+> **staging live** at https://staging.cap360.tech:8443; nightly local backups; **production prepared** (environment, secrets, `/opt/cap360-prod`) —
+> first run triggered, reviewer approval and the prod seed still open. Open items are the unchecked boxes below and in `TODO.md` → DevOps.
 > Hosts **staging + production** as two Compose stacks. Deploy design, rollback and the full
 > command reference live in [DEPLOYMENT.md §0](DEPLOYMENT.md#0-deploy-runbook--one-vps-two-stacks-docker-compose--ghcr);
 > this file is the order to do things in on the fresh box.
@@ -10,7 +13,7 @@
 | | |
 |---|---|
 | Host | `179.198.220.184`  (host key ED25519 `SHA256:9Y956mq+VHByw0J4sGLAR3uDlno50ajTlOsO3RnmRa8`) |
-| Domain | `cap360.tech` (Hostinger free domain, claimed 2026-10-03). **Prod = `https://cap360.tech`**; **staging = `https://staging.cap360.tech:8443`** (Phase 9b; until then `http://179.198.220.184:8080` — API works, browser sessions don't, see 9b). DNS points at the VPS and a Let's Encrypt cert exists on it (expires 2027-01-01) — Phase 9 |
+| Domain | `cap360.tech` (Hostinger free domain, claimed 2026-10-03). **Prod = `https://cap360.tech`**; **staging = `https://staging.cap360.tech:8443`** (Phase 9b). DNS points at the VPS and Let's Encrypt certs exist for both names (expire 2027-01-01, auto-renewed) — Phase 9 |
 | First login | `ssh -i ~/.ssh/cap_vps root@179.198.220.184` |
 | Day-to-day login (after phase 2) | `ssh -i ~/.ssh/cap_vps deploy@179.198.220.184` |
 | Private key | `C:\Users\emerson.silva\.ssh\cap_vps` — **never** copy it into the repo, chat, or a form |
@@ -82,28 +85,29 @@ If Windows OpenSSH says `UNPROTECTED PRIVATE KEY FILE`, fix the ACL once:
 
 ## Phase 6 — GitHub secrets (repo → Settings → Environments)
 
-Use a **dedicated CI key**, not `cap_vps`: `ssh-keygen -t ed25519 -N "" -f cap360_ci` on your PC, append `cap360_ci.pub` to
-`/home/deploy/.ssh/authorized_keys`, paste the *private* half into GitHub only.
+Use **dedicated CI keys**, not `cap_vps`, one per environment (`cap360_ci` for staging, `cap360_ci_prod` for production):
+`ssh-keygen -t ed25519 -N "" -f cap360_ci` on your PC, append the `.pub` to `/home/deploy/.ssh/authorized_keys`, put the *private* half into GitHub only
+(both keys log into the same `deploy` user, so this gives separate revocation, not separate privileges).
 
 - [x] Environment `STAGING` (created via gh 2026-10-03; CI key is `~/.ssh/cap360_ci` on the PC, authorized for `deploy`): `STAGING_VM_IP` = `179.198.220.184`, `STAGING_VM_USER` = `deploy`, `STAGING_SSH_PRIVATE_KEY`
-- [x] Repo variable `STAGING_PUBLIC_APP_URL` = `http://179.198.220.184:8080`
+- [x] Repo variable `STAGING_PUBLIC_APP_URL` = `https://staging.cap360.tech:8443` (was `http://179.198.220.184:8080` until Phase 9b)
 - [x] Environment `PRODUCTION` created 2026-10-03: required reviewer `zyron153` (self-review allowed — solo), deployments limited to the `prod` branch; variable `PUBLIC_APP_URL` = `https://cap360.tech`
-- [ ] **Secrets `PRODUCTION_VM_IP`, `PRODUCTION_VM_USER`, `PRODUCTION_SSH_PRIVATE_KEY` — you set these** (the assistant's write was blocked as a secret-store write). Key: `~/.ssh/cap360_ci_prod` (already authorized for `deploy` on the VPS):
+- [x] Secrets `PRODUCTION_VM_IP`, `PRODUCTION_VM_USER`, `PRODUCTION_SSH_PRIVATE_KEY` set 2026-10-03 (the first attempt was blocked as a secret-store write; created on the user's explicit request). Key: `~/.ssh/cap360_ci_prod` (already authorized for `deploy` on the VPS):
   ```powershell
   gh secret set PRODUCTION_VM_IP --env PRODUCTION --repo zyron153/cap_360 --body 179.198.220.184
   gh secret set PRODUCTION_VM_USER --env PRODUCTION --repo zyron153/cap_360 --body deploy
-  Get-Content -Raw $HOME.sshcap360_ci_prod | gh secret set PRODUCTION_SSH_PRIVATE_KEY --env PRODUCTION --repo zyron153/cap_360
+  Get-Content -Raw $HOME\.ssh\cap360_ci_prod | gh secret set PRODUCTION_SSH_PRIVATE_KEY --env PRODUCTION --repo zyron153/cap_360
   ```
   (`PUBLIC_APP_URL` is baked into the web image, so it had to be right before the first prod build — it now is.)
 
 ## Phase 7 — First staging deploy
 
-- [x] (2026-10-03: written on the VPS with generated secrets; `ADMIN_PASSWORD` still empty — the seed needs ≥ 12 chars) `cd /opt/cap360-staging && cp .env.prod.example .env.prod && chmod 600 .env.prod`, then fill: `GHCR_OWNER=zyron153`,
+- [x] (2026-10-03: written on the VPS with generated secrets; `ADMIN_PASSWORD` is only set around the seed, needs ≥ 12 chars) `cd /opt/cap360-staging && cp .env.prod.example .env.prod && chmod 600 .env.prod`, then fill: `GHCR_OWNER=zyron153`,
   `HTTP_PORT=8080`, `HTTPS_PORT=8443`, `WEB_URL` / `ALLOWED_ORIGINS` = `http://179.198.220.184:8080`, fresh
   `POSTGRES_PASSWORD` (`openssl rand -hex 24` — hex, it goes into a URL), fresh `FIELD_ENCRYPTION_KEY` (`openssl rand -hex 32`), `ADMIN_EMAIL`/`ADMIN_PASSWORD`
-- [ ] **Back up `FIELD_ENCRYPTION_KEY` off the server** (password manager) — losing it makes encrypted patient data unreadable
+- [ ] Back up the staging `FIELD_ENCRYPTION_KEY` off the server (low stakes: staging holds no real data; the **prod** key is the one that matters, see Phase 9)
 - [x] Run workflow → Deploy Staging from `master`; green (2026-10-03, images `staging-5de077f`, all containers healthy)
-- [x] First admin `admin@cap360.tech` created, `ADMIN_PASSWORD` blanked in `.env.prod`. The `seed` service failed with `ERR_UNKNOWN_FILE_EXTENSION` (ts-node vs node:20 ESM loader) — fixed in `docker-compose.prod.yml` (`--compiler-options {"module":"commonjs"}`); that fix is **not yet pushed**, so the VPS clone still has the old line until the next deploy
+- [x] First admin `admin@cap360.tech` created, `ADMIN_PASSWORD` blanked in `.env.prod`. The `seed` service failed with `ERR_UNKNOWN_FILE_EXTENSION` (ts-node vs node:20 ESM loader) — fixed in `docker-compose.prod.yml` (`--compiler-options {"module":"commonjs"}`); pushed in `3f2c57b`; the VPS clone picks it up on the next deploy
 - [x] `/health` → 200 and `POST /v1/auth/login` with the admin → 200 (verified by curl). **A browser can't keep the session over plain http**: the `cap_session` cookie is `Secure` whenever `NODE_ENV=production` (`session.service.ts:22`), so staging needs HTTPS → Phase 9b
 
 ## Phase 8 — Backups (required before real patient data)
@@ -138,7 +142,17 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
   cd /etc/letsencrypt/renewal-hooks
   printf '#!/bin/sh\ndocker ps -q --filter publish=80 > /run/cap360-certbot-stopped\nxargs -r docker stop < /run/cap360-certbot-stopped\n' > pre/cap360.sh
   printf '#!/bin/sh\nxargs -r docker start < /run/cap360-certbot-stopped\nrm -f /run/cap360-certbot-stopped\n' > post/cap360.sh
-  printf '#!/bin/sh\nd=/opt/cap360-prod/infra/nginx/certs\n[ -d "$d" ] || exit 0\ncp "$RENEWED_LINEAGE/fullchain.pem" "$RENEWED_LINEAGE/privkey.pem" "$d/"\n' > deploy/cap360.sh
+  cat > deploy/cap360.sh <<'HOOK'
+  #!/bin/sh
+  # copy a renewed cert into the matching stack's nginx certs dir (post hook then restarts nginx)
+  case "$(basename "$RENEWED_LINEAGE")" in
+    cap360.tech) d=/opt/cap360-prod/infra/nginx/certs ;;
+    staging.cap360.tech) d=/opt/cap360-staging/infra/nginx/certs ;;
+    *) exit 0 ;;
+  esac
+  [ -d "$d" ] || exit 0
+  cp "$RENEWED_LINEAGE/fullchain.pem" "$RENEWED_LINEAGE/privkey.pem" "$d/"
+  HOOK
   chmod +x pre/cap360.sh post/cap360.sh deploy/cap360.sh
   certbot renew --dry-run
   ```
@@ -154,7 +168,7 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
   ```
   The `tls.conf` carries the `cap360.tech` :80 → :443 redirect; `app.conf`'s default server still answers by IP, which is what
   `deploy.sh`'s health probe (`curl http://127.0.0.1/health`) needs.
-- [ ] First prod deploy (`git push origin master:prod`, or Run workflow → Deploy Production on `prod`; approve), seed the admin, then
+- [ ] First prod deploy (`git push origin master:prod`, or Run workflow → Deploy Production on `prod`; approve). **Triggered 2026-10-03 (run 37122916321, from `bfa5aac`); the reviewer approval is left to the user.** Then seed the admin (`ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env.prod`, `run --rm seed`, blank the password), add the prod backup cron (Phase 8), then
   `curl -I https://cap360.tech/health` → 200 and `curl -I http://cap360.tech` → 301
 - [ ] Once prod is live, allow only what's needed: if staging never gets TLS, close `8443`: `ufw delete allow 8080,8443/tcp && ufw allow 8080/tcp`
 - [ ] Pin the host key in the deploy workflows (`fingerprint:` input of `appleboy/ssh-action`): `ssh-keyscan -t ed25519 179.198.220.184 | ssh-keygen -lf -` (should match the ED25519 fingerprint in the table above)
@@ -170,4 +184,4 @@ Layout: **prod = `https://cap360.tech`** (nginx on 80/443). Staging is **`https:
   :80 redirect to `return 301 https://$host:8443$request_uri;` (staging's :80 is host port 8080)
 - [x] `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://staging.cap360.tech:8443`
 - [x] Repo variable `STAGING_PUBLIC_APP_URL` = `https://staging.cap360.tech:8443` (baked into the web image → redeploy rebuilds it)
-- [x] Redeploy staging, then `curl -I https://staging.cap360.tech:8443/health` → 200 and log in from a browser Verified 2026-10-03: TLS valid, login page 200, :8080 → 301 → :8443, admin login 200 with a Secure cookie. Note `https://…:8443/health` returns 307 (the old `tls.conf.example` copy has no `/health` block; deploy.sh probes 127.0.0.1:8080 so it's unaffected).
+- [x] Redeploy staging, then `curl -I https://staging.cap360.tech:8443/health` → 200 and log in from a browser. Verified 2026-10-03: TLS valid, login page 200, :8080 → 301 → :8443, admin login 200 with a `Secure` cookie. `/health` initially returned 307 (the first `tls.conf.example` had no `/health` block); the example now proxies it to the API and both clones were updated → 200.

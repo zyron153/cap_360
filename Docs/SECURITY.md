@@ -114,17 +114,17 @@ See `ROLES-PERMISSIONS.md` for full permission matrix.
 
 | Data | Encryption |
 |---|---|
-| PostgreSQL database | AES-256 via Hetzner/AWS volume encryption |
+| PostgreSQL database | Sensitive columns are AES-256-GCM encrypted by the app (`FIELD_ENCRYPTION_KEY`). 🟡 No volume-level encryption is configured on the Hostinger VPS (not verified) |
 | Redis cache | In-memory only; no sensitive data persisted to disk beyond session |
 | R2 file storage | AES-256 server-side encryption (Cloudflare R2 default) |
-| Backup files | AES-256 encrypted before upload to S3/R2 |
+| Backup files | 🟡 Today: gzip dumps in `backups/` on the VPS (dir 700, files 600), **not encrypted and not off-server**. Plan: encrypt before upload to B2/S3/R2 |
 
 ### 4.2 Data in Transit
 
-- All external communications: TLS 1.3
-- Internal service-to-service (within K8s cluster): mutual TLS (mTLS) enforced via service mesh (Linkerd or Istio)
-- Database connections: `sslmode=require` in PostgreSQL connection string
-- Redis: TLS enabled; auth password required
+- All external communications: TLS 1.2/1.3 (Let's Encrypt cert on nginx; plain HTTP for the domain redirects to HTTPS)
+- Internal service-to-service: ❌ no K8s/mTLS; the Compose network is private (only nginx publishes host ports)
+- Database connections: 🟡 no `sslmode` set — plain TCP inside the private Compose network
+- Redis: 🟡 no TLS and no password; reachable only on the private Compose network
 
 ### 4.3 Sensitive Fields
 
@@ -173,7 +173,9 @@ storage) before running more than one API replica in production.
 
 ### 5.4 HTTPS & Headers
 
-NGINX enforces:
+🟡 What `infra/nginx/tls.conf.example` actually sets today: HSTS `max-age=63072000` (no `includeSubDomains`), `X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `Referrer-Policy no-referrer-when-downgrade`; **no CSP yet**. The block below is the target.
+
+NGINX should enforce:
 ```nginx
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 add_header X-Content-Type-Options "nosniff" always;
@@ -279,8 +281,11 @@ Meta-approved templates, so they only deliver inside the 24h window; no bot, no 
 - PostgreSQL accessible only from within the private VPC (not publicly exposed)
 - Redis accessible only from within the private VPC — now holds real security-sensitive state
   (sessions, login-lockout counters, password-reset tokens), not just job queues and slot locks
-- SSH access to servers via key pairs only (no password auth)
-- Automatic OS security patches enabled
+- SSH access to servers via key pairs only (no password auth) — ✅ on the VPS since 2026-10-03: password auth off, root `prohibit-password`, day-to-day work as the non-root `deploy` user (note: the `docker` group is root-equivalent)
+- Automatic OS security patches enabled — ✅ `unattended-upgrades`
+- ✅ ufw allows only 22, 80, 443, 8080, 8443 (staging); fail2ban on SSH; only nginx publishes container ports
+- ✅ Secrets: `.env.prod` is mode 600 on the VPS and never in git; CI uses environment-scoped GitHub secrets, one SSH key per environment, and the `PRODUCTION` environment requires a reviewer and only deploys from `prod`
+- 🟡 The GitHub repo is **public** and `Docs/VPS_CONFIG.md` lists the VPS IP and layout — decide: private repo (loses the required-reviewer gate on GitHub Free) or move that file out of git
 - Docker images: non-root user; read-only filesystem where possible
 - Dependency scanning via Snyk or GitHub Dependabot on CI/CD
 

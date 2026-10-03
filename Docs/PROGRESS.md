@@ -5,10 +5,41 @@
 
 ## Done
 
+- **VPS, domínio, TLS e primeiro deploy real — 2026-10-03.** Pedido: pôr o staging numa VPS real e deixar a
+  produção preparada. Checklist por fases em [VPS_CONFIG.md](VPS_CONFIG.md); runbook em `DEPLOYMENT.md` §0.
+  - **VPS:** Hostinger KVM 2 (2 vCPU, 8 GB, Ubuntu 24.04, Düsseldorf). Endurecida: SSH só por chave (password
+    e login root por password desligados; o ficheiro tem de se chamar `00-hardening.conf` porque o
+    `50-cloud-init.conf` reativa a password), utilizador `deploy` (grupo docker), ufw (22/80/443/8080/8443),
+    fail2ban, unattended-upgrades, Docker 29 + Compose v5 com rotação de logs.
+  - **Domínio e TLS:** `cap360.tech` (domínio grátis da Hostinger) com A para a VPS; o AAAA de parking teve de
+    sair (o Let's Encrypt prefere IPv6). Certificado Let's Encrypt via certbot standalone + hooks de renovação
+    (pre/post param o container que publica a :80, deploy copia o cert para o `infra/nginx/certs` da stack);
+    `certbot renew --dry-run` passa. O `tls.conf` vive por clone, sem tocar no `app.conf` rastreado — um 301
+    geral no `app.conf` partia o health check do `deploy.sh`.
+  - **Staging no ar** em `https://staging.cap360.tech:8443`: hostname próprio porque o cookie `cap_session` é
+    `Secure` (um browser descarta-o em HTTP) e cookies ignoram portas, logo `cap360.tech:8443` chocaria com a
+    produção. Primeiro admin criado com o serviço `seed`; login por HTTPS verificado.
+  - **Bugs apanhados:** (1) `seed` morria com `ERR_UNKNOWN_FILE_EXTENSION` (ts-node vs ESM no node:20) →
+    `--compiler-options {"module":"commonjs"}` no compose; (2) o gate `Dependency audit` passou de 32 para 33
+    high em menos de uma hora e bloqueou o deploy → override `multer >=2.3.0` (33 → 27 high); (3) esse override só
+    no `pnpm-workspace.yaml` partiu o build das imagens (o Docker usa pnpm 9, que lê o `package.json`) → fica nos
+    dois sítios; (4) `POSTGRES_PASSWORD` em base64 parte o `DATABASE_URL` → hex.
+  - **Backups:** `scripts/vps/backup.sh <staging|prod>` (cron nocturno, 14 dumps, `.tmp` + `gzip -t`, falha não
+    deixa ficheiro); restauro testado em staging (38 tabelas + admin). **Ainda sem cópia off-server.**
+  - **Produção preparada:** ambiente `PRODUCTION` (revisor obrigatório, só a branch `prod`), secrets criados,
+    `/opt/cap360-prod` com `.env.prod` próprio, cert e `tls.conf`. `deploy-production.yml` dispara num push a
+    `prod` (+ manual); release = `git push origin master:prod`. Primeira execução disparada em 2026-10-03; a
+    aprovação é do utilizador. Falta: seed do admin de prod, backup off-server da `FIELD_ENCRYPTION_KEY` de prod,
+    cron de backup de prod.
+  - **Atenção:** o repositório é **público**, e `Docs/VPS_CONFIG.md` expõe o IP e a estrutura da VPS; tornar o
+    repo privado desliga o revisor obrigatório do ambiente no plano Free.
+  - Docs atualizados: `DEPLOYMENT.md`, `VPS_CONFIG.md`, `SECURITY.md`, `ARCHITECTURE.md`, `CODING-READINESS.md`,
+    `TODO.md`, `CONTRIBUTING.md`, `CLAUDE.md`.
+
 - **Nota para mais tarde — proteção do repositório e verificação de vulnerabilidades, 2026-10-03.**
   Ainda **não** está configurado: branch protection/rulesets, Dependabot (`.github/dependabot.yml`),
-  secret scanning, CodeQL e scan de imagens; o `pnpm audit` do CI é só informativo (`|| true`) e a baseline
-  tem 0 critical / 32 high por tratar. Proteger só a `master` não afeta o deploy de staging (corre num push
+  secret scanning, CodeQL e scan de imagens; o `pnpm audit` do CI é um gate com baseline (falha acima de 0 critical / 32 high; bloqueou um
+  deploy em 2026-10-03 até o override do `multer` baixar para 27 high) e há highs por tratar. Proteger só a `master` não afeta o deploy de staging (corre num push
   a `staging` ou manualmente); proteger a própria `staging` obriga a que o deploy venha de um PR.
   Checklist em `TODO.md` → DevOps → «Repository protection & vulnerability checks».
 
@@ -70,7 +101,8 @@
   de copiar a referência, que constrói na VPS.
   - **Workflows:** `ci.yml` (Lint & Typecheck, Unit Tests, Dependency audit, Docker build check; também
     `workflow_call`), `deploy-staging.yml` (push a `staging` + manual: ci → build → SSH),
-    `deploy-production.yml` (só manual e só a partir de `master`; ambiente `PRODUCTION` com aprovação).
+    `deploy-production.yml` (hoje: push a `prod` + manual, só a branch `prod`; ambiente `PRODUCTION` com aprovação — era
+    «só manual a partir de `master`» até 2026-10-03).
     Imagens com tag `<env>-<sha>` — antes a tag `<sha>` era partilhada e o bundle web (que embute
     `NEXT_PUBLIC_API_URL`) de staging e prod podia misturar-se.
   - **`scripts/vps/deploy.sh`:** pull → postgres/redis → backup `pg_dump` (só prod) → `migrate deploy`
@@ -207,7 +239,7 @@
     trigger `audit_log`; serviço `seed` no profile `tools`), CI corrigido (`master` em vez de `main`;
     deploy fictício por `echo` → SSH + smoke test). Imagem da API construída (falta re-testar após o
     fix do `@cap/database`); imagem web ainda por confirmar; compose/CI nunca executados.
-  - **Sem VPS nem domínio ainda (decisão 2026-09-26):** só a estrutura/configs ficam prontas.
+  - **Sem VPS nem domínio ainda (decisão 2026-09-26; superado em 2026-10-03, ver a primeira entrada):** só a estrutura/configs ficam prontas.
     nginx agnóstico ao domínio (`nginx.conf` + `conf.d/app.conf` HTTP em qualquer host;
     `tls.conf.example` para ativar HTTPS depois), `.env.prod.example`, `.gitignore` para
     `.env.prod`/certs, e runbook completo em `DEPLOYMENT.md` §0 (o que fazer quando existir a VPS e
