@@ -9,6 +9,7 @@ import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
+import { getJson } from "../../../lib/get-json";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -138,55 +139,55 @@ export default function DashboardPage() {
   /* ── Queries ── */
   const { data: todayAppts = [], isLoading: todayLoading } = useQuery<TodayAppt[]>({
     queryKey: ["appointments", "calendar", todayStr, todayStr],
-    queryFn:  () => fetch(`/api/appointments?from=${todayStr}&to=${todayStr}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${todayStr}&to=${todayStr}`),
     staleTime: 30_000,
   });
 
   const { data: monthAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", monthStart, monthEnd],
-    queryFn:  () => fetch(`/api/appointments?from=${monthStart}&to=${monthEnd}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${monthStart}&to=${monthEnd}`),
     staleTime: 60_000,
   });
 
   const { data: calAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", calMonthStart, calMonthEnd],
-    queryFn:  () => fetch(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`),
     staleTime: 60_000,
   });
 
   const { data: selectedAppts = [], isLoading: selectedLoading } = useQuery<TodayAppt[]>({
     queryKey: ["appointments", "calendar", selectedDay, selectedDay],
-    queryFn:  () => fetch(`/api/appointments?from=${selectedDay}&to=${selectedDay}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${selectedDay}&to=${selectedDay}`),
     staleTime: 30_000,
   });
 
   const { data: patientsList } = useQuery<{ data: RecentPatient[] }>({
     queryKey: ["patients", "dashboard"],
-    queryFn:  () => fetch("/api/patients?limit=20").then(r => r.json()),
+    queryFn:  () => getJson("/api/patients?limit=20"),
     staleTime: 60_000,
   });
 
   const { data: invoicesData } = useQuery<{ data: InvoiceRow[] }>({
     queryKey: ["invoices", "dashboard"],
-    queryFn:  () => fetch("/api/invoices?limit=5").then(r => r.json()),
+    queryFn:  () => getJson("/api/invoices?limit=5"),
     staleTime: 30_000,
   });
 
   const { data: billingSummary } = useQuery<BillingSummary>({
     queryKey: ["bff", "billing-summary"],
-    queryFn:  () => fetch("/api/bff/billing-summary").then(r => r.json()),
+    queryFn:  () => getJson("/api/bff/billing-summary"),
     staleTime: 60_000,
   });
 
   const { data: healthPlans = [] } = useQuery<HealthPlan[]>({
     queryKey: ["health-plans", "all"],
-    queryFn:  () => fetch("/api/health-plans").then(r => r.json()),
+    queryFn:  () => getJson("/api/health-plans"),
     staleTime: 120_000,
   });
 
-  const { data: patients }    = useQuery<{ data: { id: string; fullName: string }[] }>({ queryKey: ["patients-list"],  queryFn: () => fetch("/api/patients?limit=100").then(r => r.json()), staleTime: 60_000 });
-  const { data: staffList }   = useQuery<{ id: string; fullName: string }[]>({ queryKey: ["staff-list"],   queryFn: () => fetch("/api/staff").then(r => r.json()), staleTime: 60_000 });
-  const { data: servicesList} = useQuery<{ id: string; name: string }[]>({   queryKey: ["services-list"], queryFn: () => fetch("/api/services").then(r => r.json()), staleTime: 60_000 });
+  const { data: patients }    = useQuery<{ data: { id: string; fullName: string }[] }>({ queryKey: ["patients-list"],  queryFn: () => getJson("/api/patients?limit=100"), staleTime: 60_000 });
+  const { data: staffList }   = useQuery<{ id: string; fullName: string }[]>({ queryKey: ["staff-list"],   queryFn: () => getJson("/api/staff"), staleTime: 60_000 });
+  const { data: servicesList} = useQuery<{ id: string; name: string }[]>({   queryKey: ["services-list"], queryFn: () => getJson("/api/services"), staleTime: 60_000 });
 
   /* ── Real-time ── */
   useEffect(() => {

@@ -12,6 +12,7 @@ import { useMessage } from "../../../components/ui/message-handler";
 import { Field } from "../../../components/ui/field";
 import { TagPicker, TagBadges } from "../../../components/ui/tag-picker";
 import { useDebouncedValue } from "../../../lib/use-debounced-value";
+import { getJson } from "../../../lib/get-json";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreatePatientSchema, type CreatePatientDto } from "@cap/types";
 import type { Patient, PaginatedResponse } from "@cap/types";
@@ -192,7 +193,7 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
 
   const { data: products = [] } = useQuery<PlanProduct[]>({
     queryKey: ["health-plan-products"],
-    queryFn:  () => fetch("/api/health-plans/products").then(r => r.json()),
+    queryFn:  () => getJson("/api/health-plans/products"),
     staleTime: 120_000,
   });
 
@@ -200,7 +201,7 @@ function PlanModal({ patient, onClose }: { patient: Patient; onClose: () => void
 
   const { data: currentPlan, isLoading: planLoading } = useQuery<HealthPlan>({
     queryKey: ["health-plan", patient.activeHealthPlan?.id],
-    queryFn:  () => fetch(`/api/health-plans/${patient.activeHealthPlan!.id}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/health-plans/${patient.activeHealthPlan!.id}`),
     enabled:  hasplan,
     staleTime: 60_000,
   });
