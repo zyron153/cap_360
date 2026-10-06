@@ -639,6 +639,10 @@ people get push access).
 
 ## Immediate Next Steps
 
+- [ ] **Prod reference data:** staging got the Parametrizações + `services` data from dev on 2026-10-06 (one-off copy,
+  [DEPLOYMENT.md](DEPLOYMENT.md) §0.4); prod starts empty. Agree with the clinic which groups/prices go live and load
+  them the same way, or make the seed ship them (the seed is dev-only and hard-codes dev's `TIPO_SERVICO` → service links).
+
 REVIEW.md's entire fix list (Sections 1–5, incl. all of §4) is now closed. Section 6 is a
 redesign exercise, not an implementation task. What remains in this file below is all
 new-feature / infra work (M3, M5, M9, M10, Phase 4, k8s, backups, k6, ZAP, SMS infra) — each

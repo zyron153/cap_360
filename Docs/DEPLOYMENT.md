@@ -160,6 +160,14 @@ docker compose -p cap360-staging --env-file .env.prod -f docker-compose.prod.yml
 # afterwards remove ADMIN_PASSWORD from .env.prod
 ```
 
+**Reference data (Parametrizações) is not seeded in staging/prod** — the seed only creates the admin, so every
+Parametrizações group starts empty. Staging got a one-off copy from the dev DB on 2026-10-06: the 46 live
+`parametrizacoes` rows (9 groups) plus the 7 active `services` rows, in one transaction that aborts if either table
+is non-empty (a re-run refuses; there is no sync). **`TIPO_SERVICO.codigo` is a `services.id`**, so that group can't be
+copied without the `services` rows — the copy would leave dangling links (null `codigo` is the supported "sem
+preço definido" state). Name the columns in `COPY` (`services` has a different physical column order on dev and
+staging). The dev prices are now on staging. Prod has no such data yet — decide it with the clinic before go-live.
+
 `.env.prod` is never written by the deploy and never in git. **Changing it needs a recreate, not a
 restart** (`restart` keeps the env from container creation time and silently ignores the edit):
 `docker compose … up -d --force-recreate api` (or `web`).

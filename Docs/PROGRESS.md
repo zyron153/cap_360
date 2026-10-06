@@ -5,6 +5,16 @@
 
 ## Done
 
+- **Dados de Parametrizações enviados para o staging — 2026-10-06.** Pedido: pôr no staging todos os dados da BD de
+  dev de Parametrizações. O staging tinha 0 linhas. Copiadas **46 linhas de `parametrizacoes` (9 grupos) + 7 `services`
+  ativos**, numa transação que aborta se alguma das tabelas já tiver dados. Os `services` foram incluídos (decisão da
+  clínica/utilizador) porque `TIPO_SERVICO.codigo` é um `services.id`: sem eles, 7 das 8 ligações ficavam penduradas.
+  Ficaram de fora a linha apagada (soft-delete) "Teste Draft Service" e o serviço inativo correspondente. Verificado
+  por `md5` das duas tabelas (dev = staging), acentos intactos, 7/8 ligações `TIPO_SERVICO` resolvidas (a 8.ª,
+  "Cardiologia", não tem `codigo` nem em dev). A migração `20261007000000_efatura_techplace` só acrescenta uma coluna
+  nula a `services`, por isso continua segura com estas linhas. Sem alterações de código; ver `DEPLOYMENT.md` §0.4.
+  **Os preços de dev (ex.: Consulta Geral 1500) estão agora no staging; o prod continua sem estes dados.**
+
 - **Registo clínico: passagem de endurecimento por dois agentes em paralelo — 2026-10-06.** Pedido: fechar todos os
   pontos ainda abertos e os problemas encontrados, com o módulo a correr de ponta a ponta sem erros.
   - **Backend (agente 1).** Descartar rascunho (`DELETE /clinical-notes/:id`: autor ou admin, só rascunhos, auditado
