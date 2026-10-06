@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { io } from "socket.io-client";
 import { format, isToday } from "date-fns";
-import { Search, Send, Check, CheckCheck, MessageCircle, AlertCircle, UserPlus, CheckCircle2, Plus } from "lucide-react";
+import { ArrowLeft, Search, Send, Check, CheckCheck, MessageCircle, AlertCircle, UserPlus, CheckCircle2, Plus } from "lucide-react";
 import { useMessage } from "@/components/ui/message-handler";
 import { Modal } from "@/components/ui/modal";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
@@ -182,7 +182,7 @@ export default function WhatsAppPage() {
       style={{ height: "calc(100vh - 60px - 48px)" }}
     >
       {/* Left: conversation list */}
-      <div className="w-[320px] shrink-0 border-r border-dim-100 flex flex-col bg-white">
+      <div className={`${selectedId ? "hidden md:flex" : "flex"} w-full md:w-[320px] md:shrink-0 border-r border-dim-100 flex-col bg-white`}>
         <div className="px-4 py-4 border-b border-dim-100">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-display text-[15px] font-semibold text-dim-900">WhatsApp Hub</h2>
@@ -258,7 +258,7 @@ export default function WhatsAppPage() {
       </div>
 
       {/* Right: thread */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className={`${selectedId ? "flex" : "hidden md:flex"} flex-1 flex-col min-w-0`}>
         {!selectedId ? (
           <div className="flex-1 flex items-center justify-center bg-dim-50">
             <div className="text-center">
@@ -274,8 +274,16 @@ export default function WhatsAppPage() {
           </div>
         ) : (
           <>
-            <div className="px-5 py-3.5 border-b border-dim-100 flex items-center gap-3 bg-white">
-              <div className="flex-1 min-w-0">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-dim-100 flex flex-wrap items-center gap-x-3 gap-y-2 bg-white">
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                aria-label="Voltar às conversas"
+                className="md:hidden -ml-1 w-9 h-9 rounded-md flex items-center justify-center text-dim-600 hover:bg-dim-100 transition-colors shrink-0"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="flex-1 min-w-[8rem]">
                 <p className="text-[14px] font-semibold text-dim-900 truncate">{displayName(conv)}</p>
                 <p className="font-mono text-[11px] text-dim-400">{conv.phone}</p>
               </div>

@@ -1,5 +1,9 @@
 # M6a — e-Fatura direct integration (Cabo Verde / DNRE)
 
+> **Being replaced:** the clinic may report through Techplace instead — see
+> [M6b](M6b-efatura-techplace.md). This transport stays the default (`EFATURA_PROVIDER=dnre`) until
+> Techplace covers credit notes and cancellation.
+
 > Status: implemented and unit-tested against DNRE's official XSD pack and sample documents;
 > **not yet run against a live Homologação environment** (needs the clinic's credentials and
 > certificate). Source of truth for the protocol: Manual Técnico v11.0 (2025-03-14) and the OpenAPI

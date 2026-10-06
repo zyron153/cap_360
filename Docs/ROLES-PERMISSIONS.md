@@ -83,11 +83,21 @@
 
 | Action | patient | receptionist | doctor | nurse | lab_tech | admin |
 |---|---|---|---|---|---|---|
-| View clinical notes | 🔒 | summary only | own patients | assigned visits | 🔒 | read (no edit) |
-| Create SOAP note | 🔒 | 🔒 | ✅ (own patients) | 🔒 | 🔒 | 🔒 |
-| Lock note | 🔒 | 🔒 | ✅ auto after 24h | 🔒 | 🔒 | 🔒 |
-| Create prescription | 🔒 | 🔒 | ✅ | 🔒 | 🔒 | 🔒 |
-| Create referral | 🔒 | 🔒 | ✅ | 🔒 | 🔒 | 🔒 |
+| View clinical notes | 🔒 | 🔒 | own notes + others' *finalized* ones while the patient is in treatment today and someone else checked them in (read-only) | 🔒 | 🔒 | read + edit all |
+| Create session note (4 sections + risk) | 🔒 | 🔒 | ✅ (autosaved draft → finalize) | 🔒 | 🔒 | ✅ |
+| Lock note | 🔒 | 🔒 | ✅ auto 24h after finalization | 🔒 | 🔒 | edits any time |
+| Discard a draft (`DELETE /clinical-notes/:id`) | 🔒 | 🔒 | ✅ own drafts only | 🔒 | 🔒 | ✅ any draft |
+| Delete a finalized note, or a draft a prescription/referral refers to | 🔒 | 🔒 | 🔒 never (409) | 🔒 | 🔒 | 🔒 never (409) |
+| Review cross-author reads (`GET /clinical-notes/access-log`) | 🔒 | 🔒 | 🔒 (403) | 🔒 | 🔒 | ✅ |
+| Create prescription | 🔒 | 🔒 | ✅ (may link only their own note for that patient) | 🔒 | 🔒 | 🔒 |
+| Create referral | 🔒 | 🔒 | ✅ (internal: to an active doctor/admin, not themself) | 🔒 | 🔒 | 🔒 |
+| Move a referral's status | 🔒 | 🔒 | ✅ referrer or target, within the transition rules | 🔒 | 🔒 | ✅ may correct any status |
+
+> **Open discrepancy (not decided here):** the two 🔒 in the admin column of *Create prescription* / *Create
+> referral* describe the intent, but the controllers are gated `@Roles("admin", "doctor")` as a whole, so an admin
+> session *can* create both through the API today. Whether admin should be
+> refused is the owner's call; the service already treats admin consistently if it stays allowed (may link any note
+> of that patient).
 
 ### 3.4 Billing (M6)
 
@@ -106,10 +116,14 @@
 
 ### 4.1 Clinical Data Isolation
 
-❌ **Not real.** M7 (clinical notes) doesn't exist (see its module doc). What does exist —
-`patient_notes` on the Patient CRM — is visible identically to admin, receptionist, doctor, *and*
-nurse; there is no "assigned patients only" filter for any role, and no 24h lock/admin-unlock
-mechanism.
+✅ **Real for M7 clinical notes** (see `modules/M7-clinical-records-emr.md` §3 and `SECURITY.md` §3.1):
+authorship-scoped — a doctor sees only their own notes, admin sees all, every other role is refused —
+with one narrow, audited, read-only exception (other authors' finalized notes while the patient is in
+treatment today, put there by someone other than the reader) and a 24h edit lock counted from finalization.
+
+❌ **Still not real for `patient_notes`** (the generic sticky-note field on the Patient CRM, not a clinical
+note): visible identically to admin, receptionist, doctor, *and* nurse, with no "assigned patients only"
+filter and no lock. It is not the place for session content.
 
 ### 4.2 Corporate HR Isolation
 

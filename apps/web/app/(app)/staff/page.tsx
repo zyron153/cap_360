@@ -100,12 +100,12 @@ export default function StaffPage() {
   return (
     <div className="flex flex-col gap-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-[22px] font-bold text-dim-900">Equipa & Turnos</h1>
           <p className="text-[13px] text-dim-500 mt-0.5">Gestão de colaboradores e horários</p>
         </div>
-        <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1">
+        <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1 max-w-full overflow-x-auto">
           <button
             onClick={() => setView("overview")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
@@ -142,7 +142,7 @@ export default function StaffPage() {
       {view === "overview" && (
       <>
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { icon: Users2,      label: "Em Serviço",     value: onDuty,     sub: `de ${staff.length} total`, bg: "bg-emerald-50", cls: "text-emerald-600" },
           { icon: Stethoscope, label: "Médicos",         value: doctors,    sub: "na equipa clínica",        bg: "bg-brand-50",   cls: "text-brand-600"   },
@@ -163,7 +163,7 @@ export default function StaffPage() {
       </div>
 
       {/* Role overview */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {(["doctor", "nurse", "receptionist", "technician"] as const).map((role) => {
           const members = staff.filter((s) => s.role === role);
           const active  = members.filter((s) => s.status === "on_duty").length;
@@ -195,7 +195,7 @@ export default function StaffPage() {
       {/* Staff cards — on duty */}
       <div>
         <h2 className="font-display text-[14px] font-semibold text-dim-800 mb-3">Em Serviço Hoje</h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {staff.filter((s) => s.status === "on_duty").map((member) => {
             const roleMeta = ROLE_META[member.role];
             return (
@@ -246,6 +246,7 @@ export default function StaffPage() {
           <span className="font-mono text-[11px] text-dim-400">{staff.length} colaboradores</span>
         </div>
 
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
             <tr>
@@ -313,6 +314,7 @@ export default function StaffPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
       </>
       )}

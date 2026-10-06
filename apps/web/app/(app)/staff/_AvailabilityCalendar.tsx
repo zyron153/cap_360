@@ -125,7 +125,7 @@ export default function AvailabilityCalendar() {
       const flagged = isBlocked(a.scheduledAt.slice(0, 10));
       out.push({
         id: a.id,
-        title: `${flagged ? "⚠ " : ""}${a.patient.fullName} — ${a.service.name}`,
+        title: `${flagged ? "⚠ " : ""}${a.patient.fullName ?? "Paciente removido"} — ${a.service.name}`,
         start: a.scheduledAt,
         end: new Date(new Date(a.scheduledAt).getTime() + a.durationMinutes * 60_000).toISOString(),
         backgroundColor: STATUS_COLORS[a.status] ?? "#8E8EA8",
@@ -227,7 +227,7 @@ export default function AvailabilityCalendar() {
 
       <Modal open={blockOpen} onClose={() => setBlockOpen(false)} title="Bloquear Agenda" description="Impede novas marcações neste período — não cancela as já existentes" size="sm">
         <div className="px-6 py-5 flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="De" required>
               <input type="date" value={blockForm.startDate} onChange={(e) => setBlockForm((f) => ({ ...f, startDate: e.target.value }))} className={inputCls} />
             </Field>

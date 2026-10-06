@@ -15,16 +15,39 @@
  * Cleanup: DELETE /staff/:id (soft-delete). The email is timestamped so a failed run's leftover
  * can't 409 a retry. /auth/login is throttled to 5/min per IP; this spec logs in 3 times.
  */
-import { test, expect, type Browser } from "@playwright/test";
+import { test, expect, type APIResponse, type Browser, type Page } from "@playwright/test";
 
-const API = "http://localhost:4000/v1";
+// E2E_API points both the setup calls and the browser's /api traffic at a different API instance (e.g. one freshly
+// built from the working tree); unset, it is the same API the web app proxies to.
+const API = process.env.E2E_API ?? "http://localhost:4000/v1";
+
+/** Redirects a page's /api traffic to E2E_API (a no-op when it is unset). */
+async function shim(page: Page) {
+  if (!process.env.E2E_API) return;
+  await page.route("**/api/**", (route) =>
+    route.continue({ url: route.request().url().replace(/^https?:\/\/[^/]+\/api\//, `${API}/`) }),
+  );
+}
+
+test.beforeEach(async ({ page }) => shim(page));
+
+/** Teardown that cannot hide a failure: a swallowed error here is how test patients used to leak. A throttled (429)
+ * call is retried; `allow` lists statuses that are fine for this call (e.g. 404 for something the test already removed). */
+async function must(label: string, call: () => Promise<APIResponse>, allow: number[] = []) {
+  let r = await call();
+  for (let i = 0; i < 3 && r.status() === 429; i++) {
+    await new Promise((res) => setTimeout(res, 5_000));
+    r = await call();
+  }
+  expect(r.ok() || allow.includes(r.status()), `cleanup: ${label} -> ${r.status()}`).toBeTruthy();
+}
 const email = `e2e-admin-pw-${Date.now()}@example.com`;
 const NEW_PASSWORD = "AdminChosen-9x";
 
 test.afterAll(async ({ request }) => {
   const staff = (await request.get(`${API}/staff`).then((r) => r.json())) as { id: string; email: string }[];
   const staffId = staff.find((s) => s.email === email)?.id;
-  if (staffId) await request.delete(`${API}/staff/${staffId}`).catch(() => {});
+  if (staffId) await must("deactivate the staff member", () => request.delete(`${API}/staff/${staffId}`));
 });
 
 /** Logs in through the real login form in a fresh browser context (no bypass admin involved). */

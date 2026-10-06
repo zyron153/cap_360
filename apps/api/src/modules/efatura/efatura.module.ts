@@ -6,6 +6,7 @@ import { EFaturaController } from "./efatura.controller";
 import { EFaturaConfigService } from "./efatura-config.service";
 import { EFaturaAuthService } from "./efatura-auth.service";
 import { EFaturaClientService } from "./efatura-client.service";
+import { TechplaceClientService } from "./techplace/techplace-client.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 
 @Module({
@@ -17,6 +18,7 @@ import { EncryptionService } from "../../common/services/encryption.service";
     EFaturaConfigService,
     EFaturaAuthService,
     EFaturaClientService,
+    TechplaceClientService,
     EncryptionService,
   ],
   exports: [EFaturaService, EFaturaConfigService, BullModule],

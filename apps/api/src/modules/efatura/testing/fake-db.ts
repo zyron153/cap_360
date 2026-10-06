@@ -8,7 +8,7 @@ export interface FakeItem {
   description: string;
   quantity: number;
   total: string;
-  service?: { code: string; name: string } | null;
+  service?: { id?: string; code: string; name: string; price?: string; techplaceProductId?: string | null } | null;
   taxTypeCode?: string | null;
   taxPercentage?: string | null;
   taxExemptionReasonCode?: number | null;
@@ -26,6 +26,7 @@ export interface FakeInvoice {
   status: string;
   issuedAt: Date | null;
   total: string;
+  patientId?: string;
   patient: { fullName: string | null; nif: string | null };
   items: FakeItem[];
   payments: FakePayment[];
@@ -72,6 +73,8 @@ export class FakeDb {
       documentNumber: null,
       repositoryCode: null,
       iud: null,
+      externalId: null,
+      externalCode: null,
       issuedAt: null,
       signedXml: null,
       reason: null,
@@ -138,6 +141,23 @@ export class FakeDb {
       const inv = this.invoices.get(where.invoiceId);
       inv?.items.forEach((i) => Object.assign(i, data));
       return { count: inv?.items.length ?? 0 };
+    },
+  };
+
+  /** The Service rows live inside the invoice items; every item sharing a service id sees the update. */
+  service = {
+    updateMany: async ({ where, data }: any) => {
+      let count = 0;
+      for (const inv of this.invoices.values()) {
+        for (const it of inv.items) {
+          const s = it.service;
+          if (s && s.id === where.id && (s.techplaceProductId ?? null) === where.techplaceProductId) {
+            Object.assign(s, data);
+            count++;
+          }
+        }
+      }
+      return { count };
     },
   };
 

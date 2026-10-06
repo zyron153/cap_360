@@ -169,6 +169,8 @@ export interface EFaturaSubmission {
   documentNumber: number | null;
   /** The platform's unique document id (45 chars); the QR code / public reference. */
   iud: string | null;
+  /** Techplace's number for the sale (e.g. "FRAA-123"); null on the DNRE-direct transport. */
+  externalCode: string | null;
   issuedAt: string | null;
   reason: string | null;
   errorCode: string | null;

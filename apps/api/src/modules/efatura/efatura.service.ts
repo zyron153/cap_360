@@ -5,8 +5,10 @@ import type { Prisma, EFaturaStatus } from "@cap/database";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 import { cvParts } from "../../common/cabo-verde-time";
-import { EFaturaConfigService, type ReadyConfig } from "./efatura-config.service";
+import { EFaturaConfigService, efaturaProvider, type ReadyConfig, type TechplaceConfig } from "./efatura-config.service";
 import { EFaturaClientService } from "./efatura-client.service";
+import { TechplaceClientService, TECHPLACE_UNCERTAIN } from "./techplace/techplace-client.service";
+import { pickMethod, toIssueBody, type TpLine } from "./techplace/techplace-mapper";
 import { EFaturaError, clip } from "./efatura.errors";
 import { buildDfeXml, buildEventXml, normText } from "./dfe/dfe-xml";
 import { signXml } from "./dfe/dfe-signer";
@@ -20,15 +22,18 @@ const MAX_ATTEMPTS = 3;
 /** The platform only accepts online documents issued within 24h of its clock — stop well before that. */
 const STALE_MS = 20 * 3_600_000;
 /** Waiting for something outside the queue (payment, NIF, the primary document). */
-const PARKED = ["AWAITING_PAYMENT", "AWAITING_PRIMARY", "NEEDS_NIF"];
+const PARKED = ["AWAITING_PAYMENT", "AWAITING_PRIMARY", "NEEDS_NIF", "TECHPLACE_UNSUPPORTED"];
 const SWEEP_EVERY_MS = 60_000;
+/** Techplace rows that wait for a human: re-sending would duplicate a sale that may already exist.
+ * The admin's "Retentar" clears the code and is the only way back into the queue. */
+const NO_AUTO_RETRY = [TECHPLACE_UNCERTAIN, "TECHPLACE_TOTAL_MISMATCH"];
 
 type Tx = Prisma.TransactionClient;
 
 /** Everything about a submission that is safe to show (never the encrypted signed XML). */
 const PUBLIC_FIELDS = {
   id: true, invoiceId: true, purpose: true, paymentId: true, status: true, documentTypeCode: true,
-  year: true, ledCode: true, serie: true, documentNumber: true, iud: true, issuedAt: true, reason: true,
+  year: true, ledCode: true, serie: true, documentNumber: true, iud: true, externalCode: true, issuedAt: true, reason: true,
   errorCode: true, errorMessage: true, retryCount: true, submittedAt: true, acceptedAt: true,
   createdAt: true, updatedAt: true,
 } as const;
@@ -38,7 +43,7 @@ type Sub = Prisma.EFaturaSubmissionGetPayload<{
     invoice: {
       include: {
         patient: { select: { fullName: true; nif: true } };
-        items: { include: { service: { select: { code: true; name: true } } } };
+        items: { include: { service: { select: { id: true; code: true; name: true; price: true; techplaceProductId: true } } } };
         payments: true;
       };
     };
@@ -62,7 +67,8 @@ export class EFaturaService {
     private readonly config: EFaturaConfigService,
     private readonly client: EFaturaClientService,
     private readonly encryption: EncryptionService,
-    @InjectQueue("efatura") private readonly queue: Queue
+    @InjectQueue("efatura") private readonly queue: Queue,
+    private readonly techplace: TechplaceClientService
   ) {}
 
   // ── Scheduling (used by billing) ───────────────────────────────────────────
@@ -135,19 +141,14 @@ export class EFaturaService {
 
     try {
       const sub = await this.load(id);
+      if (efaturaProvider() === "techplace") return await this.processTechplace(sub);
       const resolved = await this.config.resolve();
       if (!resolved.enabled) return void (await this.park(id, "DISABLED", "Integração e-Fatura desativada"));
       if (!resolved.ok) throw new EFaturaError("NOT_CONFIGURED", `Configuração incompleta: ${resolved.missing.join("; ")}`, false);
       const cfg = resolved.config;
 
       const outcome = await this.prepareIfNeeded(sub, cfg);
-      if (outcome.kind === "skip") {
-        return void (await this.prisma.eFaturaSubmission.update({
-          where: { id },
-          data: { status: outcome.status, errorCode: null, errorMessage: outcome.message ? clip(outcome.message) : null },
-        }));
-      }
-      if (outcome.kind === "wait") return void (await this.park(id, outcome.code, outcome.message));
+      if (await this.settle(id, outcome)) return;
 
       await this.send(await this.load(id), cfg);
     } catch (e) {
@@ -159,7 +160,7 @@ export class EFaturaService {
   /** Re-queues anything that fell through the cracks: lost jobs, crashed workers, and failed
    * attempts whose back-off has elapsed (1, 2, 4 … 60 minutes). */
   async sweep(): Promise<number> {
-    const resolved = await this.config.resolve();
+    const resolved = efaturaProvider() === "techplace" ? await this.config.resolveTechplace() : await this.config.resolve();
     if (!resolved.enabled || !resolved.ok) return 0;
     const now = Date.now();
     const live = resolved.config.goLiveAt;
@@ -174,6 +175,7 @@ export class EFaturaService {
     });
     let n = 0;
     for (const r of rows) {
+      if (r.errorCode && NO_AUTO_RETRY.includes(r.errorCode)) continue;
       const age = now - r.updatedAt.getTime();
       const parked = r.status === "pending" && r.errorCode != null && PARKED.includes(r.errorCode);
       const due =
@@ -209,7 +211,9 @@ export class EFaturaService {
     const toCancel = subs.filter((s) => open.includes(s.status) && s.id !== primary.id).map((s) => s.id);
 
     // Reported to DNRE (or possibly so: a send whose answer was lost) → the platform must be told.
-    const maybeLive = primary.status === "accepted" || (primary.status === "error" && primary.submittedAt != null && primary.iud != null);
+    const maybeLive =
+      primary.status === "accepted" ||
+      (primary.status === "error" && primary.submittedAt != null && (primary.iud != null || primary.externalId != null || primary.errorCode === TECHPLACE_UNCERTAIN));
     if (!maybeLive) {
       await tx.eFaturaSubmission.updateMany({ where: { id: { in: [primary.id, ...toCancel] } }, data: { status: "cancelled" } });
       return [];
@@ -231,7 +235,7 @@ export class EFaturaService {
         invoice: {
           include: {
             patient: { select: { fullName: true, nif: true } },
-            items: { include: { service: { select: { code: true, name: true } } } },
+            items: { include: { service: { select: { id: true, code: true, name: true, price: true, techplaceProductId: true } } } },
             payments: true,
           },
         },
@@ -602,5 +606,161 @@ export class EFaturaService {
       select: { id: true },
     });
     for (const r of waiting) await this.enqueue(r.id);
+  }
+
+  // ── Techplace transport ─────────────────────────────────────────────────────
+  // Techplace signs and reports to DNRE for us, so there is no XML, number or certificate here:
+  // CAP only hands over a fully paid sale (Fatura-Recibo / Talão de Venda) and records the sale's
+  // number. What its public API cannot do yet (unpaid Fatura, receipts, credit notes, voids) is
+  // parked as TECHPLACE_UNSUPPORTED for a human — never failed silently. See M6b.
+
+  /** Applies a skip/wait decision; true = the submission is settled and nothing is sent. */
+  private async settle(id: string, outcome: Outcome): Promise<boolean> {
+    if (outcome.kind === "skip") {
+      await this.prisma.eFaturaSubmission.update({
+        where: { id },
+        data: { status: outcome.status, errorCode: null, errorMessage: outcome.message ? clip(outcome.message) : null },
+      });
+      return true;
+    }
+    if (outcome.kind === "wait") {
+      await this.park(id, outcome.code, outcome.message);
+      return true;
+    }
+    return false;
+  }
+
+  private async processTechplace(sub: Sub): Promise<void> {
+    // A sale that may exist in Techplace waits for a human; only "Retentar" (which clears the code) re-enters.
+    if (sub.errorCode && NO_AUTO_RETRY.includes(sub.errorCode)) {
+      return void (await this.prisma.eFaturaSubmission.update({ where: { id: sub.id }, data: { status: "error" } }));
+    }
+    const resolved = await this.config.resolveTechplace();
+    if (!resolved.enabled) return void (await this.park(sub.id, "DISABLED", "Integração e-Fatura desativada"));
+    if (!resolved.ok) throw new EFaturaError("NOT_CONFIGURED", `Configuração incompleta: ${resolved.missing.join("; ")}`, false);
+
+    if (sub.purpose === "issue") return this.issueTechplace(sub, resolved.config);
+    const unsupported: Outcome = { kind: "wait", code: "TECHPLACE_UNSUPPORTED", message: "O Techplace ainda não suporta este documento: trate-o no Techplace" };
+    await this.settle(sub.id, sub.purpose === "receipt" ? this.receiptOutcome(sub, unsupported) : unsupported);
+  }
+
+  /** A payment already covered by a Fatura-Recibo / Talão needs no receipt; any other is unsupported. */
+  private receiptOutcome(sub: Sub, unsupported: Outcome): Outcome {
+    const primary = sub.references;
+    if (!primary || !sub.payment) return { kind: "skip", status: "not_required", message: "Recibo sem documento de origem" };
+    if (primary.status === "cancelled") return { kind: "skip", status: "cancelled" };
+    const settled = primary.documentTypeCode === DOC_TYPE_CODE.invoice_receipt || primary.documentTypeCode === DOC_TYPE_CODE.sales_receipt;
+    return primary.status === "not_required" || settled ? { kind: "skip", status: "not_required", message: "O pagamento já consta da fatura-recibo" } : unsupported;
+  }
+
+  private async issueTechplace(sub: Sub, cfg: TechplaceConfig): Promise<void> {
+    const inv = sub.invoice;
+    const totalCents = toCents(inv.total);
+    // The sale already exists there (e.g. its total was wrong and an admin fixed it): never POST again.
+    if (sub.externalId) return this.finishTechplace(sub.id, sub.externalId, cfg, totalCents);
+    if (inv.status === "cancelled") return void (await this.settle(sub.id, { kind: "skip", status: "cancelled" }));
+    if (inv.status === "draft") return void (await this.park(sub.id, "AWAITING_PAYMENT", "A fatura ainda é um rascunho"));
+    if (cfg.goLiveAt && inv.issuedAt && inv.issuedAt < cfg.goLiveAt) {
+      return void (await this.settle(sub.id, { kind: "skip", status: "not_required", message: "Fatura emitida antes da data de arranque da e-Fatura" }));
+    }
+
+    const now = new Date();
+    const cv = cvParts(now);
+    const items = this.items(sub);
+    const itemsCents = items.reduce((s, i) => s + i.totalCents, 0);
+    if (itemsCents !== totalCents) {
+      throw new EFaturaError("TOTAL_MISMATCH", `A soma das linhas (${fmtCents(itemsCents)}) difere do total da fatura (${fmtCents(totalCents)})`, false);
+    }
+    const sameDay = inv.payments.filter((p) => cvParts(p.paidAt).date === cv.date);
+    const paidSameDayCents = sameDay.reduce((s, p) => s + toCents(p.amount), 0);
+    const nif = this.nifOf(sub);
+    const decision = chooseDocument({ totalCents, paidSameDayCents, hasNif: !!nif });
+    if ("wait" in decision) {
+      return void (await this.settle(
+        sub.id,
+        decision.wait === "NOTHING_TO_REPORT" ? { kind: "skip", status: "not_required", message: decision.message } : { kind: "wait", code: decision.wait, message: decision.message }
+      ));
+    }
+    if (decision.kind === "invoice") {
+      return void (await this.park(sub.id, "TECHPLACE_UNSUPPORTED", "Fatura por pagar: o Techplace ainda só regista faturas pagas na totalidade"));
+    }
+    const kind = decision.kind;
+    const methodId = pickMethod(sameDay.map((p) => ({ amountCents: toCents(p.amount), method: p.method })), cfg.methods);
+
+    // The sale names a customer (NIF) and products that must exist in Techplace first.
+    let customerExt: string | undefined;
+    if (nif && kind === "invoice_receipt") {
+      const name = normText(inv.patient.fullName ?? "").slice(0, 150);
+      if (name.length < 3) throw new EFaturaError("BAD_RECEIVER_NAME", "O nome do paciente é demasiado curto para a fatura", false);
+      const c = await this.techplace.syncCustomer(cfg.credentials, {
+        DESIG: name, NIF: nif, ESTADO: "A", IND_COLETIVO: "N", glb_user_ID: cfg.userId, Entidade_ID: cfg.entityId, CODIGO_EXT: nif,
+      });
+      // the customer is keyed by NIF, so "already there" is the normal answer from the second invoice on
+      if (!c.ok && c.code !== "DUPLICATE_ENTRY") throw new EFaturaError(c.code, c.message, false);
+      customerExt = nif;
+    }
+    const lines: TpLine[] = [];
+    let discountCents = 0;
+    const known = new Map<string, string>();
+    for (const it of inv.items) {
+      const cents = toCents(it.total);
+      if (cents < 0) {
+        discountCents -= cents;
+        continue;
+      }
+      lines.push({ productId: await this.techplaceProduct(it.service, cfg, known), quantity: it.quantity, totalCents: cents });
+    }
+
+    const body = toIssueBody(
+      { kind, codigoExt: sub.id, customerExt, lines, discountCents, totalCents, methodId },
+      { entityId: cfg.entityId, userId: cfg.userId, types: cfg.types, conditionId: cfg.conditionId }
+    );
+    await this.prisma.eFaturaSubmission.update({
+      where: { id: sub.id },
+      data: { documentTypeCode: DOC_TYPE_CODE[kind], issuedAt: now, submittedAt: now, retryCount: { increment: 1 }, errorCode: null, errorMessage: null },
+    });
+    const r = await this.techplace.issue(cfg.credentials, body);
+    if (!r.ok) {
+      this.logger.warn(`Submission ${sub.id} refused by Techplace: ${r.code}`);
+      await this.prisma.eFaturaSubmission.update({ where: { id: sub.id }, data: { status: "rejected", errorCode: r.code.slice(0, 50), errorMessage: clip(r.message) } });
+      return;
+    }
+    await this.prisma.eFaturaSubmission.update({ where: { id: sub.id }, data: { externalId: r.data.faturaId, externalCode: r.data.vendaCode.slice(0, 50) } });
+    // Paid in full → the sale already covers every payment: receipt rows are redundant.
+    await this.prisma.eFaturaSubmission.updateMany({ where: { invoiceId: inv.id, purpose: "receipt", status: { in: ["pending", "error"] } }, data: { status: "not_required" } });
+    await this.finishTechplace(sub.id, r.data.faturaId, cfg, totalCents);
+  }
+
+  /** The sale exists in Techplace: confirm it recorded our total, then mark the document issued. */
+  private async finishTechplace(id: string, faturaId: string, cfg: TechplaceConfig, totalCents: number): Promise<void> {
+    const recorded = await this.techplace.saleTotal(cfg.credentials, faturaId);
+    if (recorded != null && toCents(recorded) !== totalCents) {
+      throw new EFaturaError(
+        "TECHPLACE_TOTAL_MISMATCH",
+        `O total no Techplace (${fmtCents(toCents(recorded))}) difere do da fatura (${fmtCents(totalCents)}): corrija a venda no Techplace e carregue em Retentar`,
+        false
+      );
+    }
+    await this.prisma.eFaturaSubmission.update({ where: { id }, data: { status: "accepted", acceptedAt: new Date(), errorCode: null, errorMessage: null } });
+  }
+
+  /** The Techplace product behind an invoice line: registered the first time a Service is invoiced. */
+  private async techplaceProduct(svc: Sub["invoice"]["items"][number]["service"], cfg: TechplaceConfig, known: Map<string, string>): Promise<string> {
+    if (!svc) {
+      if (cfg.fallbackProductId) return cfg.fallbackProductId;
+      throw new EFaturaError("TECHPLACE_NO_PRODUCT", "Linha sem serviço: defina o produto genérico do Techplace (Configurações → e-Fatura)", false);
+    }
+    const have = svc.techplaceProductId ?? known.get(svc.id);
+    if (have) return have;
+    const r = await this.techplace.registerProduct(cfg.credentials, {
+      CODIGO_EXT: svc.code, DESIG: normText(svc.name).slice(0, 150), produto_servico: "S", Vendivel: "V",
+      unidade_ID: cfg.unitId, iva_ID: cfg.ivaId, Preco_venda: Number(svc.price), glb_user_ID: cfg.userId, Entidade_ID: cfg.entityId,
+    });
+    // ponytail: if Techplace answers "already exists" we have no id to read back — an admin sets
+    // Service.techplaceProductId by hand. Add a product lookup once Techplace documents one.
+    if (!r.ok) throw new EFaturaError(r.code, r.message, false);
+    await this.prisma.service.updateMany({ where: { id: svc.id, techplaceProductId: null }, data: { techplaceProductId: r.data.produtoID } });
+    known.set(svc.id, r.data.produtoID);
+    return r.data.produtoID;
   }
 }

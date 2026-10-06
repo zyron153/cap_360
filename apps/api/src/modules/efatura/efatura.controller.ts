@@ -11,6 +11,7 @@ import { CurrentUser, type JwtUser } from "../../common/decorators/current-user.
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { EFaturaConfigService } from "./efatura-config.service";
 import { EFaturaAuthService } from "./efatura-auth.service";
+import { TechplaceClientService } from "./techplace/techplace-client.service";
 import { EFaturaError } from "./efatura.errors";
 
 /** Admin-only configuration of the e-Fatura (DNRE) integration. Secrets are write-only: no
@@ -20,7 +21,8 @@ import { EFaturaError } from "./efatura.errors";
 export class EFaturaController {
   constructor(
     private readonly config: EFaturaConfigService,
-    private readonly auth: EFaturaAuthService
+    private readonly auth: EFaturaAuthService,
+    private readonly techplace: TechplaceClientService
   ) {}
 
   @Get("config")
@@ -75,6 +77,21 @@ export class EFaturaController {
       return back("connected");
     } catch (e) {
       return back("error", e instanceof EFaturaError ? e.message : "Não foi possível concluir a autorização");
+    }
+  }
+
+  /** "Testar ligação" (Techplace transport): logs in and lists the ids the admin has to copy into the
+   * settings. Runs with the credentials alone, before the rest of the form is filled in. */
+  @Post("techplace/test")
+  @HttpCode(HttpStatus.OK)
+  async testTechplace() {
+    const creds = await this.config.getTechplaceCredentials();
+    if (!creds) return { error: "Preencha a chave de API, ou o utilizador e a palavra-passe, do Techplace primeiro" };
+    try {
+      return await this.techplace.lookups(creds);
+    } catch (e) {
+      if (e instanceof EFaturaError) return { error: e.message };
+      throw e;
     }
   }
 

@@ -3,15 +3,38 @@
  * real UI. Company/product/plan setup goes through the API directly, same reasoning as the other
  * Financeiro specs — only the renewal flow itself needs to be exercised through the browser.
  *
- * Cleanup note: health plan instances have no delete endpoint at all (only products can be
+ * Cleanup note: health plan instances have no delete endpoint at all (only products and companies can be
  * soft-deactivated), so the plan row created here is left in the dev DB — same constraint the
  * backend integration test works around by deleting directly via Prisma, which isn't available
- * from a browser-driven e2e spec. The product is deactivated afterward to at least keep it out of
- * the active catalogue.
+ * from a browser-driven e2e spec. The product and the company are deactivated afterward to at least
+ * keep them out of the active catalogue (the company used to be left active).
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIResponse, type Page } from "@playwright/test";
 
-const API = "http://localhost:4000/v1";
+// E2E_API points both the setup calls and the browser's /api traffic at a different API instance (e.g. one freshly
+// built from the working tree); unset, it is the same API the web app proxies to.
+const API = process.env.E2E_API ?? "http://localhost:4000/v1";
+
+/** Redirects a page's /api traffic to E2E_API (a no-op when it is unset). */
+async function shim(page: Page) {
+  if (!process.env.E2E_API) return;
+  await page.route("**/api/**", (route) =>
+    route.continue({ url: route.request().url().replace(/^https?:\/\/[^/]+\/api\//, `${API}/`) }),
+  );
+}
+
+test.beforeEach(async ({ page }) => shim(page));
+
+/** Teardown that cannot hide a failure: a swallowed error here is how test patients used to leak. A throttled (429)
+ * call is retried; `allow` lists statuses that are fine for this call (e.g. 404 for something the test already removed). */
+async function must(label: string, call: () => Promise<APIResponse>, allow: number[] = []) {
+  let r = await call();
+  for (let i = 0; i < 3 && r.status() === 429; i++) {
+    await new Promise((res) => setTimeout(res, 5_000));
+    r = await call();
+  }
+  expect(r.ok() || allow.includes(r.status()), `cleanup: ${label} -> ${r.status()}`).toBeTruthy();
+}
 
 let companyId: string;
 let productId: string;
@@ -53,7 +76,8 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.afterAll(async ({ request }) => {
-  if (productId) await request.delete(`${API}/health-plans/products/${productId}`);
+  if (productId) await must("deactivate the product", () => request.delete(`${API}/health-plans/products/${productId}`));
+  if (companyId) await must("deactivate the company", () => request.delete(`${API}/companies/${companyId}`));
 });
 
 test("renewing an expired plan from its detail page extends the validity and flips the status badge", async ({ page }) => {

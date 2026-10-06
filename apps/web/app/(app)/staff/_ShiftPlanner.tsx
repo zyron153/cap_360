@@ -233,7 +233,7 @@ export default function ShiftPlanner() {
         {draft && (
           <>
             <div className="px-6 py-5 flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Início" required>
                   <input type="time" value={draft.startTime} onChange={(e) => setDraft((d) => d && { ...d, startTime: e.target.value })} className={inputCls} />
                 </Field>

@@ -6,9 +6,32 @@
  * Company/product/plan/patient setup goes through the API directly, same reasoning as the other
  * Financeiro/health-plan specs — only the member add/remove flow itself needs the browser.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIResponse, type Page } from "@playwright/test";
 
-const API = "http://localhost:4000/v1";
+// E2E_API points both the setup calls and the browser's /api traffic at a different API instance (e.g. one freshly
+// built from the working tree); unset, it is the same API the web app proxies to.
+const API = process.env.E2E_API ?? "http://localhost:4000/v1";
+
+/** Redirects a page's /api traffic to E2E_API (a no-op when it is unset). */
+async function shim(page: Page) {
+  if (!process.env.E2E_API) return;
+  await page.route("**/api/**", (route) =>
+    route.continue({ url: route.request().url().replace(/^https?:\/\/[^/]+\/api\//, `${API}/`) }),
+  );
+}
+
+test.beforeEach(async ({ page }) => shim(page));
+
+/** Teardown that cannot hide a failure: a swallowed error here is how test patients used to leak. A throttled (429)
+ * call is retried; `allow` lists statuses that are fine for this call (e.g. 404 for something the test already removed). */
+async function must(label: string, call: () => Promise<APIResponse>, allow: number[] = []) {
+  let r = await call();
+  for (let i = 0; i < 3 && r.status() === 429; i++) {
+    await new Promise((res) => setTimeout(res, 5_000));
+    r = await call();
+  }
+  expect(r.ok() || allow.includes(r.status()), `cleanup: ${label} -> ${r.status()}`).toBeTruthy();
+}
 
 let productId: string;
 let planId: string;
@@ -61,11 +84,15 @@ test.beforeAll(async ({ request }) => {
   planNumber = planBody.planNumber;
 });
 
+// The test removes the member itself, so removing it again is allowed to say "not a member" (400/404/409) — anything else is a failure.
+// The plan row stays (no API deletes a plan); its product is deactivated and both patients erased.
 test.afterAll(async ({ request }) => {
-  if (planId && memberPatientId) await request.delete(`${API}/health-plans/${planId}/members/${memberPatientId}`);
-  if (solePatientId) await request.delete(`${API}/patients/${solePatientId}`);
-  if (memberPatientId) await request.delete(`${API}/patients/${memberPatientId}`);
-  if (productId) await request.delete(`${API}/health-plans/products/${productId}`);
+  if (planId && memberPatientId) {
+    await must("remove the member", () => request.delete(`${API}/health-plans/${planId}/members/${memberPatientId}`), [400, 404, 409]);
+  }
+  if (solePatientId) await must("erase the plan holder", () => request.delete(`${API}/patients/${solePatientId}`));
+  if (memberPatientId) await must("erase the member patient", () => request.delete(`${API}/patients/${memberPatientId}`));
+  if (productId) await must("deactivate the product", () => request.delete(`${API}/health-plans/products/${productId}`));
 });
 
 test("adding and removing a member from the plan detail page updates the Membros list", async ({ page }) => {

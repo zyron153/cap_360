@@ -266,4 +266,42 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
     const invoice = await repo.findById("inv-x");
     expect(invoice).toBeNull();
   });
+
+  describe("nextInvoiceNumber — highest issued + 1, never COUNT + 1", () => {
+    const txRaw = { $executeRaw: jest.fn(), $queryRaw: jest.fn() };
+    const sqlOf = (call: unknown[]) => (call[0] as TemplateStringsArray).join("?");
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-10-06T12:00:00Z"));
+      prisma.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(txRaw));
+      txRaw.$executeRaw.mockResolvedValue(1);
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      prisma.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    });
+
+    it("formats the next number from the highest sequence this year, zero-padded to four digits", async () => {
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 93n }]);
+      expect(await repo.nextInvoiceNumber()).toBe("INV-2026-0093");
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 12345n }]);
+      expect(await repo.nextInvoiceNumber()).toBe("INV-2026-12345"); // padStart never truncates
+    });
+
+    it("reads MAX of the numeric suffix of this year's numbers (a gap can't make it collide); it does not count rows", async () => {
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 1n }]);
+      await repo.nextInvoiceNumber();
+      const call = txRaw.$queryRaw.mock.calls[0];
+      expect(sqlOf(call)).toMatch(/MAX\(/);
+      expect(sqlOf(call)).not.toMatch(/COUNT\(/i);
+      expect(call.slice(1)).toEqual(["^INV-2026-([0-9]+)$", "INV-2026-%"]); // the year's prefix, as bound parameters
+    });
+
+    it("still takes the per-year advisory lock inside the transaction", async () => {
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 1n }]);
+      await repo.nextInvoiceNumber();
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(sqlOf(txRaw.$executeRaw.mock.calls[0])).toMatch(/pg_advisory_xact_lock/);
+    });
+  });
 });

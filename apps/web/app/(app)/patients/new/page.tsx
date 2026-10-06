@@ -79,8 +79,8 @@ export default function NewPatientPage() {
           <h2 className="font-display text-[14px] font-semibold text-dim-900">Informação Pessoal</h2>
         </div>
 
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <Field label="Nome Completo" required error={errors.fullName?.message}>
               <input {...register("fullName")} placeholder="Ex: Maria da Silva" className={inputCls} />
             </Field>
@@ -111,13 +111,13 @@ export default function NewPatientPage() {
             <input {...register("nif")} inputMode="numeric" maxLength={9} placeholder="123456789" className={inputCls} />
           </Field>
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Email">
               <input type="email" {...register("email")} placeholder="paciente@email.com" className={inputCls} />
             </Field>
           </div>
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Morada">
               <textarea
                 {...register("address")}
@@ -128,7 +128,7 @@ export default function NewPatientPage() {
             </Field>
           </div>
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Etiquetas">
               <TagPicker nome="TAG_PACIENTE" value={tags} onChange={(v) => setValue("tags", v)} />
             </Field>

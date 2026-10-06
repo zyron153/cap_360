@@ -356,7 +356,7 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-5">
 
       {/* ── KPI Stats ── */}
-      <div className="grid grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {STATS.map((s) => (
           <div key={s.label} className={`${CARD} p-[18px] flex flex-col gap-2.5 hover:shadow-[0_4px_12px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.04)] transition-shadow`}>
             <div className="flex items-center justify-between">
@@ -381,7 +381,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Main Grid ── */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 340px" }}>
+      <div className="grid gap-5 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
 
         {/* Appointment Timeline */}
         <div className={CARD}>
@@ -419,7 +419,7 @@ export default function DashboardPage() {
                     <div className={`w-0.5 ${LINE_CLS[st.lineState]} rounded-sm shrink-0 relative`}>
                       <span className={`absolute top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full ${DOT_CLS[st.lineState]} border-2 border-white`}/>
                     </div>
-                    <div className={`flex-1 ${CARD_CLS[st.card]} rounded-[10px] px-3 py-2.5 flex items-center gap-2.5 border border-transparent hover:border-dim-200 hover:shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-all`}>
+                    <div className={`flex-1 min-w-0 ${CARD_CLS[st.card]} rounded-[10px] px-3 py-2.5 flex items-center gap-2.5 border border-transparent hover:border-dim-200 hover:shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-all`}>
                       <div className={`w-8 h-8 rounded-full ${AVATAR_CLS[st.avatar]} font-semibold text-[12px] flex items-center justify-center shrink-0`}>
                         {initials(appt.patient.fullName) || "?"}
                       </div>
@@ -427,7 +427,7 @@ export default function DashboardPage() {
                         <div className="font-semibold text-[13px] text-dim-900 truncate">{appt.patient.fullName ?? "Paciente removido"}</div>
                         <div className="text-[11px] text-dim-500 mt-0.5">{appt.service?.name ?? "—"}</div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2 shrink-0">
                         <span className="font-mono text-[10px] text-dim-500">{appt.staff?.fullName ?? "—"}</span>
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${st.pillCls}`}>{st.label}</span>
                       </div>
@@ -514,6 +514,7 @@ export default function DashboardPage() {
             <Plus className="w-2.5 h-2.5"/> Novo Paciente
           </button>
         </div>
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
             <tr>{["Paciente","Telefone","Registado em","Plano"].map(h => (
@@ -542,10 +543,11 @@ export default function DashboardPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* ── Bottom Grid ── */}
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
         {/* Billing */}
         <div className={CARD}>
@@ -558,6 +560,7 @@ export default function DashboardPage() {
             </div>
             <button className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-dim-100 text-dim-600 hover:bg-dim-200 transition-colors">Ver Tudo</button>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>{["Paciente","Fatura","Valor","Estado"].map((h, i) => (
@@ -582,6 +585,7 @@ export default function DashboardPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Bar chart — real data from monthAppts grouped by service */}

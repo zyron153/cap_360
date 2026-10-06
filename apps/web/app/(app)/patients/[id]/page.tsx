@@ -63,9 +63,9 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
     return (
       <div className="flex flex-col gap-5 animate-pulse">
         <div className="w-24 h-3 bg-dim-100 rounded" />
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="col-span-1 bg-dim-100 rounded-[16px] h-72" />
-          <div className="col-span-2 bg-dim-100 rounded-[16px] h-72" />
+          <div className="lg:col-span-2 bg-dim-100 rounded-[16px] h-72" />
         </div>
       </div>
     );
@@ -91,9 +91,9 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
         <ArrowLeft className="w-3.5 h-3.5" /> Pacientes
       </Link>
 
-      <div className="grid grid-cols-3 gap-5 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
         {/* Profile card */}
-        <div className="col-span-1 flex flex-col gap-4">
+        <div className="lg:col-span-1 flex flex-col gap-4">
           <div className={CARD}>
             {/* Avatar header */}
             <div className="bg-gradient-to-br from-brand-50 via-brand-100/60 to-brand-100 px-6 py-8 text-center border-b border-brand-100">
@@ -169,7 +169,7 @@ export default function PatientProfilePage({ params }: { params: Promise<{ id: s
         </div>
 
         {/* Timeline */}
-        <div className={`col-span-2 ${CARD}`}>
+        <div className={`lg:col-span-2 ${CARD}`}>
           <div className="px-6 py-4 border-b border-dim-100 flex items-center justify-between">
             <h3 className="font-display font-semibold text-[15px] text-dim-900">Histórico</h3>
             <span className="font-mono text-[11px] text-dim-400">{timeline?.length ?? 0} eventos</span>

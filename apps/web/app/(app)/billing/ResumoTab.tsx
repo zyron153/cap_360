@@ -46,7 +46,7 @@ function BarList({ rows, color = BRAND }: { rows: { label: string; total: number
     <div className="flex flex-col gap-3">
       {rows.map((r) => (
         <div key={r.label} className="flex items-center gap-3">
-          <span className="w-32 shrink-0 text-[12px] font-medium text-dim-700 truncate">{r.label}</span>
+          <span className="w-24 sm:w-32 shrink-0 text-[12px] font-medium text-dim-700 truncate">{r.label}</span>
           <div className="flex-1 h-2.5 bg-dim-100 rounded-full overflow-hidden">
             <div className="h-full rounded-full" style={{ width: `${(r.total / max) * 100}%`, backgroundColor: color }} />
           </div>
@@ -81,7 +81,7 @@ export function ResumoTab() {
   if (isLoading) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {Array.from({ length: 3 }).map((_, i) => <div key={i} className={`${CARD} h-28 animate-pulse`} />)}
         </div>
         <div className={`${CARD} h-72 animate-pulse`} />
@@ -111,11 +111,11 @@ export function ResumoTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-[12px] text-dim-500">
           Período: <span className="font-semibold text-dim-700">{format(new Date(`${from}T12:00:00`), "dd/MM/yyyy")} – {format(new Date(`${to}T12:00:00`), "dd/MM/yyyy")}</span>
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select value={rangeMode} onChange={(e) => setRangeMode(e.target.value as RangeMode)} className={inputCls}>
             {(Object.keys(RANGE_LABELS) as RangeMode[]).map((m) => <option key={m} value={m}>{RANGE_LABELS[m]}</option>)}
           </select>
@@ -129,7 +129,7 @@ export function ResumoTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className={CARD}>
           <div className="px-5 py-5">
             <div className="w-9 h-9 bg-emerald-50 rounded-[10px] flex items-center justify-center mb-3">
@@ -169,7 +169,7 @@ export function ResumoTab() {
           <h3 className="font-display text-[14px] font-semibold text-dim-900">Contas a Receber</h3>
           <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-dim-400">valor atual — não depende do período</span>
         </div>
-        <div className="px-5 py-5 grid grid-cols-3 gap-6">
+        <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-3 gap-6">
           <div>
             <p className="font-display font-bold text-[20px] text-dim-900 leading-none">{data.receivables.totalOutstanding.toLocaleString("pt-CV")}</p>
             <p className="text-[11px] text-dim-500 mt-1">Total em aberto (CVE)</p>
@@ -264,7 +264,7 @@ export function ResumoTab() {
           <div className="w-11 h-11 bg-amber-50 rounded-[12px] flex items-center justify-center shrink-0">
             <CalendarX className="text-amber-600" style={{ width: 20, height: 20 }} />
           </div>
-          <div className="flex items-center gap-8">
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-3 min-w-0">
             <div>
               <p className="font-display font-bold text-[20px] text-dim-900 leading-none">{data.noShowImpact.count}</p>
               <p className="text-[11px] text-dim-500 mt-1 flex items-center gap-1"><Clock className="w-3 h-3" /> Faltas no período</p>

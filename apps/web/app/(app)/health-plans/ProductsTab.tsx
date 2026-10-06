@@ -224,7 +224,7 @@ export function ProductsTab() {
       <div className="flex flex-col gap-5">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-display text-[16px] font-bold text-dim-900">Produtos de Plano</h2>
             <p className="text-[13px] text-dim-500 mt-0.5">Catálogo de produtos e subscritores</p>
@@ -239,7 +239,7 @@ export function ProductsTab() {
         </div>
 
         {/* KPI cards — all live */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             {
               icon: Shield, label: "Produtos Ativos",
@@ -280,7 +280,7 @@ export function ProductsTab() {
         </div>
 
         {/* Type distribution — live */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {(["familiar", "corp", "particular"] as const).map(type => {
             const count = typeCount[type];
             const pct   = totalTyped > 0 ? Math.round((count / totalTyped) * 100) : 0;
@@ -311,6 +311,7 @@ export function ProductsTab() {
             <h2 className="font-display text-[14px] font-semibold text-dim-900">Produtos de Plano</h2>
             <span className="font-mono text-[11px] text-dim-400">{products.length} produto{products.length !== 1 ? "s" : ""}</span>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>
@@ -384,14 +385,15 @@ export function ProductsTab() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
 
       </div>
 
       {/* ── New Product Modal ── */}
       <Modal open={newOpen} onClose={() => { setNewOpen(false); setFormErr(""); }} title="Novo Produto de Plano" size="md">
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <Field label="Nome do Produto" required>
               <input value={form.name} onChange={e => set("name", e.target.value)} placeholder="Ex: Plano Familiar Ouro" className={inputCls} />
             </Field>
@@ -456,7 +458,7 @@ export function ProductsTab() {
       {managingProduct && (
         <Modal open onClose={() => { setManagingProduct(null); setDeactivateConfirm(false); setEditingSeguradora(false); }} title={managingProduct.name} description={managingProduct.code} size="md">
           <div className="px-6 py-5 flex flex-col gap-4">
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
+            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
               {([
                 ["Estado",         managingProduct.active ? "Ativo" : "Inativo"],
                 ["Tipo",           TYPE_LABEL[managingProduct.coverageRules?.type ?? "particular"] ?? "Particular"],

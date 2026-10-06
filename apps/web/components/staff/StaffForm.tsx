@@ -160,8 +160,8 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
 
   return (
     <form onSubmit={submit}>
-      <div className="px-6 py-5 grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
           <Field label="Nome Completo" required error={errs.name}>
             <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Ex: Dra. Maria Silva" className={inputCls} />
           </Field>
@@ -193,7 +193,7 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
         </Field>
 
         {withPassword && (
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <NewPasswordFields
               password={form.password}
               confirm={form.confirm}
@@ -207,7 +207,7 @@ export function StaffForm({ initialValues, onSave, onCancel, submitLabel, saving
           </div>
         )}
 
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-2">Dias e Horário de Trabalho</label>
           <div className="flex flex-col gap-1.5">
             {DAYS_OF_WEEK.map(({ dow, label }) => {

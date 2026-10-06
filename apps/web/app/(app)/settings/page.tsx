@@ -115,8 +115,8 @@ function ClinicTab({ initial }: { initial: ClinicSettings }) {
         <div className="px-5 py-4 border-b border-dim-100">
           <h3 className="font-display text-[14px] font-semibold text-dim-900">Informação da Clínica</h3>
         </div>
-        <div className="px-5 py-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <Field label="Nome da Clínica">
               <input className={inputCls} value={form.name} onChange={e => setField("name", e.target.value)} />
             </Field>
@@ -133,7 +133,7 @@ function ClinicTab({ initial }: { initial: ClinicSettings }) {
           <Field label="Email Geral">
             <input type="email" className={inputCls} value={form.email} onChange={e => setField("email", e.target.value)} />
           </Field>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Endereço">
               <input className={inputCls} value={form.address} onChange={e => setField("address", e.target.value)} />
             </Field>
@@ -153,8 +153,8 @@ function ClinicTab({ initial }: { initial: ClinicSettings }) {
         </div>
         <div className="px-5 py-4 flex flex-col gap-2">
           {form.hours.map((h, i) => (
-            <div key={h.day} className="flex items-center gap-4 py-2 border-b border-dim-50 last:border-0">
-              <div className="w-36 shrink-0">
+            <div key={h.day} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2 border-b border-dim-50 last:border-0">
+              <div className="w-28 sm:w-36 shrink-0">
                 <span className={`text-[13px] font-medium ${h.active ? "text-dim-800" : "text-dim-400"}`}>{h.day}</span>
               </div>
               {h.active ? (
@@ -225,7 +225,7 @@ function NotificationsTab({ initial }: { initial: NotifSettings }) {
           <div className="divide-y divide-dim-100">
             {NOTIF_DEFS.filter(n => n.group === group).map(n => (
               <div key={n.id} className="px-5 py-4 flex items-center justify-between gap-4">
-                <div>
+                <div className="min-w-0">
                   <p className="text-[13px] font-medium text-dim-900">{n.label}</p>
                   <p className="text-[11px] text-dim-400 mt-0.5">{n.desc}</p>
                 </div>
@@ -393,7 +393,7 @@ function IntegrationsTab() {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {INTEGRATIONS_DEF.map(intg => {
           const Icon = intg.icon;
           const status = statuses[intg.key];
@@ -428,7 +428,7 @@ function IntegrationsTab() {
                     <button onClick={() => setConfirmDisconnect(null)} className="text-[11px] text-dim-500 hover:text-dim-700 transition-colors ml-1">Não</button>
                   </div>
                 ) : (
-                  <div className="mt-4 flex items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => setConfiguring(intg.key)}
                       className={`text-[11px] font-semibold px-3 py-1.5 rounded-[8px] border transition-colors ${
@@ -622,8 +622,8 @@ function SecurityTab() {
         <div className="px-5 py-4 border-b border-dim-100">
           <h3 className="font-display text-[14px] font-semibold text-dim-900">Autenticação de Dois Factores</h3>
         </div>
-        <div className="px-5 py-5 flex items-start justify-between gap-6">
-          <div className="flex items-start gap-3">
+        <div className="px-5 py-5 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
+          <div className="flex items-start gap-3 min-w-0">
             <div className="w-9 h-9 bg-violet-50 rounded-[10px] flex items-center justify-center shrink-0">
               <Lock className="text-violet-600" style={{ width: 18, height: 18 }} />
             </div>
@@ -708,8 +708,8 @@ export default function SettingsPage() {
         <p className="text-[13px] text-dim-500 mt-0.5">Gestão da clínica, notificações, integrações e segurança</p>
       </div>
 
-      <div className="flex gap-5 items-start">
-        <nav className="w-48 shrink-0 flex flex-col gap-1">
+      <div className="flex flex-col lg:flex-row gap-5 lg:items-start">
+        <nav className="w-full lg:w-48 lg:shrink-0 flex lg:flex-col gap-1 overflow-x-auto pb-1 lg:pb-0">
           {TABS.map(tab => {
             const Icon = tab.icon;
             const active = activeTab === tab.key;
@@ -718,7 +718,7 @@ export default function SettingsPage() {
                 key={tab.key}
                 data-settings-tab={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`flex items-center gap-2.5 w-full text-left px-3.5 py-2.5 rounded-[10px] text-[13px] font-medium transition-colors cursor-pointer ${
+                className={`flex items-center gap-2.5 shrink-0 whitespace-nowrap lg:w-full text-left px-3.5 py-2.5 rounded-[10px] text-[13px] font-medium transition-colors cursor-pointer ${
                   active ? "bg-brand-700 text-white shadow-[0_1px_2px_rgba(0,0,0,.08)]"
                          : "text-dim-600 hover:bg-dim-100 hover:text-dim-900"
                 }`}

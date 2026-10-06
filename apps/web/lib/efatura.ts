@@ -34,13 +34,24 @@ export function docLabel(s: Pick<EFaturaSubmission, "purpose" | "documentTypeCod
   return (s.documentTypeCode != null ? DOC_LABEL[s.documentTypeCode] : undefined) ?? PURPOSE_LABEL[s.purpose];
 }
 
-/** "A2026 · 12/2026" style number as DNRE shows it, or null before it is assigned. */
-export function docNumber(s: Pick<EFaturaSubmission, "serie" | "documentNumber" | "year">): string | null {
+/** "A2026 · 12/2026" style number as DNRE shows it — or Techplace's own number (e.g. "FRAA-123")
+ * when that transport issued the sale — or null before it is assigned. */
+export function docNumber(s: Pick<EFaturaSubmission, "serie" | "documentNumber" | "year" | "externalCode">): string | null {
+  if (s.externalCode) return s.externalCode;
   return s.documentNumber != null ? `${s.serie ?? ""} ${s.documentNumber}/${s.year ?? ""}`.trim() : null;
 }
 
+/** Techplace confirms the sale exists; whether DNRE authorized it is not something we can see
+ * yet (no IUD comes back), so "Autorizada" would overstate it. */
+export const issuedByTechplace = (s: Pick<EFaturaSubmission, "status" | "iud" | "externalCode">): boolean =>
+  s.status === "accepted" && !!s.externalCode && !s.iud;
+
+export const statusLabel = (s: Pick<EFaturaSubmission, "status" | "iud" | "externalCode">): string =>
+  issuedByTechplace(s) ? "Emitida" : EFATURA_META[s.status]?.label ?? EFATURA_META.pending.label;
+
 /** Codes under which a pending document is waiting for something, not failing. */
 export const WAITING_REASON: Record<string, string> = {
+  TECHPLACE_UNSUPPORTED: "O Techplace ainda não suporta este documento — trate-o no Techplace",
   AWAITING_PAYMENT: "A aguardar o pagamento total (paciente sem NIF)",
   AWAITING_PRIMARY: "A aguardar a autorização da fatura",
   NEEDS_NIF: "Falta o NIF do paciente",

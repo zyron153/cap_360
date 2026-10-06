@@ -52,7 +52,7 @@ const NAV = [
   },
 ] as const;
 
-export function Sidebar() {
+export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const { can, isLoading, role, me, clinicName } = usePermissions();
@@ -90,7 +90,14 @@ export function Sidebar() {
     .split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
 
   return (
-    <aside className="w-60 h-screen bg-dim-900 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden z-50">
+    // Below lg: an off-canvas drawer (`invisible` when closed, so it's out of the tab order and the
+    // accessibility tree). From lg: the always-visible column.
+    <aside
+      id="app-sidebar"
+      className={`fixed inset-y-0 left-0 z-50 lg:static w-60 h-screen bg-dim-900 flex flex-col shrink-0 overflow-y-auto overflow-x-hidden transition-[transform,visibility] duration-200 lg:translate-x-0 lg:visible ${
+        open ? "translate-x-0 visible" : "-translate-x-full invisible"
+      }`}
+    >
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/[0.07]">
         <div className="flex items-center gap-2.5">
@@ -131,6 +138,7 @@ export function Sidebar() {
                     key={item.href}
                     href={item.href}
                     prefetch={true}
+                    onClick={onClose}
                     className={`relative flex items-center gap-2.5 px-5 py-2 text-[13px] transition-colors ${
                       active
                         ? "bg-brand-500/[0.15] text-brand-300 font-medium"

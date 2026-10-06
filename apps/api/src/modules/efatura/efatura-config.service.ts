@@ -11,6 +11,7 @@ import {
 import { PrismaService } from "../../prisma/prisma.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 import { loadSigningKey, type SigningKey } from "./dfe/dfe-signer";
+import type { TechplaceCreds } from "./techplace/techplace-client.service";
 
 const CONFIG_KEY = "integration_efatura";
 /** Encrypted values only. Never returned by any endpoint, and excluded from GET /settings. */
@@ -26,6 +27,45 @@ interface Secrets {
   refreshToken?: string;
   certificate?: string;
   certificatePassword?: string;
+  techplacePassword?: string;
+  techplaceApiKey?: string;
+}
+
+/** Which transport reports invoices. Read per call so a deploy-time env change needs no rebuild.
+ * ponytail: temporary switch, deleted together with the DNRE-direct code once Techplace covers
+ * credit notes and cancellation (Docs/modules/M6b-efatura-techplace.md, phase 3). */
+export const efaturaProvider = (): "dnre" | "techplace" => (process.env.EFATURA_PROVIDER === "techplace" ? "techplace" : "dnre");
+
+/** Everything the Techplace pipeline needs, fully resolved (no nulls). */
+export interface TechplaceConfig {
+  goLiveAt: Date | null;
+  entityId: string;
+  userId: string;
+  credentials: TechplaceCreds;
+  types: { invoice_receipt: string; sales_receipt: string };
+  conditionId: string;
+  methods: Record<string, string>;
+  ivaId: string;
+  unitId: string;
+  /** Product for lines without a Service; null = such a line stops the sale with a clear message. */
+  fallbackProductId: string | null;
+}
+
+export type TechplaceResolved = ({ ok: true; config: TechplaceConfig } | { ok: false; missing: string[] }) & { enabled: boolean };
+
+/** What still blocks Techplace submissions, in plain Portuguese (shown to the admin). */
+export function computeMissingTechplace(cfg: EFaturaConfig, has: { password: boolean; apiKey: boolean }): string[] {
+  const m: string[] = [];
+  if (!cfg.techplaceEntityId) m.push("ID da entidade no Techplace");
+  if (!cfg.techplaceUserId) m.push("ID do utilizador no Techplace");
+  if (!has.apiKey && !(cfg.techplaceUsername && has.password)) m.push("Chave de API, ou utilizador e palavra-passe, do Techplace");
+  if (!cfg.techplaceTypeFR) m.push("Tipo de documento: Fatura-Recibo");
+  if (!cfg.techplaceTypeTV) m.push("Tipo de documento: Talão de Venda");
+  if (!cfg.techplaceConditionId) m.push("Condição de pagamento do Techplace");
+  if (Object.keys(cfg.techplaceMethods).length === 0) m.push("Métodos de pagamento do Techplace");
+  if (!cfg.techplaceIvaId) m.push("IVA dos produtos no Techplace");
+  if (!cfg.techplaceUnitId) m.push("Unidade dos produtos no Techplace");
+  return m;
 }
 
 /** Everything the submission pipeline needs, fully resolved (no nulls). */
@@ -122,14 +162,21 @@ export class EFaturaConfigService {
 
   async getView(): Promise<EFaturaConfigView> {
     const { cfg, meta, secrets, clinic } = await this.load();
-    const missing = computeMissing(cfg, clinic, {
-      clientSecret: !!secrets.clientSecret,
-      connected: !!secrets.refreshToken,
-      certificate: !!secrets.certificate,
-      certificateNotAfter: meta.certificateNotAfter,
-    });
+    const provider = efaturaProvider();
+    const missing =
+      provider === "techplace"
+        ? computeMissingTechplace(cfg, { password: !!secrets.techplacePassword, apiKey: !!secrets.techplaceApiKey })
+        : computeMissing(cfg, clinic, {
+            clientSecret: !!secrets.clientSecret,
+            connected: !!secrets.refreshToken,
+            certificate: !!secrets.certificate,
+            certificateNotAfter: meta.certificateNotAfter,
+          });
     return {
       ...cfg,
+      provider,
+      hasTechplacePassword: !!secrets.techplacePassword,
+      hasTechplaceApiKey: !!secrets.techplaceApiKey,
       hasClientSecret: !!secrets.clientSecret,
       connected: !!secrets.refreshToken,
       connectedAt: meta.connectedAt,
@@ -145,7 +192,7 @@ export class EFaturaConfigService {
 
   async update(dto: UpdateEFaturaConfigDto): Promise<EFaturaConfigView> {
     const { cfg, meta, secrets } = await this.load();
-    const { oauthClientSecret, ...fields } = dto;
+    const { oauthClientSecret, techplacePassword, techplaceApiKey, ...fields } = dto;
     const next = EFaturaConfigSchema.safeParse({ ...cfg, ...fields });
     if (!next.success) throw new BadRequestException(next.error.issues.map((i) => i.message).join("; "));
     // Switching on without a start date means "from now": history is never reported retroactively.
@@ -160,6 +207,8 @@ export class EFaturaConfigService {
       meta.connectedAt = null;
     }
     if (newSecret) secrets.clientSecret = this.encryption.encrypt(oauthClientSecret);
+    if (techplacePassword !== undefined) secrets.techplacePassword = this.encryption.encrypt(techplacePassword);
+    if (techplaceApiKey !== undefined) secrets.techplaceApiKey = this.encryption.encrypt(techplaceApiKey);
     await this.save(next.data, meta);
     await this.writeJson(EFATURA_SECRETS_KEY, secrets as Record<string, unknown>);
     return this.getView();
@@ -290,6 +339,46 @@ export class EFaturaConfigService {
           redirectUri: cfg.oauthRedirectUri as string,
         },
         signingKey,
+      },
+    };
+  }
+
+  // ── Techplace transport ─────────────────────────────────────────────────────
+
+  private techplaceCreds(cfg: EFaturaConfig, secrets: Secrets): TechplaceCreds | null {
+    const creds: TechplaceCreds = {
+      username: cfg.techplaceUsername ?? undefined,
+      password: secrets.techplacePassword ? this.encryption.decrypt(secrets.techplacePassword) : undefined,
+      apiKey: secrets.techplaceApiKey ? this.encryption.decrypt(secrets.techplaceApiKey) : undefined,
+    };
+    return creds.apiKey || (creds.username && creds.password) ? creds : null;
+  }
+
+  /** What "Testar ligação" needs: the credentials alone, before the rest is filled in. */
+  async getTechplaceCredentials(): Promise<TechplaceCreds | null> {
+    const { cfg, secrets } = await this.load();
+    return this.techplaceCreds(cfg, secrets);
+  }
+
+  async resolveTechplace(): Promise<TechplaceResolved> {
+    const { cfg, secrets } = await this.load();
+    const missing = computeMissingTechplace(cfg, { password: !!secrets.techplacePassword, apiKey: !!secrets.techplaceApiKey });
+    const credentials = this.techplaceCreds(cfg, secrets);
+    if (missing.length > 0 || !credentials) return { ok: false, missing, enabled: cfg.enabled };
+    return {
+      ok: true,
+      enabled: cfg.enabled,
+      config: {
+        goLiveAt: cfg.goLiveAt ? new Date(cfg.goLiveAt) : null,
+        entityId: cfg.techplaceEntityId as string,
+        userId: cfg.techplaceUserId as string,
+        credentials,
+        types: { invoice_receipt: cfg.techplaceTypeFR as string, sales_receipt: cfg.techplaceTypeTV as string },
+        conditionId: cfg.techplaceConditionId as string,
+        methods: cfg.techplaceMethods,
+        ivaId: cfg.techplaceIvaId as string,
+        unitId: cfg.techplaceUnitId as string,
+        fallbackProductId: cfg.techplaceProductId,
       },
     };
   }

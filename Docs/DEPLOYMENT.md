@@ -657,3 +657,10 @@ Never commit `.env.production` to the repository. Use `1Password` or `Vault` for
 5. The first invoice number of a (year, LED, type) is 1. If the LED was already used this year by
    another tool, seed `efatura_counters.lastNumber` with its last number before enabling.
 6. Optional overrides (tests/staging only): `EFATURA_BASE_URL`, `EFATURA_IAM_URL`.
+
+### Techplace transport (instead of the above)
+
+Set `EFATURA_PROVIDER=techplace` in the API env (default `dnre`); optional `TECHPLACE_BASE_URL`
+(default `https://api.techplace.cv`). Steps 1–2 and the certificate/OAuth parts of 4–5 do not apply:
+configure the Techplace card in the UI instead. Not yet run against Techplace — read
+[`modules/M6b-efatura-techplace.md`](modules/M6b-efatura-techplace.md) (assumptions, open questions) before enabling.

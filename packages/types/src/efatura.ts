@@ -55,6 +55,25 @@ export const EFaturaConfigSchema = z.object({
   oauthClientId: z.string().min(1).max(200).nullable(),
   /** Must equal, character for character, the Redirect URI registered in the PE. */
   oauthRedirectUri: z.string().url().max(500).nullable(),
+
+  // ── Techplace (api.techplace.cv) — read only when the API runs with EFATURA_PROVIDER=techplace.
+  // Ids come from the Techplace entity ("Testar ligação" lists them); none of these is a secret.
+  techplaceEntityId: z.string().min(1).max(100).nullable(),
+  /** The Techplace user ("utilizador") the sales are issued as. */
+  techplaceUserId: z.string().min(1).max(100).nullable(),
+  /** Only needed when Techplace asks for a JWT login instead of (or besides) an API key. */
+  techplaceUsername: z.string().min(1).max(100).nullable(),
+  /** `tipoFatura` codes (Fatura-Recibo / Talão de Venda). Fatura (FT) is not sent: see M6b. */
+  techplaceTypeFR: z.string().min(1).max(20).nullable(),
+  techplaceTypeTV: z.string().min(1).max(20).nullable(),
+  techplaceConditionId: z.string().min(1).max(100).nullable(),
+  /** CAP payment method (cash, vinti4, bank_transfer, health_plan) → Techplace payment-method id. */
+  techplaceMethods: z.record(z.string().min(1).max(100)),
+  /** Used when registering a Service as a Techplace product. */
+  techplaceIvaId: z.string().min(1).max(100).nullable(),
+  techplaceUnitId: z.string().min(1).max(100).nullable(),
+  /** Product used for invoice lines that have no Service (their description cannot be sent). */
+  techplaceProductId: z.string().min(1).max(100).nullable(),
 });
 export type EFaturaConfig = z.infer<typeof EFaturaConfigSchema>;
 
@@ -79,11 +98,23 @@ export const DEFAULT_EFATURA_CONFIG: EFaturaConfig = {
   creditNoteReasonCode: "2",
   oauthClientId: null,
   oauthRedirectUri: null,
+  techplaceEntityId: null,
+  techplaceUserId: null,
+  techplaceUsername: null,
+  techplaceTypeFR: null,
+  techplaceTypeTV: null,
+  techplaceConditionId: null,
+  techplaceMethods: {},
+  techplaceIvaId: null,
+  techplaceUnitId: null,
+  techplaceProductId: null,
 };
 
-/** PATCH body: any subset of the settings, plus the write-only OAuth client secret. */
+/** PATCH body: any subset of the settings, plus the write-only secrets. */
 export const UpdateEFaturaConfigSchema = EFaturaConfigSchema.partial().extend({
   oauthClientSecret: z.string().min(1).max(500).optional(),
+  techplacePassword: z.string().min(1).max(500).optional(),
+  techplaceApiKey: z.string().min(1).max(500).optional(),
 });
 export type UpdateEFaturaConfigDto = z.infer<typeof UpdateEFaturaConfigSchema>;
 
@@ -95,6 +126,10 @@ export const UploadEFaturaCertificateSchema = z.object({
 export type UploadEFaturaCertificateDto = z.infer<typeof UploadEFaturaCertificateSchema>;
 
 export interface EFaturaConfigView extends EFaturaConfig {
+  /** Which transport the API runs with (EFATURA_PROVIDER); decides which settings matter. */
+  provider: "dnre" | "techplace";
+  hasTechplacePassword: boolean;
+  hasTechplaceApiKey: boolean;
   hasClientSecret: boolean;
   /** An admin completed the PE consent (a refresh token is stored). */
   connected: boolean;

@@ -125,7 +125,11 @@ Key routes:
 - ✅ **Fixed.** Status transitions are now validated server-side (`pending → confirmed/cancelled`,
   `confirmed → checked_in/completed/no_show/cancelled`, `checked_in → completed/no_show/cancelled`;
   `completed`/`cancelled`/`no_show` are terminal — `PATCH /appointments/:id/status` returns 400
-  otherwise). There was previously no check at all: a retried or duplicate "completed" request on
+  otherwise). The endpoint also records **who** moved the appointment into `checked_in` /
+  `completed` (`checkedInByStaffId` / `completedByStaffId`, from the session; absent for system callers such
+  as the WhatsApp reply handler) — it is the evidence behind the clinical-note "treating today" rule
+  (`modules/M7-clinical-records-emr.md` §3.1: a doctor can't unlock a patient's notes by checking them in
+  themself). There was previously no check at all: a retried or duplicate "completed" request on
   an already-completed appointment silently re-ran the auto-invoice-draft and health-plan
   session-usage side effects (see `Docs/modules/M6-billing-invoicing.md` §2.2) every time it
   replayed. A DB-level `invoices.appointmentId` unique constraint backs this up even if the
@@ -143,7 +147,7 @@ Key routes:
 | My Schedule | Doctor | Own upcoming appointments only |
 | Appointment Detail | All | Patient info, service, notes, status actions — completing prompts for actual duration before generating the draft invoice |
 | Waitlist Manager | Receptionist/Admin | Active waitlist entries with notify button |
-| Registos Clínicos — "Check-in Feito" tab | Admin/Doctor | Second entry point for the same completion flow: today's `checked_in` appointments, with an inline "Concluir" that confirms duration and calls the same `PATCH /appointments/:id/status` used by Appointment Detail. See `Docs/modules/M7-clinical-records-emr.md` §6. |
+| Registos Clínicos — "Em consulta" tab | Admin/Doctor | The doctor's day queue and a second entry point for the same completion flow: today's `checked_in` appointments with their clinical-note state, a one-tap link to write the note, and an inline "Concluir" that confirms duration and calls the same `PATCH /appointments/:id/status` used by Appointment Detail. The note editor can also complete the consulta in the same click ("Guardar e concluir consulta"). See `Docs/modules/M7-clinical-records-emr.md` §6. |
 
 ---
 

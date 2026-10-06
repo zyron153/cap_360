@@ -21,13 +21,19 @@ export class BillingRepository {
     // dev DB (idle connection holding the lock, three others blocked on it indefinitely).
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${year}::bigint)`;
+      // The next number is the highest one issued this year plus one — NOT COUNT(*) + 1. A count only works while the
+      // sequence has no gaps: removing any invoice but the newest (the dev DB's debris cleanup did) made COUNT + 1 land on
+      // a number that already exists, and every later invoice creation failed with a unique-constraint 500 (the retry in
+      // BillingService.createNumbered re-reads the same count, so it can't escape). MAX(...) + 1 can't collide.
+      // Numbers that don't match INV-<year>-<digits> are ignored.
+      const prefix = `INV-${year}-`;
       const result = await tx.$queryRaw<[{ next_seq: bigint }]>`
-        SELECT (SELECT COUNT(*) FROM invoices
-                WHERE "createdAt" >= ${new Date(`${year}-01-01`)}
-                  AND "createdAt" <  ${new Date(`${year + 1}-01-01`)}) + 1 AS next_seq
+        SELECT COALESCE(MAX(CAST(SUBSTRING("invoiceNumber" FROM ${`^${prefix}([0-9]+)$`}) AS BIGINT)), 0) + 1 AS next_seq
+        FROM invoices
+        WHERE "invoiceNumber" LIKE ${`${prefix}%`}
       `;
       const seq = String(Number(result[0].next_seq)).padStart(4, "0");
-      return `INV-${year}-${seq}`;
+      return `${prefix}${seq}`;
     });
   }
 

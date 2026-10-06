@@ -170,7 +170,7 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
           </div>
 
           {/* Customer + E-Fatura status */}
-          <div className="grid grid-cols-2 gap-4 text-[12px]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[12px]">
             <div>
               <p className="text-dim-400 uppercase text-[10px] font-bold tracking-[0.06em] mb-1">Cliente</p>
               <p className="text-dim-900 font-semibold">{invoice.patient.fullName ?? "Paciente removido"}</p>
@@ -193,6 +193,7 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
           </div>
 
           {/* Line items */}
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse text-[12px]">
             <thead>
               <tr>
@@ -214,6 +215,7 @@ function FaturaPreviewModal({ invoiceId, onClose }: { invoiceId: string | null; 
               ))}
             </tbody>
           </table>
+          </div>
 
           {/* Totals */}
           <div className="flex flex-col items-end gap-1 text-[12px]">
@@ -385,7 +387,7 @@ export function FaturasTab() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { icon: Receipt,      label: "Total Faturas",    value: data?.total ?? "—",       sub: "este mês",          bg: "bg-dim-100",     cls: "text-dim-600"     },
           { icon: Clock,        label: "Emitidas",         value: summary ? summary.issuedCount : "—",                                                    sub: "aguardam pagamento", bg: "bg-brand-50",    cls: "text-brand-600"   },
@@ -547,8 +549,8 @@ export function FaturasTab() {
     </div>
 
     <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Fatura" description="Cria e emite a fatura. Com a e-Fatura ativa, é comunicada automaticamente à DNRE." size="md">
-      <div className="px-6 py-5 grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Paciente *</label>
           <PatientPicker
             value={form.patientId}
@@ -597,7 +599,7 @@ export function FaturasTab() {
             </label>
           )}
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
           <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Observações opcionais…" className={`${inputCls} resize-none`} />
         </div>

@@ -60,7 +60,7 @@ const root = (xml: string) => xml.match(/<(Invoice|InvoiceReceipt|SalesReceipt|R
 beforeEach(() => {
   jest.clearAllMocks();
   db = new FakeDb();
-  service = new EFaturaService(db as never, config as never, client as never, enc, queue as never);
+  service = new EFaturaService(db as never, config as never, client as never, enc, queue as never, {} as never);
   config.resolve.mockResolvedValue({ ok: true, enabled: true, config: READY });
   client.post.mockResolvedValue(accepted());
   client.dfeExists.mockResolvedValue(false);

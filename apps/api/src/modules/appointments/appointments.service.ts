@@ -455,7 +455,9 @@ export class AppointmentsService {
     });
   }
 
-  async updateStatus(id: string, dto: UpdateAppointmentStatusDto) {
+  /** `actorId` is the staff member making the change (absent for system callers such as the WhatsApp
+   * reply handler); it is recorded on check-in and completion — see Appointment.checkedInByStaffId. */
+  async updateStatus(id: string, dto: UpdateAppointmentStatusDto, actorId?: string) {
     const appointment = await this.repo.findById(id);
     if (!appointment) throw new NotFoundException(`Appointment ${id} not found`);
 
@@ -469,9 +471,13 @@ export class AppointmentsService {
     const data: Record<string, unknown> = { status: dto.status };
     if (dto.cancellationReason)
       data.cancellationReason = dto.cancellationReason;
-    if (dto.status === "checked_in") data.checkedInAt = new Date();
+    if (dto.status === "checked_in") {
+      data.checkedInAt = new Date();
+      if (actorId) data.checkedInByStaffId = actorId;
+    }
     if (dto.status === "completed") {
       data.completedAt = new Date();
+      if (actorId) data.completedByStaffId = actorId;
       // The actual time spent, as confirmed at completion — kept even when the service's
       // standard duration is unknown, since it's still the correct record of what happened.
       if (dto.durationMinutes) data.durationMinutes = dto.durationMinutes;

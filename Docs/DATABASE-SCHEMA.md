@@ -164,6 +164,8 @@ CREATE TABLE appointments (
   "cancellationReason" VARCHAR(300),
   "checkedInAt"        TIMESTAMPTZ,
   "completedAt"        TIMESTAMPTZ,
+  "checkedInByStaffId" VARCHAR(36),           -- who checked the patient in (no FK; NULL = unknown: system action, or a row from before this existed)
+  "completedByStaffId" VARCHAR(36),           -- who completed it (same). Evidence for the clinical-note "treating today" read rule (M7 §3.1)
   "idempotencyKey"     VARCHAR(100) UNIQUE,   -- retried create() replays the original instead of duplicating
   "seriesId"           UUID REFERENCES appointment_series(id),
   "seriesIndex"        INT,                    -- 1-based position within the series, display only
@@ -450,7 +452,7 @@ a result, there is nowhere in the current schema for that file reference to live
 ```sql
 CREATE TABLE invoices (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, xact-advisory-lock-guarded sequence
+  "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, xact-advisory-lock-guarded; next = MAX(this year's suffix) + 1 (it was COUNT + 1, which collided on the first gap)
   "patientId"     UUID NOT NULL REFERENCES patients(id),
   "appointmentId" UUID UNIQUE REFERENCES appointments(id),  -- one invoice per appointment; NULLs
                                                              -- (manual invoices) are unrestricted
@@ -706,15 +708,30 @@ Not in the original design at all. Honored by `getAvailability`/`create()` the s
 
 ---
 
-## 8. Clinical Records Module (M7) — not implemented
+## 8. Clinical Records Module (M7) — built
 
-**No `clinical_notes`, `prescriptions`, or `referrals` table exists.** `Docs/TODO.md` previously
-claimed these were "already in schema" — they are not (verified directly against
-`schema.prisma`). The only patient-notes storage is the generic `patient_notes` table (§3.2), which
-has none of SOAP structure, ICD-10 codes, a 24-hour edit lock, or role-gated visibility. Given the
-client is now a psychology clinic, this module's real shape (session notes, treatment plans)
-likely needs a fresh spec pass rather than resuming the original SOAP/ICD-10/prescription design
-written for a general medical clinic.
+`clinical_notes`, `prescriptions`, `prescription_items` and `referrals` exist (the field lists live in
+`schema.prisma`; behaviour is in `modules/M7-clinical-records-emr.md`). This replaces an earlier version of
+this section that said none of them existed. What matters at the database level:
+
+- **Encrypted columns** (AES-256-GCM, `@db.Text`): `clinical_notes.presentingConcerns/observations/assessment/plan/
+  riskNotes`, `prescriptions.notes`, `prescription_items.drugName/dosage/frequency/instructions`.
+  `referrals.reason` is plaintext (documented decision).
+- **Drafts:** `clinical_notes.finalizedAt` NULL = autosaved draft; the 24h edit lock counts from it.
+  A draft can be **deleted** (`DELETE /clinical-notes/:id`); a finalized note never is.
+- **One note per appointment per clinician:** `UNIQUE (appointmentId, authorStaffId)` — NULL `appointmentId`s
+  (ad-hoc notes) never conflict. Deleting a draft frees the slot.
+- **Foreign keys to a note are `ON DELETE RESTRICT`** (`prescriptions.clinicalNoteId`,
+  `referrals.clinicalNoteId`; migration `20261006000000_clinical_records_hardening`). They were the Prisma
+  default for optional relations, `SET NULL`, which silently detached a prescription/referral from a note that
+  was deleted. `clinical_notes.appointmentId` stays `SET NULL` (appointments are soft-deleted, never removed).
+  The patient/author/prescriber/referrer foreign keys are `RESTRICT` as before.
+- **Indexes** (all serve a bounded, newest-first page): `clinical_notes (patientId, createdAt)` and
+  `(authorStaffId, createdAt)` (replacing the single-column ones), `prescriptions (patientId, issuedAt)`,
+  `referrals (patientId, createdAt)`, plus `clinicalNoteId` on both `prescriptions` and `referrals` (the
+  RESTRICT check and the "has linked records" check look rows up by it; it had no index).
+- **Appointments** carry `checkedInByStaffId` / `completedByStaffId` (no FK) — the evidence for the "treating
+  today" read rule.
 
 ---
 
@@ -770,19 +787,27 @@ CREATE TABLE audit_log (
   "resourceId" VARCHAR(36),
   "ipAddress"  VARCHAR(45),
   "userAgent"  VARCHAR(300),
-  metadata     JSONB,                    -- includes { diff: { before, after } } for Patients + Financeiro mutations
+  metadata     JSONB,                    -- { url, diff?: { before, after } }. diff is set for Patients + Financeiro + clinical-note
+                                         -- mutations, and (after = { basis: "patient in treatment today", … }) marks a cross-author
+                                         -- clinical-note read — the admin's GET /clinical-notes/access-log filters on that path
   "createdAt"  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX ON audit_log("actorId");
 CREATE INDEX ON audit_log(resource, "resourceId");
 CREATE INDEX ON audit_log("createdAt");
+-- Partial, outside schema.prisma (Prisma can't express it and `migrate diff` ignores it): serves the admin's
+-- cross-author clinical-note read report. Migration 20261006000100_audit_log_cross_author_read_index.
+CREATE INDEX audit_log_cross_author_read_idx ON audit_log ("createdAt" DESC, id DESC)
+  WHERE (metadata #> '{diff,after,basis}'::text[]) = '"patient in treatment today"'::jsonb;
 ```
 
 Shape differs from the original design (`table_name`/`record_id`/`old_values`/`new_values`
 generic-diff columns) — the actual implementation logs at the HTTP-request level (one row per
 mutating request, or per `@AuditView()`-marked GET) with an optional before/after `diff` in
-`metadata`, not a per-column DB-trigger-style change record.
+`metadata`, not a per-column DB-trigger-style change record. `resource`/`resourceId` come from the URL *path*
+only (a query string used to leak into them — and, past the column width, silently voided the row); the full
+URL stays in `metadata.url`, and both are truncated to their column widths as a backstop.
 
 **Genuinely append-only at the database level**, not just by convention: a
 `BEFORE UPDATE OR DELETE` trigger rejects any attempt to modify or remove a row, enforced even
@@ -839,7 +864,10 @@ admin-configurable dropdown option lists.
 | payments | invoiceId; idempotencyKey (unique) |
 | efatura_submissions | status |
 | leave_requests | staffId |
-| audit_log | actorId, (resource, resourceId), createdAt |
+| clinical_notes | (appointmentId, authorStaffId) unique, (patientId, createdAt), (authorStaffId, createdAt) |
+| prescriptions | (patientId, issuedAt), clinicalNoteId |
+| referrals | (patientId, createdAt), clinicalNoteId |
+| audit_log | actorId, (resource, resourceId), createdAt; partial `audit_log_cross_author_read_idx` on (createdAt DESC, id DESC) WHERE the "patient in treatment today" mark is set (not in `schema.prisma`) |
 
 ---
 

@@ -130,7 +130,7 @@ export default function NewAppointmentPage() {
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="ID do Médico" required>
               <input
                 {...register("staffId")}

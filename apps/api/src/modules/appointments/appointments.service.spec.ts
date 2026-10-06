@@ -716,6 +716,41 @@ describe("AppointmentsService", () => {
     });
   });
 
+  describe("updateStatus — who moved the patient into treatment", () => {
+    beforeEach(() => {
+      repo.update.mockResolvedValue({ id: "appt-1" });
+      billingMock.createDraft.mockResolvedValue({});
+      healthPlansMock.recordSessionUsage.mockResolvedValue(null);
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status: "confirmed", patientId: "p1", serviceId: "s1",
+        patient: { id: "p1" }, service: { id: "s1", name: "Consulta Geral", price: "1500" },
+      });
+    });
+
+    it("records who checked the patient in", async () => {
+      await service.updateStatus("appt-1", { status: "checked_in" }, "staff-7");
+      const data = repo.update.mock.calls[0][1];
+      expect(data).toMatchObject({ status: "checked_in", checkedInByStaffId: "staff-7" });
+      expect(data).not.toHaveProperty("completedByStaffId");
+    });
+
+    it("records who completed the appointment", async () => {
+      await service.updateStatus("appt-1", { status: "completed" }, "staff-7");
+      const data = repo.update.mock.calls[0][1];
+      expect(data).toMatchObject({ status: "completed", completedByStaffId: "staff-7" });
+      expect(data).not.toHaveProperty("checkedInByStaffId");
+    });
+
+    it("leaves the actor unrecorded for a system caller (e.g. the WhatsApp reply handler) and for other statuses", async () => {
+      await service.updateStatus("appt-1", { status: "checked_in" });
+      expect(repo.update.mock.calls[0][1]).not.toHaveProperty("checkedInByStaffId");
+
+      await service.updateStatus("appt-1", { status: "no_show" }, "staff-7"); // a valid move out of "confirmed" that isn't a treatment status
+      expect(repo.update.mock.calls[1][1]).not.toHaveProperty("checkedInByStaffId");
+      expect(repo.update.mock.calls[1][1]).not.toHaveProperty("completedByStaffId");
+    });
+  });
+
   describe("updateStatus — completion side-effects", () => {
     beforeEach(() => {
       repo.update.mockResolvedValue({ id: "appt-1", status: "completed" });

@@ -394,7 +394,7 @@ export default function AppointmentsPage() {
 
   const events = filteredAppts.map((a) => ({
     id: a.id,
-    title: `${a.patient.fullName} — ${a.service.name}`,
+    title: `${a.patient.fullName ?? "Paciente removido"} — ${a.service.name}`,
     start: a.scheduledAt,
     end: new Date(new Date(a.scheduledAt).getTime() + a.durationMinutes * 60_000).toISOString(),
     backgroundColor: STATUS_COLORS[a.status] ?? "#8E8EA8",
@@ -424,14 +424,14 @@ export default function AppointmentsPage() {
     <div className="flex flex-col gap-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-[22px] font-bold text-dim-900">Agendamentos</h1>
           <p className="text-[13px] text-dim-500 mt-0.5">Calendário de consultas e marcações</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* View toggle */}
-          <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1">
+          <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1 max-w-full overflow-x-auto">
             <button
               onClick={() => setView("calendar")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
@@ -474,7 +474,7 @@ export default function AppointmentsPage() {
       </div>
 
       {/* Quick stats */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {[
           { label: "Este mês", value: today,     cls: "bg-dim-100 text-dim-700" },
           { label: "Pendentes", value: pending,   cls: "bg-amber-50 text-amber-700 border border-amber-200/80" },
@@ -487,7 +487,7 @@ export default function AppointmentsPage() {
           </div>
         ))}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             onClick={() => setTodayOnly((v) => !v)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-opacity"
@@ -559,6 +559,7 @@ export default function AppointmentsPage() {
               <p className="text-[13px] font-medium text-dim-600">Sem marcações este mês</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr>
@@ -616,6 +617,7 @@ export default function AppointmentsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -646,6 +648,7 @@ export default function AppointmentsPage() {
               <p className="text-[13px] font-medium text-dim-600">Ninguém em lista de espera</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr>
@@ -720,14 +723,15 @@ export default function AppointmentsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
     </div>
 
     <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Marcação" description="Agende uma nova consulta ou procedimento" size="md">
-      <div className="px-6 py-5 grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Paciente *</label>
           <PatientPicker value={form.patientId} onSelect={(id) => set("patientId", id)} />
         </div>
@@ -766,7 +770,7 @@ export default function AppointmentsPage() {
             className={inputCls}
           />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-2">Horário Disponível *</label>
           {!form.serviceId || !form.staffId || !form.apptDate ? (
             <p className="text-[12px] text-dim-400">Selecione serviço, médico/a e data para ver os horários.</p>
@@ -796,11 +800,11 @@ export default function AppointmentsPage() {
             </div>
           )}
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
           <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Observações opcionais…" className={`${inputCls} resize-none`} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="flex items-center gap-2 text-[13px] font-medium text-dim-800 cursor-pointer">
             <input type="checkbox" checked={form.recurring} onChange={(e) => set("recurring", e.target.checked)} className="w-4 h-4 rounded border-dim-300 text-brand-700 focus:ring-brand-500" />
             Tornar recorrente
@@ -820,7 +824,7 @@ export default function AppointmentsPage() {
               <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">A cada</label>
               <input type="number" min={1} value={form.interval} onChange={(e) => set("interval", e.target.value)} className={inputCls} />
             </div>
-            <div className="col-span-2 flex gap-4 text-[13px] text-dim-700">
+            <div className="sm:col-span-2 flex gap-4 text-[13px] text-dim-700">
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="radio" name="endType" checked={form.endType === "count"} onChange={() => set("endType", "count")} />
                 Nº de sessões

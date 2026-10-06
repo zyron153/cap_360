@@ -251,6 +251,8 @@ model Service {
   /// Free-text, same Parametrizacao "ESPECIALIDADE" convention as Staff.specialtyCode. Null means
   /// bookable by any staff member; set, it must exact-match the assigned staff's own specialtyCode.
   specialtyCode   String?  @db.VarChar(50)
+  /// Id of this service as a product in Techplace, registered the first time it is invoiced.
+  techplaceProductId String? @db.VarChar(100)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -295,6 +297,11 @@ model Appointment {
   cancellationReason String?           @db.VarChar(300)
   checkedInAt        DateTime?
   completedAt        DateTime?
+  /// Who moved the appointment into `checked_in` / `completed` (a staff id, no FK — like AuditLog.actorId; null =
+  /// unknown: a system action, or a row from before this was recorded). Evidence for the clinical-note "treating
+  /// today" read rule: the reader must not be the only person who put the patient into treatment.
+  checkedInByStaffId String?           @db.VarChar(36)
+  completedByStaffId String?           @db.VarChar(36)
   /// Client-supplied dedup key — a retried "create appointment" request (double-click, timeout
   /// retry) with the same key returns the existing appointment instead of creating a duplicate.
   idempotencyKey     String?           @db.VarChar(100)
@@ -480,6 +487,9 @@ model ClinicalNote {
   /// the DB (Postgres has no cross-column conditional-required constraint worth the complexity).
   /// Encrypted like the fields above.
   riskNotes          String?   @db.Text
+  /// null = autosaved draft (editable until finalized, text fields may be empty). The 24h edit
+  /// lock counts from here, not createdAt, so a draft finalized the next day isn't born locked.
+  finalizedAt        DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -489,8 +499,13 @@ model ClinicalNote {
   prescriptions Prescription[]
   referrals     Referral[]
 
-  @@index([patientId])
-  @@index([authorStaffId])
+  /// One note per appointment per clinician. Rows without an appointment never conflict (NULLs are
+  /// distinct in a Postgres unique index), so ad-hoc notes are unrestricted.
+  @@unique([appointmentId, authorStaffId])
+  /// A patient's notes, newest first (the profile list) and a clinician's notes, newest first (the history list) — each
+  /// is a bounded page, so the (owner, createdAt) pair is what serves it; they replace the single-column indexes.
+  @@index([patientId, createdAt])
+  @@index([authorStaffId, createdAt])
   @@map("clinical_notes")
 }
 
@@ -505,11 +520,14 @@ model Prescription {
   createdAt           DateTime @default(now())
 
   patient      Patient            @relation(fields: [patientId], references: [id])
-  clinicalNote ClinicalNote?      @relation(fields: [clinicalNoteId], references: [id])
+  /// Restrict, not the optional-relation default (SET NULL): a note a prescription came from can't be deleted out from
+  /// under it — a draft with a linked prescription is refused (409) instead of silently detaching the prescription.
+  clinicalNote ClinicalNote?      @relation(fields: [clinicalNoteId], references: [id], onDelete: Restrict)
   prescribedBy Staff              @relation(fields: [prescribedByStaffId], references: [id])
   items        PrescriptionItem[]
 
-  @@index([patientId])
+  @@index([patientId, issuedAt])
+  @@index([clinicalNoteId])
   @@map("prescriptions")
 }
 
@@ -546,11 +564,13 @@ model Referral {
   updatedAt            DateTime       @updatedAt
 
   patient      Patient       @relation(fields: [patientId], references: [id])
-  clinicalNote ClinicalNote? @relation(fields: [clinicalNoteId], references: [id])
+  /// Restrict for the same reason as Prescription.clinicalNote.
+  clinicalNote ClinicalNote? @relation(fields: [clinicalNoteId], references: [id], onDelete: Restrict)
   referredBy   Staff         @relation("ReferralReferredBy", fields: [referredByStaffId], references: [id])
   targetStaff  Staff?        @relation("ReferralTarget", fields: [targetStaffId], references: [id])
 
-  @@index([patientId])
+  @@index([patientId, createdAt])
+  @@index([clinicalNoteId])
   @@map("referrals")
 }
 
@@ -843,6 +863,10 @@ model EFaturaSubmission {
   repositoryCode Int?
   /// 45-char Identificador Único de DFE (24-char event id for cancel events).
   iud            String?        @unique @db.VarChar(45)
+  /// Techplace transport only: the sale's id there (unique — one sale per submission) and its
+  /// printed number (e.g. FRAA-123). Null on the DNRE-direct transport.
+  externalId     String?        @unique @db.VarChar(100)
+  externalCode   String?        @db.VarChar(50)
   /// Issue date/time stamped in the document (stored as an instant; the XML uses Cabo Verde time).
   issuedAt       DateTime?
   /// The final signed XML, AES-GCM encrypted (it contains the patient's name and NIF).
@@ -1036,6 +1060,9 @@ model Parametrizacao {
 /// Append-only at the DB level via a trigger, not just app convention — see
 /// prisma/manual-sql/audit-log-immutable.sql (must be re-run by hand on a fresh database; not
 /// something `db push`/`migrate` can express or reapply).
+/// Also not expressible here: the PARTIAL index `audit_log_cross_author_read_idx` (migration
+/// 20261006000100_audit_log_cross_author_read_index) that serves the admin's cross-author read report — it holds only the rows
+/// marked `metadata.diff.after.basis = "patient in treatment today"`. `prisma migrate diff` ignores it (no drift).
 model AuditLog {
   id         String   @id @default(uuid())
   actorId    String?  @db.VarChar(36)

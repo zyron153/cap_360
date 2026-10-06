@@ -1,9 +1,140 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-10-03.
+> Snapshot overwritten each session. Última atualização: 2026-10-06.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **Registo clínico: passagem de endurecimento por dois agentes em paralelo — 2026-10-06.** Pedido: fechar todos os
+  pontos ainda abertos e os problemas encontrados, com o módulo a correr de ponta a ponta sem erros.
+  - **Backend (agente 1).** Descartar rascunho (`DELETE /clinical-notes/:id`: autor ou admin, só rascunhos, auditado
+    sem o texto); relatório admin de leituras entre autores (`GET /clinical-notes/access-log`); **falha de segurança
+    corrigida no interceptor de auditoria** — uma URL com `?` fazia o "recurso" falhar o marcador da leitura entre
+    autores (agora só o caminho conta; a URL completa fica em `metadata.url`); ligações de prescrição/referenciação a
+    uma nota validadas e FKs `RESTRICT` (migração `20261006000000`), índice parcial para o relatório (`…000100`);
+    transições de estado das referenciações (`REFERRAL_STATUS_TRANSITIONS`); **numeração de faturas passou de
+    `COUNT+1` para `MAX+1`** sob o lock — apagar uma fatura que não era a última fazia a seguinte colidir e todas as
+    criações davam 500.
+  - **UI (agente 2).** O conflito de dois separadores é agora uma **junção a 3 vias por secção** com escolha lado a
+    lado (`_note-merge.ts`, `M7` §2.1) em vez de "a minha ou a deles"; "Descartar rascunho"; separador admin
+    "Acessos entre clínicos"; prescrições com vários medicamentos, duração e instruções; referenciações com escolha do
+    colega e botões de estado; "Carregar mais" nas listas do perfil. O agente 2 foi cortado a meio pelo limite de
+    sessão da API; o que deixou foi revisto e verificado aqui.
+  - **Verificação (esta sessão).** `tsc` limpo (types, API, web), `eslint` limpo; **799 testes unitários (41 suites)**;
+    **40 testes de integração com logins reais** (2 specs clínicos + faturas); **84 Playwright**: 81 passaram na
+    primeira corrida completa e as 3 falhas eram **testes errados, não o produto** (um localizador filtrava pelo texto
+    que o próprio teste altera; um stub de URL sem `*` final que nunca apanhava o GET paginado `?page=&limit=`; um
+    clique no sino antes da hidratação, com a máquina sobrecarregada) — corrigidos e repetidos, todos verdes.
+  - **Como foi verificado, e um aviso.** A BD de dev **não tinha** a migração `20261007000000_efatura_techplace`
+    (outra sessão: e-Fatura Techplace) mas o cliente Prisma regenerado já pede `services.techplaceProductId`: com a BD
+    de dev, 39 dos 40 testes de integração davam 500. Em vez de aplicar a migração de outra sessão à BD partilhada,
+    cloná-la para uma BD descartável (`pg_dump | psql` dentro do contentor), aplicar lá o SQL, correr tudo contra
+    essa cópia e apagá-la. **A BD de dev continua sem essa migração** — ver `TODO.md`.
+  - **Ficou aberto (em `TODO.md`):** as 8 decisões que o agente 1 deixou para a clínica; reiniciar/reconstruir as APIs
+    compiladas em :4000/:4001; apagar o paciente-marcador "AG1 numbering placeholder" e a sua fatura `INV-2026-0008`;
+    `health-plans.repository.ts` ainda numera com `COUNT+1`; 3 testes de integração antigos falham só pela
+    disponibilidade do Dr. Silva (uma quinta-feira, 10–11h); notas de teste que sobraram na BD de dev.
+
+- **Os "ainda abertos" pequenos fechados — 2026-10-05 (2.ª passagem).** Pedido: avançar com o que ficou aberto.
+  - **Auto-desbloqueio da regra "em tratamento hoje" → fechado, com a opção escolhida ("outra pessoa tem de fazer
+    o check-in").** O endpoint de estado passou a registar quem fez o check-in e quem concluiu a consulta
+    (`Appointment.checkedInByStaffId` / `completedByStaffId`, migração `20261005000200`, sem FK, `NULL` = desconhecido)
+    e a leitura das notas de outros exige que **outra pessoa que não o leitor** tenha feito um dos dois. Provado
+    com dois médicos reais: check-in + conclusão do próprio médico (ou concluir direto a partir de `confirmed`)
+    não desbloqueia nada; a receção a concluir desbloqueia; ator desconhecido (sistema / linhas antigas) qualifica.
+    O editor explica ("Foi só você a pôr este paciente em consulta…") em vez de não mostrar histórico. Custo
+    aceite: numa clínica sem receção, o médico que faz ele próprio o check-in não vê as notas do colega (o admin vê).
+  - **Pesquisa no telemóvel:** abaixo de 768 px um ícone abre uma barra por cima do topo (mesmo combobox, mesma lista).
+  - **`/exams` e `/visits`:** continuam mock-only e inacessíveis (o middleware redireciona). Em vez de mexer em
+    páginas mortas sem as poder testar, há um teste-armadilha no guarda responsivo que falha no momento em que
+    forem reativadas, a mandar acrescentá-las à verificação de largura de telemóvel.
+  - **Verificação:** 685 testes unitários na suite completa da API (38 suites), com testes novos para o registo do ator e para a
+    condição da leitura; **14 testes de integração com dois médicos reais** (4 novos: auto-check-in, auto-conclusão,
+    conclusão pela receção, ator desconhecido); Playwright: notas 7, topo 5, responsivo 33. Falhas intermédias:
+    um nome acessível que continha o de outro campo (de novo) e uma suspensão de rede da máquina a meio de um teste
+    (repetido isolado, passou).
+  - **Ainda aberto** (pequeno, em `TODO.md`): duas pessoas ainda podem combinar o desbloqueio; o banner de duas
+    abas é "a minha ou a deles"; dois pacientes `E2E Paciente…` de 6–7 de setembro (lixo de e2e antigo do repo).
+
+- **Os 4 "ainda abertos" do registo clínico fechados — 2026-10-05.** Pedido: corrigi-los primeiro. Todos feitos;
+  a decisão de acesso foi do utilizador (opção A).
+  - **Última escrita ganha entre abas → corrigido.** Cada `PATCH` do editor leva `expectedUpdatedAt` e é um
+    compare-and-set numa só instrução (`updateMany where updatedAt`); perder dá 409 `NOTE_CHANGED` + a nota atual, e
+    o editor pára o autosave e mostra "Carregar a versão guardada" / "Manter a minha versão". Um segundo create para
+    a mesma consulta passou a ser 409 (antes *continuava* o rascunho, o que sobrescrevia a outra aba — o meu erro de
+    ontem). Ao vivo: 6 primeiros-guardares → 1×201 + 5×409; 2 gravações em corrida → 1×200 + 1×409.
+  - **Médico a cobrir vê as notas do colega → regra "em tratamento hoje".** Com consulta de hoje `checked_in` ou
+    `completed`, qualquer médico **lê** as notas **finalizadas** dos outros autores (nunca rascunhos), só leitura,
+    caduca no fim do dia (Cabo Verde), leitura marcada no `audit_log`. Fraqueza aceite: dá para a desbloquear
+    marcando/dando check-in a uma consulta (limitado a um dia e auditado). Documentado em `M7` §3.1, `SECURITY.md`
+    §3.1 e `ROLES-PERMISSIONS.md` (que ainda dizia que o M7 não existia).
+  - **Telemóvel: a medição estava fraca.** O guarda de ontem tratava `overflow:hidden` como seguro e dizia "0"
+    com 20 vistas partidas (tabelas cortadas 100–800 px, 4 páginas com navegação vertical fixa a deixar o conteúdo
+    com ~130 px, o layout `1fr 340px` do dashboard com a coluna principal a 2 px, calendário em 7 colunas,
+    inbox do WhatsApp). Corrigido: 37 grelhas responsivas, 12 tabelas com o seu `overflow-x-auto`, navegação em tira
+    abaixo de `lg`, calendário em vista de um dia abaixo de 768 px, WhatsApp em lista→conversa, linhas que não
+    quebravam. Guarda novo (corta/aperta/rola, em todas as abas, a 390 e 820 px).
+  - **Topo:** chips e sino ligados a dados reais (marcações por confirmar nos próximos 7 dias; planos ativos que
+    terminam em 7 dias; só admin/receção), ponto vermelho só quando há alertas; a pesquisa passou a ser um combobox de
+    pacientes ("Abrir paciente", nome acessível distinto do da pesquisa do histórico). Calendários mostravam
+    "null — Consulta" para pacientes apagados → "Paciente removido".
+  - **Verificação:** 64 testes unitários do módulo e 681 na suite completa da API (38 suites); **10 testes de
+    integração com dois médicos reais** (`clinical-note-access.integration-spec.ts`: leitura só em tratamento,
+    drafts nunca, escrita 404, auditoria, janela do dia, corridas); Playwright: notas 6, topo 4, responsivo 31.
+    As falhas intermédias foram erros meus ou da máquina sobrecarregada (import entre specs que o Playwright não
+    resolve no Node 24, "próxima vaga" fora da janela de 7 dias, nome acessível duplicado, corrida entre specs a
+    reservar a mesma vaga; um número de telefone com 12 dígitos apanhei ao reler, antes de correr) — corrigidos,
+    não contornados.
+  - **Ainda aberto** (pequeno, em `TODO.md`): a regra "em tratamento hoje" pode ser desbloqueada por quem marca/dá
+    check-in; sem pesquisa no topo abaixo de 768 px; rotas mock `/exams` e `/visits` por tocar.
+
+- **Limites do registo clínico fechados — 2026-10-04.** Pedido: verificar cada limite deixado ontem e propor
+  correção; todos os quatro implementados, mais a regra mais estrita escolhida para as notas.
+  - **Uma nota por consulta por clínico:** `@@unique([appointmentId, authorStaffId])` (migração
+    `20261005000100`, que descola — nunca apaga — duplicados antigos). Um POST repetido é um 409 com a nota
+    existente (inicialmente continuava o rascunho; ver a entrada de 2026-10-05: isso sobrescrevia a outra aba) e
+    quem perde uma corrida recebe o mesmo 409 em vez de 500. Verificado ao vivo: 6 primeiros-guardares
+    simultâneos → 1 nota.
+  - **Histórico paginado:** `page`/`limit` (resposta continua um array), "Carregar mais", ordem estável
+    `(createdAt, id)`, duplicados de fronteira descartados no cliente.
+  - **Frases rápidas editáveis:** grupos `FRASE_MOTIVO/OBSERVACOES/AVALIACAO/PLANO` em Parametrizações (secção
+    "Registo clínico"); grupo vazio → frases sugeridas (em produção começam todos vazios: o seed de produção
+    só cria o admin).
+  - **Médico a cobrir um colega:** alternador "Só os meus / Todos" na fila (lembrado no browser); linha do
+    colega mostra o nome e não mostra "Sem nota"; o editor avisa que as notas de outros clínicos não são
+    visíveis e não adivinha "Avaliação inicial".
+  - **Shell responsiva:** sidebar em gaveta abaixo de `lg` (botão de menu no topo, Escape/clique fora/navegar
+    fecham), topbar sem chips <1536px e sem relógio/pesquisa em ecrãs pequenos; 6 rotas com cabeçalhos que
+    não quebravam linha (`/appointments`, `/billing`, `/health-plans`, `/staff`, `/parametrizacoes`,
+    `/access`) agora quebram. Medido antes/depois: 14 de 15 rotas transbordavam a 390px (e `/appointments`
+    também a 820px); agora 0 em 390/820/1024/1280.
+  - **Verificação:** 51 testes unitários do módulo; 32 verificações contra a API real (19 anteriores + 13 de
+    concorrência/paginação); 1 spec Playwright de notas (3 testes) + 31 testes do guarda de overflow/gaveta; 11 verificações
+    de UI ad-hoc (alternador, aviso de colega, frases, persistência). O primeiro teste de paginação falhou
+    por corrida com o debounce da pesquisa (erro do teste, não da app) e foi corrigido.
+  - **Ainda aberto nessa altura** — fechado em 2026-10-05 (ver a entrada acima): última escrita ganha entre
+    abas, médico a cobrir sem acesso às notas do colega, tabelas/grelhas apertadas no telemóvel, chips e pesquisa
+    do topo falsos. Docs: `M7`, `TODO.md`, `TESTING.md`.
+
+- **Registo clínico do médico — 2026-10-03.** Pedido: tornar o registo (e a listagem) do médico mais
+  amigável, para o doente que está no consultório com a consulta em `checked_in`. Antes: a nota escrevia-se
+  num modal na ficha do paciente, longe da fila de check-in, nunca ligada à consulta, sem rascunho, sem
+  edição na UI, e a lista cortava as últimas 100 notas **de todos os médicos** antes de filtrar pelas do
+  próprio. Agora: página do editor `records/note` (rascunho guardado no servidor, cifrado, ~1,5 s depois de
+  parar de escrever; contexto do paciente + plano anterior + alerta de risco ao lado; frases rápidas; tipo de
+  sessão e duração pré-preenchidos; "Guardar e concluir consulta" num só clique), fila do dia em "Em consulta"
+  (estado da nota por paciente, atualiza sozinha a cada 30 s) e "Histórico" com pesquisa e filtros.
+  - **Backend:** `ClinicalNote.finalizedAt` (null = rascunho; a migração preenche as notas existentes), regra
+    de finalização única (`finalNoteIssues` em `@cap/types`), bloqueio de 24 h conta desde a finalização,
+    `appointmentId` validado (existe e é do mesmo paciente), filtro de autoria feito na query, `PATCH`
+    revalida completude e risco.
+  - **Decisão:** o rascunho vive no servidor e não no `localStorage` — texto clínico em claro num PC partilhado
+    contrariava a cifra AES-256 do módulo.
+  - **Verificação:** 41 testes unitários do módulo (658 na suite completa da API); 19 verificações contra a API real; 2 specs Playwright
+    (`e2e/clinical-note-draft.spec.ts`) contra o UI real; capturas em desktop/tablet. Limites e pendentes em
+    `TODO.md` (M7). Docs: `M7`, `M1`, `TODO.md`.
+  - **Atenção:** a shell não tem navegação móvel (sidebar fixa de 240 px) — em telemóvel todas as páginas
+    ficam apertadas; o editor é utilizável a partir de tablet vertical.
 
 - **VPS, domínio, TLS e primeiro deploy real — 2026-10-03.** Pedido: pôr o staging numa VPS real e deixar a
   produção preparada. Checklist por fases em [VPS_CONFIG.md](VPS_CONFIG.md); runbook em `DEPLOYMENT.md` §0.

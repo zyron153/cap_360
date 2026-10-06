@@ -78,8 +78,8 @@ function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void
   return (
     <Modal open={open} onClose={onClose} title="Novo Paciente" description="Preencha os dados do novo paciente" size="lg">
       <form onSubmit={handleSubmit((data) => mutation.mutate(data))}>
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <Field label="Nome Completo" required error={errors.fullName?.message}>
               <input {...register("fullName")} placeholder="Ex: Maria da Silva" className={inputCls} />
             </Field>
@@ -105,19 +105,19 @@ function NewPatientModal({ open, onClose }: { open: boolean; onClose: () => void
             <input {...register("nif")} inputMode="numeric" maxLength={9} placeholder="123456789" className={inputCls} />
           </Field>
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Email">
               <input type="email" {...register("email")} placeholder="paciente@email.com" className={inputCls} />
             </Field>
           </div>
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Morada">
               <textarea {...register("address")} rows={2} placeholder="Rua, Bairro, Cidade" className={inputCls} />
             </Field>
           </div>
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <Field label="Etiquetas">
               <TagPicker nome="TAG_PACIENTE" value={tags} onChange={(v) => setValue("tags", v)} />
             </Field>

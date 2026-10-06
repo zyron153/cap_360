@@ -20,6 +20,8 @@ const SECTIONS: { label: string; nomes: string[] }[] = [
   { label: "Colaboradores", nomes: ["PROFILE_SETTINGS", "FUNCAO", "ESPECIALIDADE"] },
   { label: "Clínica",       nomes: ["TIPO_SERVICO", "TIPO_EXAME", "TIPO_CONSULTA"] },
   { label: "Planos",        nomes: ["TIPO_PLANO_SAUDE", "TIPO_SEGURADORA"] },
+  // Quick phrases of the clinical-note editor (records/note) — one group per section of the note.
+  { label: "Registo clínico", nomes: ["FRASE_MOTIVO", "FRASE_OBSERVACOES", "FRASE_AVALIACAO", "FRASE_PLANO"] },
 ];
 const DEFAULT_NOMES = SECTIONS.flatMap(s => s.nomes);
 
@@ -86,7 +88,7 @@ function Sidebar({
   }
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col gap-0">
+    <aside className="w-full lg:w-56 lg:shrink-0 flex flex-col gap-0">
       <div className="flex items-center justify-between px-3 pt-1 pb-3">
         <span className="text-[11px] font-bold uppercase tracking-[0.07em] text-dim-400">Grupos</span>
         <button
@@ -237,10 +239,16 @@ function ValuesPanel({ nome }: { nome: string }) {
   return (
     <div className="flex-1 min-w-0 bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08)] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-dim-100">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-dim-100">
         <div>
           <h2 className="font-mono text-[15px] font-bold text-dim-900">{nome}</h2>
           <p className="text-[11px] text-dim-400 mt-0.5">{entries.length} valores</p>
+          {nome.startsWith("FRASE_") && (
+            <p className="text-[11px] text-dim-500 mt-1.5 max-w-prose">
+              Frases rápidas do editor de notas clínicas — cada valor é um texto que o médico insere com um toque.
+              Enquanto não houver nenhum valor activo, o editor usa as frases sugeridas.
+            </p>
+          )}
         </div>
         {!addingRow && (
           <button
@@ -253,6 +261,7 @@ function ValuesPanel({ nome }: { nome: string }) {
         )}
       </div>
 
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
           <tr>
@@ -335,6 +344,7 @@ function ValuesPanel({ nome }: { nome: string }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -522,7 +532,7 @@ function ServicesPanel() {
 
   return (
     <div className="flex-1 min-w-0 bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08)] overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-dim-100">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-dim-100">
         <div>
           <h2 className="font-display text-[15px] font-bold text-dim-900">Gestão de Serviços</h2>
           <p className="text-[11px] text-dim-400 mt-0.5">{merged.length} serviços (TIPO_SERVICO) · defina o preço para disponibilizar em Faturação e Agendamentos</p>
@@ -538,6 +548,7 @@ function ServicesPanel() {
         )}
       </div>
 
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
           <tr>
@@ -638,6 +649,7 @@ function ServicesPanel() {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -662,7 +674,7 @@ export default function ParametrizacoesPage() {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-brand-50 rounded-[10px] flex items-center justify-center shrink-0">
             <SlidersHorizontal className="text-brand-600" style={{ width: 18, height: 18 }} />
@@ -674,7 +686,7 @@ export default function ParametrizacoesPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 bg-dim-100 p-1 rounded-[10px]">
+        <div className="flex items-center gap-1.5 bg-dim-100 p-1 rounded-[10px] max-w-full overflow-x-auto">
           <button
             onClick={() => setView("generic")}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[12px] font-semibold transition-colors ${
@@ -697,8 +709,8 @@ export default function ParametrizacoesPage() {
       </div>
 
       {view === "generic" ? (
-        <div className="flex gap-5 items-start flex-1">
-          <div className="bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08)] p-3 shrink-0">
+        <div className="flex flex-col lg:flex-row gap-5 lg:items-start flex-1">
+          <div className="bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08)] p-3 lg:shrink-0">
             <Sidebar groups={groups} selected={selected} onSelect={setSelected} />
           </div>
           {selected ? (

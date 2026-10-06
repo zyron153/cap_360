@@ -116,6 +116,7 @@ export default function BillingNewPage() {
             </div>
 
             <div className="border border-dim-200 rounded-[10px] overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="bg-dim-50 border-b border-dim-200">
@@ -188,6 +189,7 @@ export default function BillingNewPage() {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           </div>
 

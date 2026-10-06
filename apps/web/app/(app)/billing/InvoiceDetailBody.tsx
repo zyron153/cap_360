@@ -8,7 +8,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Download, CheckCircle2, Clock, AlertCircle, RefreshCw, Shield, XCircle } from "lucide-react";
 import { RecordPaymentSchema, type RecordPaymentDto, type Invoice, type InvoiceItem, type EFaturaSubmission, type UpdateInvoiceItemDto } from "@cap/types";
-import { EFATURA_META, WAITING_REASON, docLabel, docNumber } from "../../../lib/efatura";
+import { EFATURA_META, WAITING_REASON, docLabel, docNumber, issuedByTechplace, statusLabel } from "../../../lib/efatura";
 
 async function cancelInvoice(id: string, reason: string) {
   const res = await fetch(`/api/invoices/${id}/cancel`, {
@@ -83,7 +83,7 @@ function EFaturaDocRow({ doc }: { doc: EFaturaSubmission }) {
         <span className="text-[12px] font-semibold text-dim-900">{docLabel(doc)}</span>
         <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${meta.cls}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
-          {meta.label}
+          {statusLabel(doc)}
         </span>
       </div>
       {number && (
@@ -100,7 +100,7 @@ function EFaturaDocRow({ doc }: { doc: EFaturaSubmission }) {
       )}
       {doc.acceptedAt && (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-dim-500">Autorizada em</span>
+          <span className="text-[11px] text-dim-500">{issuedByTechplace(doc) ? "Emitida em" : "Autorizada em"}</span>
           <span className="font-mono text-[11px] text-dim-600">{format(new Date(doc.acceptedAt), "d MMM yyyy HH:mm", { locale: pt })}</span>
         </div>
       )}
@@ -489,6 +489,7 @@ export function InvoiceDetailBody({ id }: { id: string }) {
 
         {/* Line items */}
         <div className="px-6 py-4">
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>
@@ -528,6 +529,7 @@ export function InvoiceDetailBody({ id }: { id: string }) {
               </tr>
             </tfoot>
           </table>
+          </div>
         </div>
 
         {/* Payments */}
@@ -567,7 +569,7 @@ export function InvoiceDetailBody({ id }: { id: string }) {
             className="px-6 py-5 border-t border-dim-100"
           >
             <h3 className="font-display text-[14px] font-semibold text-dim-900 mb-4">Registar Pagamento</h3>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">
                   Valor (CVE) <span className="text-red-500">*</span>

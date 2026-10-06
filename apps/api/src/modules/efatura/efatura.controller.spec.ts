@@ -6,8 +6,10 @@ const config = {
   update: jest.fn(),
   setCertificate: jest.fn(),
   removeCertificate: jest.fn(),
+  getTechplaceCredentials: jest.fn(),
 };
 const auth = { authorizeUrl: jest.fn(), handleCallback: jest.fn(), disconnect: jest.fn() };
+const techplace = { lookups: jest.fn() };
 const user = { sub: "admin-1", email: "a@b.cv", roles: ["admin"] };
 
 let ctl: EFaturaController;
@@ -15,7 +17,7 @@ const res = () => ({ redirect: jest.fn() });
 
 beforeEach(() => {
   jest.clearAllMocks();
-  ctl = new EFaturaController(config as never, auth as never);
+  ctl = new EFaturaController(config as never, auth as never, techplace as never);
   config.getView.mockResolvedValue({ oauthRedirectUri: "https://app.cap.cv/api/efatura/oauth/callback" });
 });
 
@@ -62,6 +64,22 @@ describe("EFaturaController", () => {
       const r = res();
       await ctl.callback("c", "s", undefined, user, r as never);
       expect(String(r.redirect.mock.calls[0][0])).not.toContain("hunter2");
+    });
+  });
+
+  describe("Techplace test", () => {
+    it("asks for credentials before calling out", async () => {
+      config.getTechplaceCredentials.mockResolvedValue(null);
+      expect(await ctl.testTechplace()).toEqual({ error: expect.stringContaining("Techplace") });
+      expect(techplace.lookups).not.toHaveBeenCalled();
+    });
+
+    it("returns the lists, and a platform failure as a message instead of a 500", async () => {
+      config.getTechplaceCredentials.mockResolvedValue({ apiKey: "k" });
+      techplace.lookups.mockResolvedValueOnce({ tipos: [], metodos: [], condicoes: [] });
+      expect(await ctl.testTechplace()).toEqual({ tipos: [], metodos: [], condicoes: [] });
+      techplace.lookups.mockRejectedValueOnce(new EFaturaError("TP_UNAUTHORIZED", "O Techplace recusou as credenciais (401)", false));
+      expect(await ctl.testTechplace()).toEqual({ error: "O Techplace recusou as credenciais (401)" });
     });
   });
 

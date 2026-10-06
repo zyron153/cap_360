@@ -344,6 +344,94 @@ notes; admin sees everything) rather than a patient-clinician assignment table t
 nowhere else. See `Docs/modules/M7-clinical-records-emr.md` v2.0 for the full shape — it no longer
 resembles the original SOAP/ICD-10 design, which was written before the client became CAP.
 
+- [x] **Doctor register reworked (2026-10-03).** The note used to be written in a modal on the
+  patient's profile — a different place from the queue where the checked-in patient appears —
+  never linked to the appointment, with no draft, no edit UI, and a worklist that only showed the
+  last 100 notes *across all doctors* before filtering to the caller's own. Now: a note editor page
+  (autosaved server-side drafts, patient context + previous plan beside the form, quick phrases,
+  smart defaults, "Guardar e concluir consulta"), a day queue with per-patient note state, and a
+  filtered history. Backend: `ClinicalNote.finalizedAt` (null = draft; migration back-fills
+  existing notes), one shared finalize rule, appointment-belongs-to-patient validation, the author
+  scope pushed into the query, and `PATCH` now re-checks completeness (the risk-detail re-check the
+  old comment promised was never implemented).
+  - [x] **Limits closed (2026-10-04).** (1) Quick phrases are admin-editable: four `FRASE_*`
+    Parametrizações groups, falling back to a suggested set while empty. (2) History is paged
+    (`page`/`limit`, "Carregar mais"). (3) One note per appointment per clinician
+    (`@@unique([appointmentId, authorStaffId])`; a repeat POST continues the draft, 409 once final;
+    six concurrent first-saves verified → one note). (4) A doctor can switch the day queue to
+    "Todos" to cover for a colleague. (5) The app shell is responsive: a drawer sidebar below `lg`,
+    and the six routes whose header rows could not wrap (`/appointments`, `/billing`,
+    `/health-plans`, `/staff`, `/parametrizacoes`, `/access`) now wrap — guarded by
+    `e2e/responsive-shell.spec.ts` (no horizontal overflow at 390 and 820px on 14 routes).
+  - [x] **The four open items closed (2026-10-05).**
+    1. *Two tabs / last write wins* — every editor `PATCH` carries `expectedUpdatedAt` and is a
+       compare-and-set in one statement; a loss is a 409 `NOTE_CHANGED` + the current note, and the
+       editor shows "Carregar a versão guardada" / "Manter a minha versão". A repeat create for an
+       appointment is now a 409 as well (it used to *continue* the draft, which would have overwritten the
+       other tab). Verified live: 6 simultaneous first-saves → 1×201 + 5×409; 2 racing saves → 1×200 + 1×409.
+    2. *Covering doctor can't see the colleague's notes* — **decided: option A, "treating today"**: while
+       the patient has an appointment today that is `checked_in`/`completed`, any doctor reads the other
+       authors' *finalized* notes (never drafts), read-only, lapsing at end of day, audit-marked. Documented in
+       `M7` §3.1, `SECURITY.md` §3.1 and `ROLES-PERMISSIONS.md` (whose §3.3/§4.1 still said M7 didn't exist).
+       Proven with two real doctor logins in `clinical-note-access.integration-spec.ts`.
+    3. *Cramped phone layouts* — measured, not guessed. Making 37 `grid-cols-N` grids responsive was the
+       easy part; a stricter check (clipped / squeezed / sideways-scroll, on every tab) then found 20 views
+       the old overflow check had passed: tables clipped inside `overflow-hidden` cards (now each in its own
+       `overflow-x-auto`), four pages with a fixed-width vertical nav beside the content (billing, health
+       plans, settings, parametrizações: now a scrollable tab strip below `lg`), the dashboard's inline
+       `1fr 340px` layout, the appointments calendar (one day at a time below 768px), the WhatsApp inbox
+       (master-detail below 768px) and a handful of rows that could not wrap. Guarded by
+       `e2e/responsive-shell.spec.ts` on 14 routes × every tab at 390 and 820px.
+    4. *Topbar* — the two chips are live (unconfirmed appointments in the next 7 days; active plans ending
+       within 7 days; admin/receptionist only) and the bell lists them with a dot only when there is
+       something; the search box is a real patient combobox. Guarded by `e2e/topbar.spec.ts`.
+  - [x] **The smaller open items closed (2026-10-05, second pass).**
+    1. *Self-unlock of the "treating today" rule* — the status endpoint now records who checked the patient in
+       and who completed the appointment (`checkedInByStaffId` / `completedByStaffId`, migration
+       `20261005000200`), and the read rule needs someone *other than the reader* to have done either. Proven with
+       two real doctors: B's own check-in and completion (or completing straight from `confirmed`) unlocks nothing;
+       reception completing it does; an unknown actor (system caller, or a row from before this) still qualifies.
+       The editor says why instead of showing no history. Trade-off accepted: in a clinic with no reception, a
+       covering doctor who checks the patient in themself won't see the colleague's notes (admin still does).
+    2. *Phone search* — below 768px a search icon opens a bar over the topbar (same combobox, same results list).
+    3. */exams and /visits* — still mock-only and unreachable (middleware redirects them). Instead of unverifiable
+       UI work on dead pages there is a tripwire in `e2e/responsive-shell.spec.ts` that fails the moment either is
+       un-hidden, telling whoever does it to add them to the phone-width check in the same change.
+  - [x] **Hardening pass by two parallel agents (2026-10-06).** *Backend:* a draft can be discarded
+    (`DELETE /clinical-notes/:id`, author/admin, drafts only, audited without its text); an admin report of
+    cross-author reads (`GET /clinical-notes/access-log`); the audit interceptor no longer records a query
+    string as the "resource" (a `?`-suffixed URL used to dodge the cross-author-read mark — a real hole, fixed,
+    the full URL stays in `metadata.url`); prescription/referral links to a note are validated and their FKs are
+    `RESTRICT` (migration `20261006000000`, plus a partial index for the report, `…000100`); referral status
+    moves follow `REFERRAL_STATUS_TRANSITIONS`; invoice numbers are `MAX+1` under the advisory lock (a deleted
+    non-newest invoice made `COUNT+1` collide and every create 500). *UI:* the two-tab conflict is a per-section
+    3-way merge with a side-by-side choice (`M7` §2.1), "Descartar rascunho", the admin tab "Acessos entre
+    clínicos", prescriptions with several medicines + duration/instructions, referrals with a colleague picker and
+    status buttons, "Carregar mais" on the profile's lists. *Tests:* 799 unit (41 suites), 40 integration across the
+    clinical + invoice specs, 84 Playwright (`clinical-note-draft`, `-editor`, `clinical-extras`, `topbar`,
+    `responsive-shell`). The first full browser run found two wrong tests (not product bugs); both fixed.
+  - [ ] **Decisions the pass left for the clinic/owner** (each was implemented the conservative way):
+    narrow "treating today" to the appointment's own doctor (today any doctor qualifies); encrypt
+    `Referral.reason` (it is plain text while note text is AES-GCM); audit *failed* 403/404 reads, not only
+    successes; `?q=` search terms (PII) are kept in `audit_log.metadata.url`; whether an admin should create
+    prescriptions/referrals (the permission matrix says no, the code allows it); make the cross-author-read audit
+    write synchronous and fail-closed; whether the referrer may mark their own referral declined/completed;
+    whether an admin can be an internal referral target.
+  - [ ] Still open (smaller): two people can still arrange the "treating today" unlock (reception or a colleague
+    checking in on a doctor's behalf) — bounded to a day and audited; an owner/admin-granted share was offered
+    and not chosen. `health-plans.repository.ts` numbers renewals with the same `COUNT+1` pattern invoices had.
+    The compiled APIs on :4000/:4001 must be rebuilt/restarted for the new endpoints and `MAX+1` numbering; the
+    dev DB has a placeholder patient "AG1 numbering placeholder" with a cancelled invoice `INV-2026-0008`
+    (inserted to cover a gap) to delete afterwards. Three pre-existing integration tests (booking-conflict ×2,
+    health-plan-renewal ×1) fail only because Dr. Silva's dev availability is a single Thursday 10–11 slot.
+    The dev DB holds leftover e2e/integration notes (it had 0 before this work) and two `E2E Paciente…` patients
+    from 2026-09-06/07; clean them with SQL scoped to those rows (children first).
+  - [ ] **Dev DB is behind the schema:** `schema.prisma` (another session's e-Fatura Techplace work) declares
+    `services.techplaceProductId`, `efatura_submissions.externalId/externalCode`, but the migration
+    `20261007000000_efatura_techplace` has not been applied to `maissaude_dev`. The regenerated Prisma client
+    queries those columns, so anything restarted or generated from this tree 500s on `services` until it is
+    applied (`prisma db execute --file … --schema prisma/schema.prisma`; the dev DB's migration history differs
+    from the repo's, so not `migrate deploy`). The compiled servers already running are unaffected until restarted.
 ### M8 — Staff & Resource Scheduler
 
 **Backend**

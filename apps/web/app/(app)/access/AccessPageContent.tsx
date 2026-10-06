@@ -177,7 +177,7 @@ function CompanyFormModal({ company, onClose, onSaved }: { company: Company | nu
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">NIF *</label>
           <input required className={inputCls} value={form.taxId} onChange={(e) => setForm((f) => ({ ...f, taxId: e.target.value }))} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Email</label>
             <input type="email" className={inputCls} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
@@ -323,6 +323,7 @@ function PermsModal({ role, perms, onSave, onClose }: {
     <Modal open onClose={onClose} title={`Permissões — ${role.valor}`}>
       <div className="flex flex-col" style={{ maxHeight: "70vh" }}>
         <div className="overflow-y-auto flex-1">
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left">
             <thead className="sticky top-0 z-10 bg-dim-50">
               <tr>
@@ -367,6 +368,7 @@ function PermsModal({ role, perms, onSave, onClose }: {
               })}
             </tbody>
           </table>
+          </div>
         </div>
         <div className="px-5 py-3 border-t border-dim-100 flex justify-end gap-2 bg-white">
           <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
@@ -560,7 +562,7 @@ function UsersSection() {
           {staffList.map((s) => {
             const initials = s.fullName.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
             return (
-              <div key={s.id} className="px-5 py-3.5 flex items-center justify-between hover:bg-dim-50/60 transition-colors">
+              <div key={s.id} className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 hover:bg-dim-50/60 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-brand-700 flex items-center justify-center text-[11px] font-semibold text-white shrink-0">{initials}</div>
                   <div>
@@ -568,7 +570,7 @@ function UsersSection() {
                     <p className="text-[11px] text-dim-400">{s.email}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ${roleBadgeCls[s.role] ?? "bg-dim-100 text-dim-500"}`}>
                     {ROLE_LABELS[s.role] ?? s.role}
                   </span>
@@ -639,7 +641,7 @@ export default function AccessPageContent() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-[22px] font-bold text-dim-900 flex items-center gap-2">
             <Users className="text-brand-600" style={{ width: 22, height: 22 }} />
@@ -647,7 +649,7 @@ export default function AccessPageContent() {
           </h1>
           <p className="text-[13px] text-dim-500 mt-0.5">Organizações, perfis de permissões e utilizadores</p>
         </div>
-        <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1">
+        <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1 max-w-full overflow-x-auto">
           <TabButton active={tab === "organica"} onClick={() => setTab("organica")} icon={Building2}>Organização</TabButton>
           <TabButton active={tab === "perfis"} onClick={() => setTab("perfis")} icon={ShieldCheck}>Perfis</TabButton>
           <TabButton active={tab === "utilizadores"} onClick={() => setTab("utilizadores")} icon={Users}>Utilizadores</TabButton>

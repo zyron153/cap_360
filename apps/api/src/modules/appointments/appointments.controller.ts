@@ -11,6 +11,7 @@ import {
 import { AppointmentsService } from "./appointments.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decorator";
 import {
   CreateAppointmentSchema,
   CreateAppointmentSeriesSchema,
@@ -95,9 +96,10 @@ export class AppointmentsController {
   updateStatus(
     @Param("id", ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateAppointmentStatusSchema))
-    dto: UpdateAppointmentStatusDto
+    dto: UpdateAppointmentStatusDto,
+    @CurrentUser() user: JwtUser
   ) {
-    return this.service.updateStatus(id, dto);
+    return this.service.updateStatus(id, dto, user.sub);
   }
 
   @Post(":id/invoice")
