@@ -15,3 +15,5 @@ overrides:
   # @nestjs/platform-express 10 pins multer 2.0.2 (several high advisories, fixed in >=2.3.0); same 2.x API.
   # Also in package.json pnpm.overrides: the Docker images install with pnpm 9, which ignores this file.
   multer: ">=2.3.0"
+  # express 4 resolves proxy-addr 2.0.7 (critical: IP spoofing via IPv4-mapped IPv6 trust subnet, fixed in 2.0.8; express asks ~2.0.7).
+  proxy-addr: ">=2.0.8"
