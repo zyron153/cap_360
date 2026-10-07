@@ -40,6 +40,18 @@
   }
 }
 
+/* Safari on macOS draws no picker icon on time inputs (Chrome/Firefox do); paint the clock
+   ourselves. The @supports pair matches desktop Safari only, so no double icon elsewhere. */
+@supports (font: -apple-system-body) and (not (-webkit-touch-callout: none)) {
+  input[type="time"] {
+    padding-right: 2rem;
+    background-repeat: no-repeat;
+    background-position: right 0.625rem center;
+    background-size: 14px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236B6B8A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E");
+  }
+}
+
 /* Thin scrollbars */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
