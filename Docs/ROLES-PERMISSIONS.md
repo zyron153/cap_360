@@ -48,6 +48,13 @@
 | M10 – Analytics | 🔒 | 📖 basic | 📖 own stats | 🔒 | 🔒 | ✅ full | 📖 plan usage |
 | Settings / Config | 🔒 | 🔒 | 🔒 | 🔒 | 🔒 | ✅ full | 🔒 |
 
+> **Implementation note (2026-10-06):** the matrix is the aspiration; the API is narrower. The class-level `@Roles` on
+> `health-plans` (only `GET /health-plans/products[/:id]` also admits `doctor`), `invoices`, `financeiro` and
+> `whatsapp/conversations` exclude `doctor`, `nurse` and `lab_tech`, so a doctor's `📖` for M3/M4/M6 is a 403 today.
+> The web sidebar does not match yet: `defaultPerms("doctor")` in `apps/web/lib/access-control.ts` still shows
+> "Planos de Saúde", and "WhatsApp Hub" is unmapped (always visible). Pages must treat 401/403 as "no data" (see
+> `lib/get-json.ts`), not render the error object — that is what put doctors on the "404" screen after login.
+
 ---
 
 ## 3. Detailed Action-Level Permissions

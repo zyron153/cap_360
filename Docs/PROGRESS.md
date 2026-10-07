@@ -5,6 +5,32 @@
 
 ## Done
 
+- **Staging mostrava "404" depois do login — corrigido e implantado, 2026-10-06.** Pedido: depurar, corrigir e pôr no
+  staging. **Causa:** não era uma rota em falta. O dashboard pede `/api/health-plans` e `/api/invoices` a todos os
+  perfis, mas a API só os dá a admin/receção; para o médico `tst@mail.cv` (criado nesse dia) a resposta é um 403 com um
+  objeto de erro, que o `data = []` do `useQuery` não substitui (só cobre `undefined`). `healthPlans.filter` rebentava
+  e o `(app)/error.tsx` — que reexporta o cartão 404 para **qualquer** erro de renderização — mostrava "Página não
+  encontrada". Os logs do nginx/web/api não mostram nenhum 404 real (só `/favicon.ico`), por isso a pista foi o
+  `TypeError: healthPlans.filter is not a function` no browser. Afeta médico, enfermeiro e lab_tech; admin e receção
+  nunca viam. **Correção:** `lib/get-json.ts` (`getJson` lança em `!r.ok`, os defaults aplicam-se), usado nas queries GET
+  do dashboard e nas duas do `PlanModal` em `patients/page.tsx` (mesmo crash à espera do médico). Teste novo
+  `e2e/dashboard-restricted-role.spec.ts` (serve os 403): falha no código antigo, passa com a correção. A 1.ª versão do
+  teste passava no código partido — afirmava antes de o 403 chegar; agora espera pela resposta.
+  - **Implantação.** A 1.ª corrida falhou no *Dependency audit* (novo **crítico**: `proxy-addr` 2.0.7, spoofing de IP,
+    via `express`; critical 1/0) — build e deploy ficaram *skipped*, staging intocado. Fixado `proxy-addr: ">=2.0.8"` nos
+    dois blocos de overrides (`pnpm-workspace.yaml` + `package.json`), como o multer; diff do lockfile só 2.0.7 → 2.0.8;
+    `pnpm@9 --frozen-lockfile` aceita (e rejeita sem o override — controlo negativo). 2.ª corrida verde: staging em
+    `staging-286b298`, tudo `healthy`, `/health` 200, 6 migrações novas aplicadas (o staging estava 5 commits atrás),
+    dados intactos (2 staff, 46 parametrizações, 7 serviços). Deploy feito pelo ramo `fix/dashboard-403-shows-404`
+    (`gh workflow run deploy-staging.yml --ref …`), **não** pelo `master`.
+  - **Verificação.** Não houve login real como médico (sem a palavra-passe da conta de teste, e não se repõe a de
+    ninguém): no staging, com cookie de sessão fictício e os 403 do médico simulados, o dashboard renderiza sem o cartão
+    404 e sem `TypeError`. `tsc` e `eslint` limpos; o `Dependency audit` voltou a critical 0 / high 29.
+  - **Em aberto.** O ramo ainda **não está no `master`** (um deploy do `master` repõe o bug e a falha do audit). A
+    sidebar continua a mostrar "Planos de Saúde" e "WhatsApp Hub" a perfis cuja API dá 403 e essas páginas
+    provavelmente mostram o mesmo "404" — decisão de permissões, não corrigida (ver `TODO.md` → DevOps,
+    `ROLES-PERMISSIONS.md`).
+
 - **Dados de Parametrizações enviados para o staging — 2026-10-06.** Pedido: pôr no staging todos os dados da BD de
   dev de Parametrizações. O staging tinha 0 linhas. Copiadas **46 linhas de `parametrizacoes` (9 grupos) + 7 `services`
   ativos**, numa transação que aborta se alguma das tabelas já tiver dados. Os `services` foram incluídos (decisão da
