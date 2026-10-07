@@ -426,12 +426,18 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
     health-plan-renewal ×1) fail only because Dr. Silva's dev availability is a single Thursday 10–11 slot.
     The dev DB holds leftover e2e/integration notes (it had 0 before this work) and two `E2E Paciente…` patients
     from 2026-09-06/07; clean them with SQL scoped to those rows (children first).
-  - [ ] **Dev DB is behind the schema:** `schema.prisma` (another session's e-Fatura Techplace work) declares
-    `services.techplaceProductId`, `efatura_submissions.externalId/externalCode`, but the migration
-    `20261007000000_efatura_techplace` has not been applied to `maissaude_dev`. The regenerated Prisma client
-    queries those columns, so anything restarted or generated from this tree 500s on `services` until it is
-    applied (`prisma db execute --file … --schema prisma/schema.prisma`; the dev DB's migration history differs
-    from the repo's, so not `migrate deploy`). The compiled servers already running are unaffected until restarted.
+  - [x] **Dev and staging DBs are caught up with the schema (2026-10-06).** `20261007000000_efatura_techplace`
+    (`services.techplaceProductId`, `efatura_submissions.externalId/externalCode`) was missing from `maissaude_dev`
+    while the regenerated Prisma client already queried it (39 of 40 integration tests 500'd). Applied to dev with
+    `prisma db execute --file … --schema prisma/schema.prisma` (the dev DB's migration history differs from the
+    repo's, so not `migrate deploy`); a schema diff afterwards is empty. **Staging** got it, and the five clinical
+    migrations before it, from the `Deploy Staging` run of 2026-10-06 19:40Z (dispatched from
+    `fix/dashboard-403-shows-404`, which contains them): the deploy job's `migrate` step ended "All migrations have
+    been successfully applied", and CI's from-scratch apply of all 10 migrations passed. Production is untouched
+    (`prod` still points at an older commit). **Still to do locally:** the compiled APIs on :4000/:4001 were not
+    restarted, so they run the old build (old Prisma client, `COUNT+1` invoice numbers, no new endpoints) until they
+    are rebuilt: stop them, `cd packages/database && npx prisma generate`, `cd apps/api && npx nest build`,
+    `node --enable-source-maps dist\main`.
 ### M8 — Staff & Resource Scheduler
 
 **Backend**

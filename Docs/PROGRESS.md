@@ -65,7 +65,9 @@
     (outra sessão: e-Fatura Techplace) mas o cliente Prisma regenerado já pede `services.techplaceProductId`: com a BD
     de dev, 39 dos 40 testes de integração davam 500. Em vez de aplicar a migração de outra sessão à BD partilhada,
     cloná-la para uma BD descartável (`pg_dump | psql` dentro do contentor), aplicar lá o SQL, correr tudo contra
-    essa cópia e apagá-la. **A BD de dev continua sem essa migração** — ver `TODO.md`.
+    essa cópia e apagá-la. **Depois disso a migração foi aplicada à BD de dev (2026-10-06; diferença de esquema vazia)
+    e o staging já a tinha desde o deploy das 19:40Z** (as 6 migrações novas, "All migrations have been successfully
+    applied"). As APIs compiladas em :4000/:4001 ainda não foram reiniciadas — ver `TODO.md`.
   - **Ficou aberto (em `TODO.md`):** as 8 decisões que o agente 1 deixou para a clínica; reiniciar/reconstruir as APIs
     compiladas em :4000/:4001; apagar o paciente-marcador "AG1 numbering placeholder" e a sua fatura `INV-2026-0008`;
     `health-plans.repository.ts` ainda numera com `COUNT+1`; 3 testes de integração antigos falham só pela
