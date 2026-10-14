@@ -9,6 +9,7 @@ import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
+import { getJson } from "../../../lib/get-json";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -64,6 +65,7 @@ const APPT_STATUS: Record<string, { lineState: string; card: string; avatar: str
   pending:    { lineState: "default", card: "gray",  avatar: "teal",  label: "Pendente",   pillCls: "bg-amber-100 text-amber-700"    },
   confirmed:  { lineState: "default", card: "teal",  avatar: "teal",  label: "Confirmada", pillCls: "bg-brand-100 text-brand-800"    },
   checked_in: { lineState: "active",  card: "teal",  avatar: "teal",  label: "Presente",   pillCls: "bg-violet-100 text-violet-700"  },
+  in_progress: { lineState: "active", card: "teal",  avatar: "teal",  label: "Em curso",   pillCls: "bg-sky-100 text-sky-700"        },
   completed:  { lineState: "done",    card: "green", avatar: "green", label: "Concluída",  pillCls: "bg-emerald-100 text-emerald-700" },
   cancelled:  { lineState: "cancel",  card: "red",   avatar: "gray",  label: "Cancelada",  pillCls: "bg-dim-100 text-dim-500"        },
   no_show:    { lineState: "cancel",  card: "red",   avatar: "gray",  label: "Faltou",     pillCls: "bg-red-100 text-red-600"        },
@@ -138,55 +140,55 @@ export default function DashboardPage() {
   /* ── Queries ── */
   const { data: todayAppts = [], isLoading: todayLoading } = useQuery<TodayAppt[]>({
     queryKey: ["appointments", "calendar", todayStr, todayStr],
-    queryFn:  () => fetch(`/api/appointments?from=${todayStr}&to=${todayStr}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${todayStr}&to=${todayStr}`),
     staleTime: 30_000,
   });
 
   const { data: monthAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", monthStart, monthEnd],
-    queryFn:  () => fetch(`/api/appointments?from=${monthStart}&to=${monthEnd}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${monthStart}&to=${monthEnd}`),
     staleTime: 60_000,
   });
 
   const { data: calAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", calMonthStart, calMonthEnd],
-    queryFn:  () => fetch(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`),
     staleTime: 60_000,
   });
 
   const { data: selectedAppts = [], isLoading: selectedLoading } = useQuery<TodayAppt[]>({
     queryKey: ["appointments", "calendar", selectedDay, selectedDay],
-    queryFn:  () => fetch(`/api/appointments?from=${selectedDay}&to=${selectedDay}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${selectedDay}&to=${selectedDay}`),
     staleTime: 30_000,
   });
 
   const { data: patientsList } = useQuery<{ data: RecentPatient[] }>({
     queryKey: ["patients", "dashboard"],
-    queryFn:  () => fetch("/api/patients?limit=20").then(r => r.json()),
+    queryFn:  () => getJson("/api/patients?limit=20"),
     staleTime: 60_000,
   });
 
   const { data: invoicesData } = useQuery<{ data: InvoiceRow[] }>({
     queryKey: ["invoices", "dashboard"],
-    queryFn:  () => fetch("/api/invoices?limit=5").then(r => r.json()),
+    queryFn:  () => getJson("/api/invoices?limit=5"),
     staleTime: 30_000,
   });
 
   const { data: billingSummary } = useQuery<BillingSummary>({
     queryKey: ["bff", "billing-summary"],
-    queryFn:  () => fetch("/api/bff/billing-summary").then(r => r.json()),
+    queryFn:  () => getJson("/api/bff/billing-summary"),
     staleTime: 60_000,
   });
 
   const { data: healthPlans = [] } = useQuery<HealthPlan[]>({
     queryKey: ["health-plans", "all"],
-    queryFn:  () => fetch("/api/health-plans").then(r => r.json()),
+    queryFn:  () => getJson("/api/health-plans"),
     staleTime: 120_000,
   });
 
-  const { data: patients }    = useQuery<{ data: { id: string; fullName: string }[] }>({ queryKey: ["patients-list"],  queryFn: () => fetch("/api/patients?limit=100").then(r => r.json()), staleTime: 60_000 });
-  const { data: staffList }   = useQuery<{ id: string; fullName: string }[]>({ queryKey: ["staff-list"],   queryFn: () => fetch("/api/staff").then(r => r.json()), staleTime: 60_000 });
-  const { data: servicesList} = useQuery<{ id: string; name: string }[]>({   queryKey: ["services-list"], queryFn: () => fetch("/api/services").then(r => r.json()), staleTime: 60_000 });
+  const { data: patients }    = useQuery<{ data: { id: string; fullName: string }[] }>({ queryKey: ["patients-list"],  queryFn: () => getJson("/api/patients?limit=100"), staleTime: 60_000 });
+  const { data: staffList }   = useQuery<{ id: string; fullName: string }[]>({ queryKey: ["staff-list"],   queryFn: () => getJson("/api/staff"), staleTime: 60_000 });
+  const { data: servicesList} = useQuery<{ id: string; name: string }[]>({   queryKey: ["services-list"], queryFn: () => getJson("/api/services"), staleTime: 60_000 });
 
   /* ── Real-time ── */
   useEffect(() => {
@@ -251,7 +253,7 @@ export default function DashboardPage() {
 
   // Occupancy = active (checked_in + completed) / total today
   const occupancyPct = todayTotal > 0
-    ? Math.round((todayAppts.filter(a => a.status === "completed" || a.status === "checked_in").length / todayTotal) * 100)
+    ? Math.round((todayAppts.filter(a => a.status === "completed" || a.status === "checked_in" || a.status === "in_progress").length / todayTotal) * 100)
     : 0;
 
   // Health plans donut from real data

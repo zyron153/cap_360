@@ -74,7 +74,7 @@ async function bookNextFreeSlot(request: APIRequestContext, patientId: string): 
 async function bookAppointment(request: APIRequestContext, patientId: string, opts: { checkIn?: boolean } = {}): Promise<string> {
   const id = await bookNextFreeSlot(request, patientId);
   if (opts.checkIn) {
-    for (const status of ["confirmed", "checked_in"]) {
+    for (const status of ["confirmed", "checked_in", "in_progress"]) {
       const r = await request.patch(`${API}/appointments/${id}/status`, { data: { status } });
       expect(r.ok(), `-> ${status}`).toBeTruthy();
     }
@@ -107,7 +107,7 @@ async function cleanup(request: APIRequestContext, opts: { appointmentIds?: (str
   for (const id of opts.appointmentIds ?? []) {
     if (!id) continue;
     const a = (await request.get(`${API}/appointments/${id}`).then((r) => r.json())) as { status: string };
-    if (["pending", "confirmed", "checked_in"].includes(a.status)) {
+    if (["pending", "confirmed", "checked_in", "in_progress"].includes(a.status)) {
       await must(`cancel appointment ${id}`, () => request.patch(`${API}/appointments/${id}/status`, { data: { status: "cancelled" } }));
     }
   }

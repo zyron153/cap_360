@@ -139,12 +139,16 @@ Response 201: Waitlist entry
 
 ### PATCH `/appointments/:id/status`
 ```
-Body: { "status": "confirmed | checked_in | completed | cancelled | no_show",
+Body: { "status": "confirmed | checked_in | in_progress | completed | cancelled | no_show",
   "cancellationReason": "string (optional)", "durationMinutes": "1-600 (optional)" }
 Response 200: Updated appointment (plus "invoiceWarning": string, only present if the auto-draft
               invoice below failed). Marking "completed" auto-creates a draft invoice for the service.
 Response 400: requested status isn't a valid transition from the appointment's current status
+Response 403: `checked_in` by anyone but reception/admin, or `in_progress` by anyone but a doctor/admin
 ```
+**"Em curso" (2026-10-14).** Reception checks the patient in (`checked_in`); the doctor then starts the consultation
+(`checked_in → in_progress`, stamps `startedAt`) and concludes it (`in_progress → completed`). `in_progress` may only
+be completed or cancelled. `checked_in → completed` is still accepted (reception closing a visit without a doctor).
 `durationMinutes` is the actual time spent, confirmed when marking "completed" — it's written onto
 the appointment and, when the service has a known standard duration, scales the auto-created draft
 invoice's price: `unitPrice = (durationMinutes / service.durationMinutes) * service.price`. Omit it

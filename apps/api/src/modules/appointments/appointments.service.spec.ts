@@ -751,6 +751,38 @@ describe("AppointmentsService", () => {
     });
   });
 
+  describe("updateStatus — Em curso", () => {
+    beforeEach(() => {
+      repo.update.mockResolvedValue({ id: "appt-1" });
+      billingMock.createDraft.mockResolvedValue({});
+      healthPlansMock.recordSessionUsage.mockResolvedValue(null);
+    });
+    const at = (status: string) =>
+      repo.findById.mockResolvedValue({
+        id: "appt-1", status, patientId: "p1", serviceId: "s1",
+        patient: { id: "p1" }, service: { id: "s1", name: "Consulta Geral", price: "1500" },
+      });
+
+    it("starts a checked-in appointment and stamps startedAt, without touching the check-in actor", async () => {
+      at("checked_in");
+      await service.updateStatus("appt-1", { status: "in_progress" }, "doc-1");
+      const data = repo.update.mock.calls[0][1];
+      expect(data.status).toBe("in_progress");
+      expect(data.startedAt).toBeInstanceOf(Date);
+      expect(data).not.toHaveProperty("checkedInByStaffId");
+    });
+
+    it("can only be started from checked_in, and can be completed from in_progress", async () => {
+      for (const from of ["pending", "confirmed", "completed", "cancelled", "no_show"]) {
+        at(from);
+        await expect(service.updateStatus("appt-1", { status: "in_progress" })).rejects.toThrow(/Cannot change status/);
+      }
+      at("in_progress");
+      await service.updateStatus("appt-1", { status: "completed" }, "doc-1");
+      expect(repo.update.mock.calls[0][1]).toMatchObject({ status: "completed", completedByStaffId: "doc-1" });
+    });
+  });
+
   describe("updateStatus — completion side-effects", () => {
     beforeEach(() => {
       repo.update.mockResolvedValue({ id: "appt-1", status: "completed" });

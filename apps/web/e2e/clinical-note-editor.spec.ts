@@ -67,7 +67,7 @@ async function bookNextFreeSlot(request: APIRequestContext, patientId: string): 
 async function bookAppointment(request: APIRequestContext, patientId: string, checkIn: boolean): Promise<string> {
   const id = await bookNextFreeSlot(request, patientId);
   if (checkIn) {
-    for (const status of ["confirmed", "checked_in"]) {
+    for (const status of ["confirmed", "checked_in", "in_progress"]) {
       const r = await request.patch(`${API}/appointments/${id}/status`, { data: { status } });
       expect(r.ok(), `-> ${status}`).toBeTruthy();
     }
@@ -102,7 +102,7 @@ test.afterAll(async ({ request }) => {
     await must(`discard draft ${n.id}`, () => request.delete(`${API}/clinical-notes/${n.id}`));
   }
   const a = (await request.get(`${API}/appointments/${queueApptId}`).then((r) => r.json())) as { status: string };
-  if (["pending", "confirmed", "checked_in"].includes(a.status)) {
+  if (["pending", "confirmed", "checked_in", "in_progress"].includes(a.status)) {
     await must("cancel the appointment", () => request.patch(`${API}/appointments/${queueApptId}/status`, { data: { status: "cancelled" } }));
   }
   const invoices = (await request.get(`${API}/invoices?patientId=${patientId}&limit=100`).then((r) => r.json())) as { data: { id: string; status: string }[] };
@@ -365,7 +365,7 @@ test.describe("on a phone", () => {
 
 // ─── the day queue ────────────────────────────────────────────────────────────────────────────────
 
-test("the day queue lists today's patients with their note state; Registar opens the editor; Concluir completes the consulta", async ({ page, request }) => {
+test("the agenda lists today's patients with status and note state; Registar opens the editor; Concluir completes the consulta", async ({ page, request }) => {
   // The queue asks for today's appointments: serve the real checked-in one, dated today.
   const appt = await request.get(`${API}/appointments/${queueApptId}`).then((r) => r.json());
   const today = new Date();
@@ -380,19 +380,45 @@ test("the day queue lists today's patients with their note state; Registar opens
   const row = page.locator("div", { hasText: PATIENT }).filter({ has: page.getByRole("link", { name: "Registar" }) }).last();
   await expect(row).toBeVisible();
   await expect(row).toContainText("Sem nota");
-  await expect(page.getByRole("tab", { name: /Em consulta/ })).toContainText("1");
+  await expect(row).toContainText("Em curso");
 
   await row.getByRole("link", { name: "Registar" }).click();
   await expect(page).toHaveURL(new RegExp(`/records/note\\?appointmentId=${queueApptId}`));
   for (const [k, v] of Object.entries({ "Motivo / Estado apresentado": "Motivo", Observações: "Obs", Avaliação: "Aval", Plano: "Plano" })) await field(page, k).fill(v);
-  // Not finalized + the consulta is checked in: the primary action finalizes AND concludes.
+  // Not finalized + the consulta is in progress ("Em curso"): the primary action finalizes AND concludes.
   await page.route(/\/api\/appointments\/[0-9a-f-]+\/status/, (route) => { completed = true; return route.fallback(); });
   await page.getByRole("button", { name: "Guardar e concluir consulta" }).click();
   await expect(page).toHaveURL((u) => u.pathname === "/records");
   await expect.poll(async () => (await request.get(`${API}/appointments/${queueApptId}`).then((r) => r.json())).status).toBe("completed");
 
-  // Back on the queue: the consulta moved to "Concluídas hoje" with its note state.
-  await expect(page.getByRole("heading", { name: "Concluídas hoje" })).toBeVisible();
+  // Back on the agenda: the consulta shows as concluded, with its note state.
+  await expect(page.getByText("Concluída", { exact: true })).toBeVisible();
   await expect(page.getByText("Nota guardada")).toBeVisible();
   await expect(page.getByRole("link", { name: "Ver nota" })).toBeVisible();
+});
+
+test("the agenda offers Iniciar consulta only on a checked-in row, and starting moves it to Em curso then opens the note", async ({ page, request }) => {
+  const appt = await request.get(`${API}/appointments/${queueApptId}`).then((r) => r.json());
+  const today = new Date();
+  today.setHours(10, 0, 0, 0);
+  const at = (h: number) => new Date(today.getTime() + (h - 10) * 3_600_000).toISOString();
+  const list = [
+    { ...appt, id: "00000000-0000-4000-8000-00000000c0c0", status: "confirmed", scheduledAt: at(9), patient: { ...appt.patient, fullName: "Confirmada Sem Check-in" } },
+    { ...appt, status: "checked_in", scheduledAt: at(10) },
+  ];
+  await page.route(/\/api\/appointments\?/, (route) => route.fulfill({ json: list }));
+  let patched: unknown = null;
+  await page.route(/\/api\/appointments\/[0-9a-f-]+\/status/, (route) => {
+    patched = route.request().postDataJSON();
+    return route.fulfill({ json: { ...appt, status: "in_progress" } });
+  });
+
+  await page.goto("/records");
+  await expect(page.getByText("Confirmada Sem Check-in")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Iniciar consulta" })).toHaveCount(1); // the confirmed one has none
+  await expect(page.getByRole("button", { name: "Concluir" })).toHaveCount(0); // nor can a checked-in one be concluded before it starts
+
+  await page.getByRole("button", { name: "Iniciar consulta" }).click();
+  await expect(page).toHaveURL(new RegExp(`/records/note\?appointmentId=${queueApptId}`));
+  expect(patched).toEqual({ status: "in_progress" });
 });

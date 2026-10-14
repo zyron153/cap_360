@@ -113,7 +113,7 @@ See `ROLES-PERMISSIONS.md` for full permission matrix.
 Notes are **author-only** — a doctor reads and edits only what they wrote; admin reads and edits all;
 nurse/receptionist/lab_tech/corporate_hr have no access (see `modules/M7-clinical-records-emr.md` §3).
 One deliberate, narrow exception (decided 2026-10-05, for a doctor covering a colleague): while a patient
-is **in treatment today** (an appointment today that is `checked_in` or `completed`, put there by someone
+is **in treatment today** (an appointment today that is `checked_in`, `in_progress` or `completed`, put there by someone
 *other than the reader*), any doctor may *read* the other authors' **finalized** notes for that patient —
 read-only, never drafts, lapsing at the end of the Cabo Verde day, and every such read is audit-marked.
 The appointment records who checked the patient in and who completed it (`checkedInByStaffId` /

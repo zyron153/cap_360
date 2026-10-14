@@ -121,7 +121,40 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `recordPayment` runs insert+resum+status-update in one transaction, with a guard against `amountPaid` exceeding the invoice total
 - [x] `POST /invoices/:id/cancel` — rejects an already-paid invoice, idempotent on already-cancelled, voids or reverses the invoice's fiscal documents at DNRE (FDC event / credit note) in the same transaction
 - [x] Overdue-invoice detection — a pre-existing weekly job already emailed a digest of overdue invoices, but nothing ever set that status; it now marks `issued`/`partially_paid` invoices past `dueDate` as `overdue` first
-- [~] E-Fatura direct integration with DNRE (`modules/M6a-efatura-direct-integration.md`): signed XML (XAdES-BES), OAuth2 + PKCE, FTE/FRE/TVE + RCE per payment, FDC/NCE voids, gap-free numbering, sweeper — validated against the official XSD and sample documents; **not yet exercised on Homologação**, offline/contingency mode not implemented, IVA/exemption treatment to confirm with the accountant
+- [~] E-Fatura direct integration with DNRE (`modules/M6a-efatura-direct-integration.md`): signed XML (XAdES-BES), OAuth2 + PKCE, FTE/FRE/TVE + RCE per payment, FDC/NCE voids, gap-free numbering, sweeper — validated against the official XSD and sample documents; **not yet exercised on Homologação**, offline/contingency mode not implemented, IVA/exemption treatment to confirm with the accountant — **may be replaced by the Techplace transport below**
+- [~] **E-Fatura through Techplace** (`modules/M6b-efatura-techplace.md`; api.techplace.cv, a CV invoicing vendor that reports to
+  DNRE for us) — phase 1 built 2026-10-06 behind `EFATURA_PROVIDER=techplace` (default `dnre`, so nothing changes until it is set);
+  replaces DNRE-direct only after Gate B. **Never run against Techplace** (no credentials). Its public API has no credit note, void,
+  DNRE status/IUD, QR or webhook, and `/fatura/sincronizador` records one full payment only.
+  - [x] Phase 1: Fatura-Recibo / Talão de Venda issue path, customer + product registration, unpaid Faturas / receipts / credit
+    notes / voids parked as `TECHPLACE_UNSUPPORTED`, total read back from `GET /venda/id`, a lost answer is never auto-resent
+    (`TECHPLACE_UNCERTAIN`), settings card + "Testar ligação", tests (mapper, client, service)
+  - [ ] **Send the 14 questions to Techplace** — Gmail draft to techplace.cv@gmail.com saved 2026-10-07, not sent when this was
+    written. 1–8 block the first live sale, 11 blocks Gate B
+  - [ ] Get a Techplace test entity + credentials (API key and/or login, entity id, user id, `FR`/`TV` codes, payment-method and
+    condition ids, IVA/unit ids); issue one Fatura-Recibo and one Talão on it, and confirm the four assumptions the code makes:
+    `preco_unid` tax-inclusive, `desconto_financeiro` an amount, `cliente_externo` = the patient's NIF, one payment method per sale
+  - [ ] **Create the e-Fatura series for CAPCV on the clinic's PE account (efatura.cv) and enter it in Ilhapay
+    (`Nº de Série`)** — until then Ilhapay refuses to create any document ("definir uma série … conta no portal PE"). Checked
+    2026-10-08 (`ilhapay.techplace.cv`, login `atendimento.psi`, read-only; see M6b): the PE account is still needed, so
+    Techplace does **not** remove that step. Still open (Q1): does the clinic also need its own ICP-CV certificate?
+  - [ ] Get the API side of CAPCV from Techplace: an api-key or CAIXA operator user + the entity/user uuids (the Ilhapay login
+    is rejected by `api.techplace.cv/auth`), and confirm a sale posted to the API shows up in Ilhapay (credit notes, receipts
+    and debit notes exist in the Ilhapay UI but not in the public API — Q11)
+  - [ ] Phase 2: bring the DNRE outcome back (IUD, QR, PDF) by polling or a signed webhook (Q3); until then a sale reads
+    "Emitida", not "Autorizada"
+  - [ ] Phase 2: unpaid Fatura + one receipt per later payment without an open cash-register session (Q10)
+  - [ ] **Gate B:** credit note + void against Techplace (Q11); until then voiding a sale already reported is done by hand in
+    Techplace (the void parks as `TECHPLACE_UNSUPPORTED`)
+  - [ ] After Gate B: delete DNRE-direct (`dfe/`, `efatura-auth|client.service.ts`, `test/fixtures/efatura-xsd`, the DNRE config
+    fields and settings UI, `efatura_counters`, the signed-XML columns, the `EFATURA_PROVIDER` switch), check prod holds no
+    fiscal data first, and rewrite `M6a` into the Techplace module doc
+  - [ ] Data protection: a data-processing agreement with Techplace (Q14) — it becomes a processor of patient name, NIF and
+    service names; reflect it in `SECURITY.md` §7 (patient data privacy) and its "e-Fatura credentials" section
+  - [ ] Known limit: if product registration answers "already exists" the product id cannot be read back — set
+    `services.techplaceProductId` by hand, and add a lookup once Techplace documents one
+  - [ ] Before enabling anywhere: set `EFATURA_PROVIDER=techplace` (+ optional `TECHPLACE_BASE_URL`) in the API env — the
+    `20261007000000_efatura_techplace` migration is already on dev and staging (see M7 note below)
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
 - [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables
@@ -426,12 +459,18 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
     health-plan-renewal ×1) fail only because Dr. Silva's dev availability is a single Thursday 10–11 slot.
     The dev DB holds leftover e2e/integration notes (it had 0 before this work) and two `E2E Paciente…` patients
     from 2026-09-06/07; clean them with SQL scoped to those rows (children first).
-  - [ ] **Dev DB is behind the schema:** `schema.prisma` (another session's e-Fatura Techplace work) declares
-    `services.techplaceProductId`, `efatura_submissions.externalId/externalCode`, but the migration
-    `20261007000000_efatura_techplace` has not been applied to `maissaude_dev`. The regenerated Prisma client
-    queries those columns, so anything restarted or generated from this tree 500s on `services` until it is
-    applied (`prisma db execute --file … --schema prisma/schema.prisma`; the dev DB's migration history differs
-    from the repo's, so not `migrate deploy`). The compiled servers already running are unaffected until restarted.
+  - [x] **Dev and staging DBs are caught up with the schema (2026-10-06).** `20261007000000_efatura_techplace`
+    (`services.techplaceProductId`, `efatura_submissions.externalId/externalCode`) was missing from `maissaude_dev`
+    while the regenerated Prisma client already queried it (39 of 40 integration tests 500'd). Applied to dev with
+    `prisma db execute --file … --schema prisma/schema.prisma` (the dev DB's migration history differs from the
+    repo's, so not `migrate deploy`); a schema diff afterwards is empty. **Staging** got it, and the five clinical
+    migrations before it, from the `Deploy Staging` run of 2026-10-06 19:40Z (dispatched from
+    `fix/dashboard-403-shows-404`, which contains them): the deploy job's `migrate` step ended "All migrations have
+    been successfully applied", and CI's from-scratch apply of all 10 migrations passed. Production is untouched
+    (`prod` still points at an older commit). **Still to do locally:** the compiled APIs on :4000/:4001 were not
+    restarted, so they run the old build (old Prisma client, `COUNT+1` invoice numbers, no new endpoints) until they
+    are rebuilt: stop them, `cd packages/database && npx prisma generate`, `cd apps/api && npx nest build`,
+    `node --enable-source-maps dist\main`.
 ### M8 — Staff & Resource Scheduler
 
 **Backend**
@@ -601,6 +640,9 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 ### DevOps
 - [ ] Pre-deploy blockers found 2026-09-25 (see PROGRESS.md): prod compose + real CI deploy, API Dockerfile fixes, `NEXT_PUBLIC_API_URL` build arg, audit-log trigger SQL step, real admin bootstrap + seed production guard, boot-time env validation, drop `--accept-data-loss` from CI `db:push`
 - [x] Staging live 2026-10-03 on the Hostinger VPS: https://staging.cap360.tech:8443 (see VPS_CONFIG.md)
+- [x] Staging redeployed 2026-10-06 from branch `fix/dashboard-403-shows-404` (`staging-286b298`: the "404 after login" fix for doctor/nurse/lab_tech + the `proxy-addr` critical-advisory pin that had been failing the audit gate; also shipped the 5 commits staging was behind, 6 migrations applied, data intact)
+- [ ] **Merge `fix/dashboard-403-shows-404` into `master`** — it was deployed from the branch, so a deploy from `master` brings the "404 after login" crash and the red audit gate back until it lands
+- [ ] Doctor/nurse/lab_tech UI vs API (found 2026-10-06, not fixed — a permissions decision): the sidebar still offers "Planos de Saúde" (`defaultPerms`) and "WhatsApp Hub" (unmapped) to roles whose API calls 403, and those pages (and any other `fetch().then(r => r.json())`) are likely to show the same "404" card. Either hide them per role or make every query throw on `!res.ok`; verify with a real doctor login on staging (`tst@mail.cv`)
 - [ ] Production — environment `PRODUCTION` (reviewer, `prod` branch only), secrets, `/opt/cap360-prod` (`.env.prod`, cert, `tls.conf`) are ready and the first run was triggered 2026-10-03; still to do: approve it, seed the prod admin (>= 12-char password), back up prod `FIELD_ENCRYPTION_KEY` off the server, add the prod backup cron
 - [ ] VPS follow-ups: confirm Hostinger weekly snapshots are on; pin the SSH host key in the deploy workflows (`fingerprint:`); close `8443` in ufw if staging stops needing it; the GHCR read PAT on the VPS expires (renew it); smoke-test a file upload after the multer 2.4 bump (`FileInterceptor` has no automated test)
 - [ ] Sentry, Grafana/Prometheus, Loki — not set up

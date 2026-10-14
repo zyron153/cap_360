@@ -234,7 +234,7 @@ export class ClinicalRecordsRepository {
       where: {
         patientId,
         deletedAt: null,
-        status: { in: ["checked_in", "completed"] },
+        status: { in: ["checked_in", "in_progress", "completed"] },
         scheduledAt: { gte: cvDayStart(today), lte: cvDayEnd(today) },
         OR: [
           { checkedInByStaffId: null, completedByStaffId: null },

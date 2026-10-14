@@ -31,6 +31,7 @@ enum AppointmentStatus {
   pending
   confirmed
   checked_in
+  in_progress
   completed
   cancelled
   no_show
@@ -296,6 +297,8 @@ model Appointment {
   notes              String?           @db.VarChar(500)
   cancellationReason String?           @db.VarChar(300)
   checkedInAt        DateTime?
+  /// When the doctor started the consultation (checked_in → in_progress).
+  startedAt          DateTime?
   completedAt        DateTime?
   /// Who moved the appointment into `checked_in` / `completed` (a staff id, no FK — like AuditLog.actorId; null =
   /// unknown: a system action, or a row from before this was recorded). Evidence for the clinical-note "treating

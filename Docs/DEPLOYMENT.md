@@ -236,6 +236,10 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
   2.0.2; highs 33 → 27, 643 API tests pass). Multer's upload path (`FileInterceptor` in the patients and
   financeiro controllers) has no automated test — smoke-test an upload after the next deploy. `AUDIT_BASELINE_HIGH`
   stays at 32 to leave headroom; when a deploy goes red on it, check which advisory is new before raising it.
+  Again on 2026-10-06: a new **critical** (`proxy-addr` 2.0.7, IP spoofing via IPv4-mapped IPv6 trust subnets, pulled in by
+  `express`) failed the gate (critical 1/0) and skipped build + deploy. Fixed the same way — `proxy-addr: ">=2.0.8"` in
+  both override blocks, critical 1 → 0, high 29. Check a lockfile change under pnpm 9 in a scratch copy of the manifests
+  (`npx pnpm@9 install --frozen-lockfile --lockfile-only`), never in the repo: pnpm 9 offers to wipe `node_modules`.
 
 ### 0.7 Domain and HTTPS — `cap360.tech` (prod)
 Domain `cap360.tech` was claimed on 2026-10-03; **prod = `https://cap360.tech`**, staging stays on

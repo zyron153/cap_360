@@ -284,6 +284,14 @@ opens a bar over the topbar (result opens the profile; Cancelar closes it). The 
 left `pending` 4+ days out, inside the 7-day window) as a link to Agendamentos. The "planos terminam"
 alert is covered only by its logic (no spec books a plan ending this week).
 
+#### Dashboard for a restricted role — ✅ `apps/web/e2e/dashboard-restricted-role.spec.ts`
+A doctor/nurse/lab_tech gets 403 from `/api/health-plans` and `/api/invoices`, which the dashboard asks for
+unconditionally. The spec serves those two 403s (`AUTH_BYPASS` makes every dev session the admin, so the real API
+would answer 200) and asserts the dashboard still renders — no "Página não encontrada" card — instead of
+`healthPlans.filter is not a function` landing in `(app)/error.tsx`. It must **wait for the 403 and let React render
+it** before asserting: the card renders from its `[]` default first, so an assertion right after `goto` passes on the
+broken page (the first version did). Verified to fail on the old code and pass on the fix.
+
 #### Admin Sets a User's Password → Login → "Alterar senha" — ✅ `apps/web/e2e/staff-admin-password.spec.ts`
 Replaced `staff-invitation.spec.ts` (and the short-lived temporary-password spec) when the
 email-invitation flow was removed. Drives Gestão de Acesso through the real UI: the Add User form

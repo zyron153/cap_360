@@ -40,7 +40,8 @@ const SLOT_LOCK_TTL_MS = 30_000;
 const VALID_STATUS_TRANSITIONS: Record<string, string[]> = {
   pending: ["confirmed", "cancelled"],
   confirmed: ["checked_in", "completed", "no_show", "cancelled"],
-  checked_in: ["completed", "no_show", "cancelled"],
+  checked_in: ["in_progress", "completed", "no_show", "cancelled"],
+  in_progress: ["completed", "cancelled"],
   completed: [],
   cancelled: [],
   no_show: [],
@@ -475,6 +476,7 @@ export class AppointmentsService {
       data.checkedInAt = new Date();
       if (actorId) data.checkedInByStaffId = actorId;
     }
+    if (dto.status === "in_progress") data.startedAt = new Date();
     if (dto.status === "completed") {
       data.completedAt = new Date();
       if (actorId) data.completedByStaffId = actorId;

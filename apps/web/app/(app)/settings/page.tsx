@@ -163,14 +163,14 @@ function ClinicTab({ initial }: { initial: ClinicSettings }) {
                     type="time"
                     value={h.open}
                     onChange={e => setHour(i, { open: e.target.value })}
-                    className="w-24 border border-dim-200 rounded-[8px] px-2.5 py-1.5 text-[12px] font-mono text-dim-700 focus:outline-none focus:border-brand-500 bg-white"
+                    className="w-32border border-dim-200 rounded-[8px] px-2.5 py-1.5 text-[12px] font-mono text-dim-700 focus:outline-none focus:border-brand-500 bg-white"
                   />
                   <span className="text-dim-300 text-[12px]">–</span>
                   <input
                     type="time"
                     value={h.close}
                     onChange={e => setHour(i, { close: e.target.value })}
-                    className="w-24 border border-dim-200 rounded-[8px] px-2.5 py-1.5 text-[12px] font-mono text-dim-700 focus:outline-none focus:border-brand-500 bg-white"
+                    className="w-32border border-dim-200 rounded-[8px] px-2.5 py-1.5 text-[12px] font-mono text-dim-700 focus:outline-none focus:border-brand-500 bg-white"
                   />
                 </div>
               ) : (

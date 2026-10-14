@@ -67,7 +67,7 @@ async function cleanupPatient(request: APIRequestContext, patientId: string, app
   for (const id of appointmentIds) {
     if (!id) continue;
     const a = (await request.get(`${API}/appointments/${id}`).then((r) => r.json())) as { status: string };
-    if (["pending", "confirmed", "checked_in"].includes(a.status)) {
+    if (["pending", "confirmed", "checked_in", "in_progress"].includes(a.status)) {
       await must(`cancel appointment ${id}`, () => request.patch(`${API}/appointments/${id}/status`, { data: { status: "cancelled" } }));
     }
   }
