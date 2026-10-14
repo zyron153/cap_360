@@ -9,11 +9,11 @@ import { sendJson } from "./_note-shared";
 type Failed = { id: string; patientName: string };
 
 /**
- * Completing a Consulta (checked_in → completed) from Registos Clínicos, shared by the day queue
+ * Completing a Consulta (in_progress → completed) from Registos Clínicos, shared by the day queue
  * and the note editor.
  *
  * The completion endpoint's auto-draft-invoice step is best-effort — a failure only ever surfaced
- * as a transient toast, with no way back to it: the appointment leaves the "Em consulta" list the
+ * as a transient toast, with no way back to it: the appointment leaves the "Em curso" agenda row the
  * moment it's completed regardless of invoice outcome. So failures are kept here (same-session
  * state, not a system of record — the invoice can always be generated later from Faturas) and
  * rendered by <FailedInvoicesBanner> with a retry button.

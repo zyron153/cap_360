@@ -3,18 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { format, subDays } from "date-fns";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { endOfWeek, format, startOfWeek, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
-import { ChevronRight, CheckCircle2, ClipboardList, Search } from "lucide-react";
+import { ChevronRight, CheckCircle2, ClipboardList, Play, Search } from "lucide-react";
 import type { RiskLevel } from "@cap/types";
 import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { useMessage } from "@/components/ui/message-handler";
 import { TabList, TabPanel } from "@/components/ui/tabs";
 import { usePermissions } from "../hooks/use-permissions";
 import { FailedInvoicesBanner, useConcludeAppointment } from "./_use-conclude";
 import { AccessLogTab } from "./_access-log";
 import {
-  NoteStateBadges, RISK_META, RiskBadge, fetchJson, isDraft, notePreview, sessionTypeLabel, type NoteWithPatient,
+  NoteStateBadges, RISK_META, RiskBadge, fetchJson, isDraft, notePreview, sendJson, sessionTypeLabel, type NoteWithPatient,
 } from "./_note-shared";
 
 type QueueAppointment = {
@@ -56,30 +57,34 @@ export default function RecordsPage() {
   // "Acessos entre clínicos" is the admin's review of the cross-author read exception — nobody else sees it.
   const tab = tabChoice === "access" && !isAdmin ? "history" : tabChoice ?? (canConclude ? "today" : "history");
 
-  // ── Day queue: today's appointments (the doctor's own — admin sees everyone's) + today's notes.
-  // Polled, so a patient the receptionist just checked in shows up without a reload.
-  const today = format(new Date(), "yyyy-MM-dd");
+  // ── Agenda: the doctor's confirmed / checked-in / in-progress / completed appointments for today or this week
+  // (admin: everyone's) + the notes written in that period. Polled, so a patient reception just checked in appears
+  // without a reload. Reception checks in; the doctor starts ("Iniciar consulta" on a checked-in row) and concludes.
+  const [range, setRange] = useState<"day" | "week">("day");
+  const now = new Date();
+  const today = format(now, "yyyy-MM-dd");
+  const from = range === "day" ? today : format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
+  const to = range === "day" ? today : format(endOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
   const staffScope = isAdmin || scope === "all" ? "" : me?.id ?? "";
   const queueEnabled = canView && canConclude && (isAdmin || !!me);
   const apptsQ = useQuery({
-    queryKey: ["appointments", "calendar", "records-queue", today, staffScope],
-    queryFn: () => fetchJson<QueueAppointment[]>(`/api/appointments?${new URLSearchParams({ from: today, to: today, ...(staffScope && { staffId: staffScope }) })}`),
+    queryKey: ["appointments", "calendar", "records-queue", from, to, staffScope],
+    queryFn: () => fetchJson<QueueAppointment[]>(`/api/appointments?${new URLSearchParams({ from, to, ...(staffScope && { staffId: staffScope }) })}`),
     enabled: queueEnabled,
     refetchInterval: REFRESH_MS,
   });
-  const todayNotesQ = useQuery({
-    queryKey: ["clinical-notes", "today", today],
-    queryFn: () => fetchJson<NoteWithPatient[]>(`/api/clinical-notes?from=${today}`),
+  const periodNotesQ = useQuery({
+    queryKey: ["clinical-notes", "period", from, to],
+    queryFn: () => fetchJson<NoteWithPatient[]>(`/api/clinical-notes?from=${from}&to=${to}`),
     enabled: queueEnabled,
     refetchInterval: REFRESH_MS,
   });
-  const appts = apptsQ.data ?? [];
-  const inConsult = appts.filter((a) => a.status === "checked_in");
-  const done = appts.filter((a) => a.status === "completed");
+  const appts = (apptsQ.data ?? []).filter((a) => AGENDA_STATUSES.includes(a.status));
+  const waiting = appts.filter((a) => a.status === "checked_in").length;
 
   // Best note per appointment: a finalized one beats a draft.
   const noteByAppt = new Map<string, NoteWithPatient>();
-  for (const n of todayNotesQ.data ?? []) {
+  for (const n of periodNotesQ.data ?? []) {
     if (!n.appointmentId) continue;
     const cur = noteByAppt.get(n.appointmentId);
     if (!cur || (isDraft(cur) && !isDraft(n))) noteByAppt.set(n.appointmentId, n);
@@ -87,13 +92,24 @@ export default function RecordsPage() {
 
   const { conclude, retryInvoice, failedInvoices } = useConcludeAppointment();
 
+  const queryClient = useQueryClient();
+  const { addMessage } = useMessage();
+  const start = useMutation({
+    mutationFn: (id: string) => sendJson(`/api/appointments/${id}/status`, "PATCH", { status: "in_progress" }),
+    onSuccess: (_d, id) => {
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      router.push(`/records/note?appointmentId=${id}`);
+    },
+    onError: (err: Error) => addMessage("Error", err.message),
+  });
+
   return (
     <div className="flex flex-col gap-5">
       <div>
         <h1 className="font-display text-[22px] font-bold text-dim-900">Registos Clínicos</h1>
         <p className="text-[13px] text-dim-500 mt-0.5">
           {tab === "today"
-            ? "Pacientes em consulta hoje — registe a nota e conclua sem sair daqui"
+            ? "As suas consultas — inicie quando a receção fizer o check-in, registe a nota e conclua sem sair daqui"
             : tab === "access" ? "Quem leu notas de outros clínicos"
             : isAdmin ? "Todas as notas clínicas recentes" : "As suas notas clínicas recentes, em todos os pacientes"}
         </p>
@@ -116,9 +132,9 @@ export default function RecordsPage() {
               key: "today" as const,
               label: (
                 <>
-                  Em consulta
-                  {inConsult.length > 0 && (
-                    <span className="ml-1.5 text-[10px] font-mono bg-violet-100 text-violet-700 rounded-full px-1.5 py-0.5">{inConsult.length}</span>
+                  Agenda
+                  {waiting > 0 && (
+                    <span title="Pacientes à espera (check-in feito)" className="ml-1.5 text-[10px] font-mono bg-violet-100 text-violet-700 rounded-full px-1.5 py-0.5">{waiting}</span>
                   )}
                 </>
               ),
@@ -131,23 +147,19 @@ export default function RecordsPage() {
 
       <TabPanel idPrefix="records" tabKey={canConclude ? tab : undefined}>
       {tab === "today" && canConclude ? (
-        <div className="flex flex-col gap-5">
-          <QueueSection
-            title="Em consulta"
-            appts={inConsult}
-            noteByAppt={noteByAppt}
-            loading={apptsQ.isLoading}
-            error={apptsQ.isError}
-            conclude={conclude}
-            empty="Sem pacientes com check-in feito neste momento."
-            meId={me?.id}
-            isAdmin={isAdmin}
-            scopeToggle={!isAdmin ? { value: scope, onChange: changeScope } : undefined}
-          />
-          {done.length > 0 && (
-            <QueueSection title="Concluídas hoje" appts={done} noteByAppt={noteByAppt} conclude={conclude} meId={me?.id} isAdmin={isAdmin} />
-          )}
-        </div>
+        <QueueSection
+          appts={appts}
+          noteByAppt={noteByAppt}
+          loading={apptsQ.isLoading}
+          error={apptsQ.isError}
+          conclude={conclude}
+          meId={me?.id}
+          isAdmin={isAdmin}
+          range={{ value: range, onChange: setRange }}
+          scopeToggle={!isAdmin ? { value: scope, onChange: changeScope } : undefined}
+          onStart={(id) => start.mutate(id)}
+          startingId={start.isPending ? start.variables : undefined}
+        />
       ) : tab === "access" ? (
         <AccessLogTab enabled={canView && isAdmin} />
       ) : (
@@ -160,38 +172,43 @@ export default function RecordsPage() {
 
 // ─── Day queue ────────────────────────────────────────────────────────────────
 
-function QueueSection({ title, appts, noteByAppt, conclude, loading, error, empty, meId, isAdmin, scopeToggle }: {
-  title: string;
+function QueueSection({ appts, noteByAppt, conclude, loading, error, meId, isAdmin, range, scopeToggle, onStart, startingId }: {
   appts: QueueAppointment[];
   noteByAppt: Map<string, NoteWithPatient>;
   conclude: ReturnType<typeof useConcludeAppointment>["conclude"];
   loading?: boolean;
   error?: boolean;
-  empty?: string;
   meId?: string;
   isAdmin: boolean;
+  range: { value: "day" | "week"; onChange: (v: "day" | "week") => void };
   scopeToggle?: { value: "mine" | "all"; onChange: (v: "mine" | "all") => void };
+  onStart: (id: string) => void;
+  startingId?: string;
 }) {
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [duration, setDuration] = useState("");
+  const week = range.value === "week";
+
+  const toggle = <T extends string>(label: string, value: T, onChange: (v: T) => void, options: readonly (readonly [T, string])[]) => (
+    <div role="group" aria-label={label} className="flex bg-dim-100 rounded-[8px] p-0.5">
+      {options.map(([k, text]) => (
+        <button
+          key={k} type="button" aria-pressed={value === k} onClick={() => onChange(k)}
+          className={`text-[11px] font-semibold px-2.5 py-1 rounded-[6px] transition-colors ${value === k ? "bg-white text-dim-900 shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-500 hover:text-dim-700"}`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className={CARD}>
-      <div className="flex items-center justify-between px-5 py-4 border-b border-dim-100">
-        <h2 className="font-display text-[14px] font-semibold text-dim-900">{title}</h2>
-        <div className="flex items-center gap-3">
-          {scopeToggle && (
-            <div role="group" aria-label="Âmbito da fila" className="flex bg-dim-100 rounded-[8px] p-0.5">
-              {([["mine", "Só os meus"], ["all", "Todos"]] as const).map(([k, label]) => (
-                <button
-                  key={k} type="button" aria-pressed={scopeToggle.value === k} onClick={() => scopeToggle.onChange(k)}
-                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-[6px] transition-colors ${scopeToggle.value === k ? "bg-white text-dim-900 shadow-[0_1px_2px_rgba(0,0,0,.08)]" : "text-dim-500 hover:text-dim-700"}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
+      <div className="flex items-center justify-between gap-3 flex-wrap px-5 py-4 border-b border-dim-100">
+        <h2 className="font-display text-[14px] font-semibold text-dim-900">Consultas</h2>
+        <div className="flex items-center gap-3 flex-wrap">
+          {toggle("Período", range.value, range.onChange, [["day", "Hoje"], ["week", "Semana"]] as const)}
+          {scopeToggle && toggle("Âmbito da lista", scopeToggle.value, scopeToggle.onChange, [["mine", "Só os meus"], ["all", "Todos"]] as const)}
           <span className="font-mono text-[11px] text-dim-400">{appts.length} consultas</span>
         </div>
       </div>
@@ -205,85 +222,106 @@ function QueueSection({ title, appts, noteByAppt, conclude, loading, error, empt
           <div className="w-10 h-10 bg-dim-100 rounded-[12px] flex items-center justify-center mx-auto mb-3">
             <CheckCircle2 className="w-5 h-5 text-dim-400" />
           </div>
-          <p className="text-[13px] text-dim-500">{empty}</p>
+          <p className="text-[13px] text-dim-500">{week ? "Sem consultas confirmadas esta semana." : "Sem consultas confirmadas para hoje."}</p>
         </div>
       ) : (
         <div className="flex flex-col">
-          {appts.map((a) => {
+          {appts.map((a, i) => {
             const note = noteByAppt.get(a.id);
-            const open = a.status === "checked_in";
+            const waitingStart = a.status === "checked_in";
+            const live = a.status === "in_progress";
             const finalNote = !!note && !isDraft(note);
             const name = a.patient.fullName ?? "Paciente";
             // Another clinician's patient (a doctor covering with "Todos"): notes are author-scoped, so
             // "Sem nota" would only mean "none *visible to you*" — say nothing until they write their own.
             const foreign = !!a.staff && !!meId && a.staff.id !== meId;
             const chipMeaningful = !!note || isAdmin || !foreign;
+            const day = format(new Date(a.scheduledAt), "yyyy-MM-dd");
+            const newDay = week && (i === 0 || day !== format(new Date(appts[i - 1].scheduledAt), "yyyy-MM-dd"));
             return (
-              <div key={a.id} className="px-5 py-3.5 border-b border-dim-100 last:border-0">
-                <div className="flex items-center justify-between gap-x-4 gap-y-3 flex-wrap">
-                  <div className="min-w-0 flex items-center gap-3">
-                    <span className="font-mono text-[12px] text-dim-500 w-11 shrink-0">{format(new Date(a.scheduledAt), "HH:mm", { locale: pt })}</span>
-                    <div className="min-w-0">
-                      <p className="text-[13px] font-medium text-dim-900 truncate">{name}</p>
-                      <p className="text-[11px] text-dim-500 mt-0.5 truncate">{a.service.name}{foreign && a.staff ? ` · ${a.staff.fullName}` : ""}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    {chipMeaningful && <NoteStateChip note={note} warn={!open} />}
-                    <Link
-                      href={`/records/note?appointmentId=${a.id}`}
-                      className={`text-[12px] font-semibold px-3.5 py-2 rounded-[8px] transition-colors shrink-0 ${
-                        open && !finalNote ? "bg-brand-700 hover:bg-brand-800 text-white" : "border border-dim-200 text-dim-700 hover:bg-dim-50"
-                      }`}
-                    >
-                      {!note ? "Registar" : isDraft(note) ? "Continuar rascunho" : "Ver nota"}
-                    </Link>
-                    {open && completingId !== a.id && (
-                      <button
-                        onClick={() => { setCompletingId(a.id); setDuration(String(a.durationMinutes)); }}
-                        className={`text-[12px] font-semibold px-3.5 py-2 rounded-[8px] transition-colors shrink-0 ${
-                          finalNote ? "bg-brand-700 hover:bg-brand-800 text-white" : "border border-dim-200 text-dim-700 hover:bg-dim-50"
-                        }`}
-                      >
-                        Concluir
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {open && completingId === a.id && (
-                  <div className="mt-3 p-4 bg-emerald-50 border border-emerald-200 rounded-[14px] flex flex-col gap-3">
-                    <p className="text-[12px] font-semibold text-emerald-800">Confirmar duração da consulta</p>
-                    {!finalNote && (
-                      <p className="text-[11px] text-amber-700 -mt-1.5">Esta consulta ainda não tem nota clínica finalizada.</p>
-                    )}
-                    <p className="text-[11px] text-dim-500 -mt-1.5">Gera automaticamente um rascunho de fatura com o valor calculado a partir da duração confirmada.</p>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" min={1} max={480} inputMode="numeric"
-                        value={duration} onChange={(e) => setDuration(e.target.value)}
-                        aria-label="Duração em minutos"
-                        className="w-full max-w-[110px] border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all"
-                      />
-                      <span className="text-[12px] text-dim-500">minutos</span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        disabled={conclude.isPending || !duration || Number(duration) <= 0}
-                        onClick={() => conclude.mutate({ id: a.id, durationMinutes: Number(duration), patientName: name }, { onSuccess: () => setCompletingId(null) })}
-                        className="flex-1 text-[12px] font-semibold py-2.5 rounded-[8px] bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
-                      >
-                        {conclude.isPending ? "A concluir…" : "Confirmar Conclusão"}
-                      </button>
-                      <button
-                        onClick={() => setCompletingId(null)}
-                        className="flex-1 text-[12px] font-semibold py-2.5 rounded-[8px] border border-dim-200 text-dim-700 hover:bg-dim-50 transition-colors"
-                      >
-                        Voltar
-                      </button>
-                    </div>
-                  </div>
+              <div key={a.id}>
+                {newDay && (
+                  <p className="px-5 py-2 bg-dim-50 border-b border-dim-100 text-[11px] font-bold uppercase tracking-wide text-dim-500">
+                    {format(new Date(a.scheduledAt), "EEEE, d MMM", { locale: pt })}
+                  </p>
                 )}
+                <div className="px-5 py-3.5 border-b border-dim-100 last:border-0">
+                  <div className="flex items-center justify-between gap-x-4 gap-y-3 flex-wrap">
+                    <div className="min-w-0 flex items-center gap-3">
+                      <span className="font-mono text-[12px] text-dim-500 w-11 shrink-0">{format(new Date(a.scheduledAt), "HH:mm", { locale: pt })}</span>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-medium text-dim-900 truncate">{name}</p>
+                        <p className="text-[11px] text-dim-500 mt-0.5 truncate">{a.service.name}{foreign && a.staff ? ` · ${a.staff.fullName}` : ""}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <StatusBadge status={a.status} />
+                      {chipMeaningful && (live || a.status === "completed") && <NoteStateChip note={note} warn={!live} />}
+                      {waitingStart && (
+                        <button
+                          type="button" onClick={() => onStart(a.id)} disabled={!!startingId}
+                          className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3.5 py-2 rounded-[8px] bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50 transition-colors shrink-0"
+                        >
+                          <Play className="w-3 h-3" aria-hidden /> {startingId === a.id ? "A iniciar…" : "Iniciar consulta"}
+                        </button>
+                      )}
+                      {(live || a.status === "completed") && (
+                        <Link
+                          href={`/records/note?appointmentId=${a.id}`}
+                          className={`text-[12px] font-semibold px-3.5 py-2 rounded-[8px] transition-colors shrink-0 ${
+                            live && !finalNote ? "bg-brand-700 hover:bg-brand-800 text-white" : "border border-dim-200 text-dim-700 hover:bg-dim-50"
+                          }`}
+                        >
+                          {!note ? "Registar" : isDraft(note) ? "Continuar rascunho" : "Ver nota"}
+                        </Link>
+                      )}
+                      {live && completingId !== a.id && (
+                        <button
+                          onClick={() => { setCompletingId(a.id); setDuration(String(a.durationMinutes)); }}
+                          className={`text-[12px] font-semibold px-3.5 py-2 rounded-[8px] transition-colors shrink-0 ${
+                            finalNote ? "bg-brand-700 hover:bg-brand-800 text-white" : "border border-dim-200 text-dim-700 hover:bg-dim-50"
+                          }`}
+                        >
+                          Concluir
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {live && completingId === a.id && (
+                    <div className="mt-3 p-4 bg-emerald-50 border border-emerald-200 rounded-[14px] flex flex-col gap-3">
+                      <p className="text-[12px] font-semibold text-emerald-800">Confirmar duração da consulta</p>
+                      {!finalNote && (
+                        <p className="text-[11px] text-amber-700 -mt-1.5">Esta consulta ainda não tem nota clínica finalizada.</p>
+                      )}
+                      <p className="text-[11px] text-dim-500 -mt-1.5">Gera automaticamente um rascunho de fatura com o valor calculado a partir da duração confirmada.</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" min={1} max={480} inputMode="numeric"
+                          value={duration} onChange={(e) => setDuration(e.target.value)}
+                          aria-label="Duração em minutos"
+                          className="w-full max-w-[110px] border border-dim-200 rounded-[10px] px-3.5 py-2.5 text-[13px] text-dim-900 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all"
+                        />
+                        <span className="text-[12px] text-dim-500">minutos</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          disabled={conclude.isPending || !duration || Number(duration) <= 0}
+                          onClick={() => conclude.mutate({ id: a.id, durationMinutes: Number(duration), patientName: name }, { onSuccess: () => setCompletingId(null) })}
+                          className="flex-1 text-[12px] font-semibold py-2.5 rounded-[8px] bg-emerald-600 hover:bg-emerald-700 text-white transition-colors disabled:opacity-50"
+                        >
+                          {conclude.isPending ? "A concluir…" : "Confirmar Conclusão"}
+                        </button>
+                        <button
+                          onClick={() => setCompletingId(null)}
+                          className="flex-1 text-[12px] font-semibold py-2.5 rounded-[8px] border border-dim-200 text-dim-700 hover:bg-dim-50 transition-colors"
+                        >
+                          Voltar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -292,6 +330,17 @@ function QueueSection({ title, appts, noteByAppt, conclude, loading, error, empt
     </div>
   );
 }
+
+const AGENDA_STATUSES = ["confirmed", "checked_in", "in_progress", "completed"];
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  confirmed:   { label: "Confirmada",          cls: "bg-brand-100 text-brand-800" },
+  checked_in:  { label: "Check-in · à espera", cls: "bg-violet-100 text-violet-700" },
+  in_progress: { label: "Em curso",            cls: "bg-sky-100 text-sky-700" },
+  completed:   { label: "Concluída",           cls: "bg-emerald-100 text-emerald-700" },
+};
+const StatusBadge = ({ status }: { status: string }) => (
+  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[status]?.cls ?? "bg-dim-100 text-dim-600"}`}>{STATUS_BADGE[status]?.label ?? status}</span>
+);
 
 function NoteStateChip({ note, warn }: { note?: NoteWithPatient; warn: boolean }) {
   if (note && isDraft(note)) return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 ring-1 ring-amber-200/80">Rascunho</span>;
@@ -386,7 +435,7 @@ function HistoryTab({ enabled, isAdmin }: { enabled: boolean; isAdmin: boolean }
           ) : (
             <>
               <p className="text-[13px] text-dim-500">Ainda sem notas clínicas.</p>
-              <p className="text-[12px] text-dim-400 mt-1">Registe a primeira a partir de «Em consulta» ou da página de um paciente.</p>
+              <p className="text-[12px] text-dim-400 mt-1">Registe a primeira a partir da «Agenda» ou da página de um paciente.</p>
             </>
           )}
         </div>

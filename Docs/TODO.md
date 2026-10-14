@@ -121,7 +121,40 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] `recordPayment` runs insert+resum+status-update in one transaction, with a guard against `amountPaid` exceeding the invoice total
 - [x] `POST /invoices/:id/cancel` — rejects an already-paid invoice, idempotent on already-cancelled, voids or reverses the invoice's fiscal documents at DNRE (FDC event / credit note) in the same transaction
 - [x] Overdue-invoice detection — a pre-existing weekly job already emailed a digest of overdue invoices, but nothing ever set that status; it now marks `issued`/`partially_paid` invoices past `dueDate` as `overdue` first
-- [~] E-Fatura direct integration with DNRE (`modules/M6a-efatura-direct-integration.md`): signed XML (XAdES-BES), OAuth2 + PKCE, FTE/FRE/TVE + RCE per payment, FDC/NCE voids, gap-free numbering, sweeper — validated against the official XSD and sample documents; **not yet exercised on Homologação**, offline/contingency mode not implemented, IVA/exemption treatment to confirm with the accountant
+- [~] E-Fatura direct integration with DNRE (`modules/M6a-efatura-direct-integration.md`): signed XML (XAdES-BES), OAuth2 + PKCE, FTE/FRE/TVE + RCE per payment, FDC/NCE voids, gap-free numbering, sweeper — validated against the official XSD and sample documents; **not yet exercised on Homologação**, offline/contingency mode not implemented, IVA/exemption treatment to confirm with the accountant — **may be replaced by the Techplace transport below**
+- [~] **E-Fatura through Techplace** (`modules/M6b-efatura-techplace.md`; api.techplace.cv, a CV invoicing vendor that reports to
+  DNRE for us) — phase 1 built 2026-10-06 behind `EFATURA_PROVIDER=techplace` (default `dnre`, so nothing changes until it is set);
+  replaces DNRE-direct only after Gate B. **Never run against Techplace** (no credentials). Its public API has no credit note, void,
+  DNRE status/IUD, QR or webhook, and `/fatura/sincronizador` records one full payment only.
+  - [x] Phase 1: Fatura-Recibo / Talão de Venda issue path, customer + product registration, unpaid Faturas / receipts / credit
+    notes / voids parked as `TECHPLACE_UNSUPPORTED`, total read back from `GET /venda/id`, a lost answer is never auto-resent
+    (`TECHPLACE_UNCERTAIN`), settings card + "Testar ligação", tests (mapper, client, service)
+  - [ ] **Send the 14 questions to Techplace** — Gmail draft to techplace.cv@gmail.com saved 2026-10-07, not sent when this was
+    written. 1–8 block the first live sale, 11 blocks Gate B
+  - [ ] Get a Techplace test entity + credentials (API key and/or login, entity id, user id, `FR`/`TV` codes, payment-method and
+    condition ids, IVA/unit ids); issue one Fatura-Recibo and one Talão on it, and confirm the four assumptions the code makes:
+    `preco_unid` tax-inclusive, `desconto_financeiro` an amount, `cliente_externo` = the patient's NIF, one payment method per sale
+  - [ ] **Create the e-Fatura series for CAPCV on the clinic's PE account (efatura.cv) and enter it in Ilhapay
+    (`Nº de Série`)** — until then Ilhapay refuses to create any document ("definir uma série … conta no portal PE"). Checked
+    2026-10-08 (`ilhapay.techplace.cv`, login `atendimento.psi`, read-only; see M6b): the PE account is still needed, so
+    Techplace does **not** remove that step. Still open (Q1): does the clinic also need its own ICP-CV certificate?
+  - [ ] Get the API side of CAPCV from Techplace: an api-key or CAIXA operator user + the entity/user uuids (the Ilhapay login
+    is rejected by `api.techplace.cv/auth`), and confirm a sale posted to the API shows up in Ilhapay (credit notes, receipts
+    and debit notes exist in the Ilhapay UI but not in the public API — Q11)
+  - [ ] Phase 2: bring the DNRE outcome back (IUD, QR, PDF) by polling or a signed webhook (Q3); until then a sale reads
+    "Emitida", not "Autorizada"
+  - [ ] Phase 2: unpaid Fatura + one receipt per later payment without an open cash-register session (Q10)
+  - [ ] **Gate B:** credit note + void against Techplace (Q11); until then voiding a sale already reported is done by hand in
+    Techplace (the void parks as `TECHPLACE_UNSUPPORTED`)
+  - [ ] After Gate B: delete DNRE-direct (`dfe/`, `efatura-auth|client.service.ts`, `test/fixtures/efatura-xsd`, the DNRE config
+    fields and settings UI, `efatura_counters`, the signed-XML columns, the `EFATURA_PROVIDER` switch), check prod holds no
+    fiscal data first, and rewrite `M6a` into the Techplace module doc
+  - [ ] Data protection: a data-processing agreement with Techplace (Q14) — it becomes a processor of patient name, NIF and
+    service names; reflect it in `SECURITY.md` §7 (patient data privacy) and its "e-Fatura credentials" section
+  - [ ] Known limit: if product registration answers "already exists" the product id cannot be read back — set
+    `services.techplaceProductId` by hand, and add a lookup once Techplace documents one
+  - [ ] Before enabling anywhere: set `EFATURA_PROVIDER=techplace` (+ optional `TECHPLACE_BASE_URL`) in the API env — the
+    `20261007000000_efatura_techplace` migration is already on dev and staging (see M7 note below)
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
 - [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables

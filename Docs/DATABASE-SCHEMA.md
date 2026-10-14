@@ -158,7 +158,7 @@ CREATE TABLE appointments (
   "scheduledAt"        TIMESTAMPTZ NOT NULL,
   "durationMinutes"    INT NOT NULL DEFAULT 30,
   status               VARCHAR(20) NOT NULL DEFAULT 'pending',
-  -- pending | confirmed | checked_in | completed | cancelled | no_show
+  -- pending | confirmed | checked_in | in_progress | completed | cancelled | no_show  (startedAt: when the doctor started)
   source               VARCHAR(20) NOT NULL DEFAULT 'web',  -- web | whatsapp | phone | walk_in
   notes                VARCHAR(500),
   "cancellationReason" VARCHAR(300),

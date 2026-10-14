@@ -109,7 +109,7 @@ describe("ClinicalRecordsRepository — field encryption", () => {
         prisma.appointment.count.mockResolvedValueOnce(1);
         expect(await repo.hasTreatmentToday("p1", "dr-silva")).toBe(true);
         const where = prisma.appointment.count.mock.calls[0][0].where;
-        expect(where).toMatchObject({ patientId: "p1", deletedAt: null, status: { in: ["checked_in", "completed"] } });
+        expect(where).toMatchObject({ patientId: "p1", deletedAt: null, status: { in: ["checked_in", "in_progress", "completed"] } });
         expect(where.scheduledAt.gte.toISOString()).toBe("2026-10-04T01:00:00.000Z");
         expect(where.scheduledAt.lte.toISOString()).toBe("2026-10-05T00:59:59.999Z");
 

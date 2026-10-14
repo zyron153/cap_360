@@ -7,9 +7,36 @@
 
 ## Why
 
-Techplace is a CV invoicing/POS vendor that signs and reports to DNRE itself. Going through it removes
-what the direct integration needs from the clinic: ICP-CV certificate, PE account and OAuth client,
-software registration and our own LED numbering.
+Techplace is a CV invoicing/POS vendor that signs and reports to DNRE itself. Going through it was
+expected to remove what the direct integration needs from the clinic (ICP-CV certificate, PE account and
+OAuth client, software registration, our own LED numbering). **Ilhapay (below) contradicts the PE-account
+part**: the clinic still needs its own PE account and a series created there.
+
+## Ilhapay — the Techplace web ERP (checked 2026-10-08, read-only)
+
+`https://ilhapay.techplace.cv/index.php` (Yii2, "Cloud Technology") is the web ERP the clinic uses with
+Techplace. The clinic's entity is `CAPCV` (code 00024, NIF 289959195, enquadramento REMPE) and the login
+`atendimento.psi` (Administrador, created 2026-10-08) works **there only**: `POST api.techplace.cv/api/v1/auth`
+answers 401 for it, because `/auth` is the login of CAIXA operators (`/auth/admin` also needs the entity uuid,
+which no Ilhapay page shows).
+
+- **Documents it issues:** FT, FR, TV, RC, NC, ND, DV, NA, NL, FP, DT (`pr-fatura-tipo`) — so credit notes and
+  receipts exist in the ERP, just not in the public API. Each invoice has a "Doc. Fiscais Eletrónico" column
+  (`DFE_ENVIADO`, "Validado" …) and the entity has a *Modo Emissão* (Online / Offline / Off).
+- **Blocker for any issuing:** "É necessário definir uma série antes de prosseguir — a sua empresa ainda não
+  configurou uma série associada à sua conta no portal PE." `Nº de Série` is empty, so Fatura creation is
+  refused. The series has to come from the clinic's own **PE account** (efatura.cv), same prerequisite as DNRE-direct.
+- Codes confirmed against our config defaults: `FR`, `TV`, `FT`, `RC`, `NC` exist as document types; payment
+  methods use the DNRE means codes (10 Dinheiro, 30 Transferência, 54/55 Cartão, 60 A Crédito, …); IVA rates
+  `IVA` 15 %, `NA` 0 %, `IS` 20 %, `TEU` 4 %, `IR` 10 %; payment conditions include *Pronto pagamento* (0 days).
+- **Ilhapay asks for Código LED + OAuth Client ID + Client Secret** (the same three DNRE-direct needs). Per the manual (v11
+  §11.5) the OAuth client is registered in the PE under *Proprietário de Software* — the **software owner's** menu, so the
+  Client ID/Secret come from Techplace, not from the clinic's PE account (Wisedat's guide says the same for its ERP). The
+  clinic's own part: a PE user, one **LED per series** created on the PE, and (if Techplace asks) a certificate under
+  *Certificado Digital*. The exact PE menu label for creating a LED is not in the manual — ask DNRE/Techplace.
+- No public API, token or key screen in Ilhapay. The account has no clients, services or invoices yet.
+- **Not verified:** that a sale posted to `api.techplace.cv/fatura/sincronizador` lands in this Ilhapay entity,
+  and which uuid is its `entidadeID`/`utilizador` (the Ilhapay user id `5230c188-…` looks like the latter).
 
 ## What Techplace's API gives us (and what it does not)
 
@@ -72,7 +99,11 @@ write-only and stored encrypted with the other e-Fatura secrets.
 **[A] before the first live sale · [B] before DNRE-direct is deleted**
 
 1. **[A]** Do you transmit our documents to DNRE e-Fatura as transmitter (your software code and
-   certificate)? Whose LED and series are used? Does the clinic still need its own PE account or ICP-CV certificate?
+   certificate)? Ilhapay already says the series must be linked to the clinic's PE account — so does the
+   clinic still need its own ICP-CV certificate, and how is the PE-linked series entered in Ilhapay?
+   (Q1 is half answered: PE account yes.) Is the Ilhapay *Modo Emissão* Online what we want?
+   **New:** which api-key / CAIXA user and `entidadeID` belong to the CAPCV entity, and does a sale posted to the
+   API appear in Ilhapay? Ilhapay can issue NC/RC/ND in its UI — is there an endpoint for them (see 11)?
 2. **[A]** Is a test entity/sandbox (own base URL) available? Which auth applies to `/fatura/sincronizador`,
    `/cliente/sincronizador`, `/produto/registrar` (`api-key`?) — the docs list them as unauthenticated; please enforce it.
 3. **[A]** How do we get the DNRE outcome of a sale (IUD, authorized/rejected + messages) and the QR/PDF the patient must receive — endpoint or webhook (signed how)?

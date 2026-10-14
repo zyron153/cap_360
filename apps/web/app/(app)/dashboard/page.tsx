@@ -65,6 +65,7 @@ const APPT_STATUS: Record<string, { lineState: string; card: string; avatar: str
   pending:    { lineState: "default", card: "gray",  avatar: "teal",  label: "Pendente",   pillCls: "bg-amber-100 text-amber-700"    },
   confirmed:  { lineState: "default", card: "teal",  avatar: "teal",  label: "Confirmada", pillCls: "bg-brand-100 text-brand-800"    },
   checked_in: { lineState: "active",  card: "teal",  avatar: "teal",  label: "Presente",   pillCls: "bg-violet-100 text-violet-700"  },
+  in_progress: { lineState: "active", card: "teal",  avatar: "teal",  label: "Em curso",   pillCls: "bg-sky-100 text-sky-700"        },
   completed:  { lineState: "done",    card: "green", avatar: "green", label: "Concluída",  pillCls: "bg-emerald-100 text-emerald-700" },
   cancelled:  { lineState: "cancel",  card: "red",   avatar: "gray",  label: "Cancelada",  pillCls: "bg-dim-100 text-dim-500"        },
   no_show:    { lineState: "cancel",  card: "red",   avatar: "gray",  label: "Faltou",     pillCls: "bg-red-100 text-red-600"        },
@@ -252,7 +253,7 @@ export default function DashboardPage() {
 
   // Occupancy = active (checked_in + completed) / total today
   const occupancyPct = todayTotal > 0
-    ? Math.round((todayAppts.filter(a => a.status === "completed" || a.status === "checked_in").length / todayTotal) * 100)
+    ? Math.round((todayAppts.filter(a => a.status === "completed" || a.status === "checked_in" || a.status === "in_progress").length / todayTotal) * 100)
     : 0;
 
   // Health plans donut from real data

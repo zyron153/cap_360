@@ -66,7 +66,9 @@
 | Create appointment (self) | ✅ | ✅ | ✅ | 🔒 | 🔒 | ✅ |
 | Create appointment (others) | 🔒 | ✅ | ✅ own schedule | 🔒 | 🔒 | ✅ |
 | View appointment list | own only | all | own schedule | assigned | 🔒 | all |
-| Update appointment status | cancel own | ✅ | check-in/complete | 🔒 | 🔒 | ✅ |
+| Update appointment status | cancel own | ✅ | start (`in_progress`) / complete — **not check-in** | 🔒 | 🔒 | ✅ |
+| Check a patient in (`checked_in`) | 🔒 | ✅ | 🔒 (403) | 🔒 (403) | 🔒 | ✅ |
+| Start a consultation (`in_progress`, "Em curso") | 🔒 | 🔒 (403) | ✅ | 🔒 (403) | 🔒 | ✅ |
 | Drag-and-drop reschedule | 🔒 | ✅ | own schedule | 🔒 | 🔒 | ✅ |
 | View full calendar | 🔒 | ✅ | own view | 🔒 | 🔒 | ✅ |
 | Manage waitlist | 🔒 | ✅ | 🔒 | 🔒 | 🔒 | ✅ |

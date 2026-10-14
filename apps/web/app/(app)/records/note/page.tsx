@@ -3,10 +3,10 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { differenceInYears, format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { AlertTriangle, ArrowLeft, Lock, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Circle, Lock, Trash2 } from "lucide-react";
 import { NOTE_CHANGED_CODE, finalNoteIssues, type ClinicalNoteEntry, type ParametrizacaoEntry, type Patient, type RiskLevel } from "@cap/types";
 import { Field } from "@/components/ui/field";
 import { useMessage } from "@/components/ui/message-handler";
@@ -167,7 +167,7 @@ function NoteEditor() {
     ),
     enabled: canView && linkLookup,
   });
-  const linkedApptId = autoLinkQ.data?.find((a) => a.status === "checked_in" && (isAdmin || a.staff?.id === me?.id))?.id ?? null;
+  const linkedApptId = autoLinkQ.data?.find((a) => (a.status === "checked_in" || a.status === "in_progress") && (isAdmin || a.staff?.id === me?.id))?.id ?? null;
   const apptIdParam = appointmentIdParam ?? linkedApptId;
 
   // ── What already exists: the note being continued/edited, or the note already written for this
@@ -243,6 +243,7 @@ function NoteEditor() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict" | "gone">("idle");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false); // phone/tablet: the patient context folded away under the form-first layout
 
   const formRef = useRef<NoteForm | null>(null);
   const snapRef = useRef("");
@@ -442,7 +443,17 @@ function NoteEditor() {
 
   const { conclude, retryInvoice, failedInvoices } = useConcludeAppointment();
   const patientName = patientQ.data?.fullName ?? appt?.patient.fullName ?? "Paciente";
-  const canConclude = appt?.status === "checked_in";
+  const canConclude = appt?.status === "in_progress";
+  // Reception checked the patient in; the doctor starts the consultation (checked_in -> in_progress), here or from the agenda.
+  const canStart = appt?.status === "checked_in";
+  const start = useMutation({
+    mutationFn: (id: string) => sendJson(`/api/appointments/${id}/status`, "PATCH", { status: "in_progress" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+      addMessage("Success", "Consulta iniciada.");
+    },
+    onError: (err: Error) => addMessage("Error", err.message),
+  });
 
   const issues = form ? finalNoteIssues(form) : [];
   const durationBad = !!form && !validDuration(form.durationMinutes);
@@ -545,21 +556,117 @@ function NoteEditor() {
     );
   }
 
+  const ctxVisible = ctxOpen || foreign || aloneByMe;
   const age = patientQ.data?.dateOfBirth ? differenceInYears(new Date(), new Date(patientQ.data.dateOfBirth)) : null;
+
+  // One chip per section of the note: filled or not, and a tap jumps to it. "Sem risco" counts as answered.
+  const progress = [
+    ...TEXT_FIELDS.map(({ key }) => ({ id: `f-${key}`, label: FIELD_LABEL[key], done: !!form[key].trim() })),
+    { id: `risk-${form.riskLevel}`, label: "Risco", done: form.riskLevel === "none" || !!form.riskNotes.trim() },
+  ];
+
+  // The patient's context: the sticky sidebar from xl, a collapsible panel above the form below it.
+  const context = (
+    <>
+      {(foreign || aloneByMe) && appt && (
+        <div role="note" className="rounded-[14px] border border-dim-200 bg-white px-4 py-3 text-[12px] text-dim-600">
+          {foreign && appt.staff && <p className="font-semibold text-dim-800">Consulta de {appt.staff.fullName}</p>}
+          <p className="mt-0.5">Enquanto o paciente estiver em consulta hoje, vê também as notas finalizadas de outros clínicos (só leitura), desde que o check-in tenha sido feito por outra pessoa. Rascunhos nunca são partilhados.</p>
+          {aloneByMe && (
+            <p className="mt-1.5 font-medium text-amber-800">
+              Foi só você a pôr este paciente em consulta, por isso as notas de outros clínicos não aparecem. Peça à receção ou a um colega para fazer o check-in.
+            </p>
+          )}
+        </div>
+      )}
+      <div className={`${CARD} p-4`}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-brand-100 text-brand-800 font-semibold text-[14px] flex items-center justify-center shrink-0">
+            {patientName[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            {patientId ? (
+              <Link href={`/patients/${patientId}`} className="text-[13px] font-semibold text-dim-900 hover:text-brand-700 truncate block">{patientName}</Link>
+            ) : <p className="text-[13px] font-semibold text-dim-900 truncate">{patientName}</p>}
+            <p className="text-[11px] text-dim-500">{age !== null ? `${age} anos` : "—"}{sessionCount > 0 && ` · ${sessionCount} ${sessionCount === 1 ? "sessão registada" : "sessões registadas"}`}</p>
+          </div>
+        </div>
+        {!!patientQ.data?.tags?.length && <div className="mt-3"><TagBadges nome="TAG_PACIENTE" codes={patientQ.data.tags} /></div>}
+      </div>
+
+      {lastFinal?.plan.trim() && (
+        <div className={`${CARD} p-4`}>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-dim-400 mb-1">
+            Plano da sessão anterior · {format(new Date(lastFinal.finalizedAt ?? lastFinal.createdAt), "d MMM", { locale: pt })}{byOther(lastFinal) && ` · ${byOther(lastFinal)}`}
+          </p>
+          <p className="text-[13px] text-dim-800 whitespace-pre-wrap">{lastFinal.plan}</p>
+        </div>
+      )}
+
+      {previous.length > 0 && (
+        <div className={`${CARD} overflow-hidden`}>
+          <p className="px-4 py-3 text-[12px] font-semibold text-dim-900 border-b border-dim-100">Sessões anteriores</p>
+          {previous.map((n) => (
+            <details key={n.id} className="group border-b border-dim-100 last:border-0">
+              <summary className="flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer list-none hover:bg-dim-50 [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-medium text-dim-900">{format(new Date(n.finalizedAt ?? n.createdAt), "d MMM yyyy", { locale: pt })}</span>
+                  <span className="block text-[11px] text-dim-500 truncate">{sessionTypeLabel(n.sessionType)}{byOther(n) && ` · ${byOther(n)}`}</span>
+                </span>
+                <RiskBadge level={n.riskLevel} />
+              </summary>
+              <div className="px-4 pb-3"><NoteSections note={n} /></div>
+            </details>
+          ))}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="flex flex-col gap-5">
       {backLink}
 
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <h1 className="font-display text-[22px] font-bold text-dim-900 break-words">Registo clínico — {patientName}</h1>
-          <p className="text-[13px] text-dim-500 mt-0.5">
-            {appt ? `${appt.service.name} · ${format(new Date(appt.scheduledAt), "d MMM, HH:mm", { locale: pt })}` : "Contacto sem marcação"}
-          </p>
+      {/* Sticky: the save status and what is still missing stay in view while the doctor writes. main (the scroll container) pads 16/24px, hence the negative margins. */}
+      <div className="sticky top-0 z-20 -mx-4 lg:-mx-6 -mt-2 px-4 lg:px-6 py-2.5 bg-dim-100/95 backdrop-blur border-b border-dim-200 flex flex-col gap-2">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <h1 className="font-display text-[18px] sm:text-[22px] font-bold text-dim-900 break-words">Registo clínico — {patientName}</h1>
+            <p className="text-[12px] sm:text-[13px] text-dim-500 mt-0.5">
+              {appt ? `${appt.service.name} · ${format(new Date(appt.scheduledAt), "d MMM, HH:mm", { locale: pt })}` : "Contacto sem marcação"}
+              {age !== null && ` · ${age} anos`}
+            </p>
+          </div>
+          <SaveStatus locked={readOnly} isFinal={isFinal} dirty={dirty} state={saveState} savedAt={savedAt} onRetry={() => form && saveDraft(form)} />
         </div>
-        <SaveStatus locked={readOnly} isFinal={isFinal} dirty={dirty} state={saveState} savedAt={savedAt} onRetry={() => form && saveDraft(form)} />
+        {!readOnly && (
+          <nav aria-label="Secções da nota" className="flex gap-1.5 overflow-x-auto -mb-0.5 pb-0.5">
+            {progress.map((p) => (
+              <button
+                key={p.label} type="button" onClick={() => document.getElementById(p.id)?.focus()}
+                aria-label={`${p.label} — ${p.done ? "preenchido" : "por preencher"}`}
+                className={`inline-flex items-center gap-1 shrink-0 text-[11px] font-semibold rounded-full px-2.5 py-1 border transition-colors ${
+                  p.done ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-dim-500 border-dim-200 hover:bg-dim-50"
+                }`}
+              >
+                {p.done ? <Check className="w-3 h-3" aria-hidden /> : <Circle className="w-3 h-3" aria-hidden />} {p.label}
+              </button>
+            ))}
+          </nav>
+        )}
       </div>
+
+      {canStart && appt && (
+        <div className="rounded-[14px] border border-violet-200 bg-violet-50 px-5 py-3.5 flex flex-wrap items-center gap-3 justify-between">
+          <p className="text-[12px] font-semibold text-violet-900">O paciente fez check-in e está à espera. Inicie a consulta para a poder concluir.</p>
+          <button
+            type="button" onClick={() => start.mutate(appt.id)} disabled={start.isPending}
+            className="text-[12px] font-semibold px-3.5 py-2 rounded-[8px] bg-brand-700 hover:bg-brand-800 text-white disabled:opacity-50 transition-colors shrink-0"
+          >
+            {start.isPending ? "A iniciar…" : "Iniciar consulta"}
+          </button>
+        </div>
+      )}
 
       <FailedInvoicesBanner failed={failedInvoices} onRetry={(id) => retryInvoice.mutate(id)} pending={retryInvoice.isPending} />
 
@@ -596,9 +703,18 @@ function NoteEditor() {
 
       {/* Two columns only from xl: the app shell's fixed sidebar means a 1024px viewport leaves ~740px of content. */}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] items-start">
+        {/* Below xl the form comes first: this button (order-1) opens the context (order-2) above it. The notice about
+            other clinicians' notes is never folded away. */}
+        <button
+          type="button" onClick={() => setCtxOpen((v) => !v)} aria-expanded={ctxVisible} aria-controls="note-context"
+          className={`${CARD} order-1 xl:hidden px-4 py-3 text-left text-[13px] font-semibold text-dim-800 flex items-center justify-between`}
+        >
+          <span>Contexto do paciente{sessionCount > 0 && ` · ${sessionCount} ${sessionCount === 1 ? "sessão anterior" : "sessões anteriores"}`}</span>
+          <ChevronDown className={`w-4 h-4 text-dim-400 transition-transform ${ctxVisible ? "rotate-180" : ""}`} aria-hidden />
+        </button>
         {/* ── Form ─────────────────────────────────────────────────────────── */}
         <div
-          className={`${CARD} overflow-clip`}
+          className={`${CARD} order-3 xl:order-none overflow-clip`}
           onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !primaryDisabled) { e.preventDefault(); void primaryAction(); }
           }}
@@ -640,7 +756,7 @@ function NoteEditor() {
                 ...phrases[key].map((s) => ({ label: s, text: s })),
               ];
               return (
-                <div key={key}>
+                <div key={key} className="scroll-mt-28">
                   <label htmlFor={`f-${key}`} className="block text-[12px] font-semibold text-dim-700 mb-1.5">
                     {label}<span className="text-red-500 ml-0.5" aria-hidden>*</span>
                   </label>
@@ -655,7 +771,7 @@ function NoteEditor() {
               );
             })}
 
-            <div>
+            <div className="scroll-mt-28">
               <p id="risk-label" className="text-[12px] font-semibold text-dim-700 mb-1.5">Nível de risco</p>
               <div
                 role="radiogroup" aria-labelledby="risk-label" className="grid grid-cols-2 lg:grid-cols-4 gap-2"
@@ -730,60 +846,7 @@ function NoteEditor() {
         </div>
 
         {/* ── Context ──────────────────────────────────────────────────────── */}
-        <aside className="order-first xl:order-none flex flex-col gap-4 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
-          {(foreign || aloneByMe) && appt && (
-            <div role="note" className="rounded-[14px] border border-dim-200 bg-white px-4 py-3 text-[12px] text-dim-600">
-              {foreign && appt.staff && <p className="font-semibold text-dim-800">Consulta de {appt.staff.fullName}</p>}
-              <p className="mt-0.5">Enquanto o paciente estiver em consulta hoje, vê também as notas finalizadas de outros clínicos (só leitura), desde que o check-in tenha sido feito por outra pessoa. Rascunhos nunca são partilhados.</p>
-              {aloneByMe && (
-                <p className="mt-1.5 font-medium text-amber-800">
-                  Foi só você a pôr este paciente em consulta, por isso as notas de outros clínicos não aparecem. Peça à receção ou a um colega para fazer o check-in.
-                </p>
-              )}
-            </div>
-          )}
-          <div className={`${CARD} p-4`}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-brand-100 text-brand-800 font-semibold text-[14px] flex items-center justify-center shrink-0">
-                {patientName[0]?.toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                {patientId ? (
-                  <Link href={`/patients/${patientId}`} className="text-[13px] font-semibold text-dim-900 hover:text-brand-700 truncate block">{patientName}</Link>
-                ) : <p className="text-[13px] font-semibold text-dim-900 truncate">{patientName}</p>}
-                <p className="text-[11px] text-dim-500">{age !== null ? `${age} anos` : "—"}{sessionCount > 0 && ` · ${sessionCount} ${sessionCount === 1 ? "sessão registada" : "sessões registadas"}`}</p>
-              </div>
-            </div>
-            {!!patientQ.data?.tags?.length && <div className="mt-3"><TagBadges nome="TAG_PACIENTE" codes={patientQ.data.tags} /></div>}
-          </div>
-
-          {lastFinal?.plan.trim() && (
-            <div className={`${CARD} p-4`}>
-              <p className="text-[10px] font-bold uppercase tracking-wide text-dim-400 mb-1">
-                Plano da sessão anterior · {format(new Date(lastFinal.finalizedAt ?? lastFinal.createdAt), "d MMM", { locale: pt })}{byOther(lastFinal) && ` · ${byOther(lastFinal)}`}
-              </p>
-              <p className="text-[13px] text-dim-800 whitespace-pre-wrap">{lastFinal.plan}</p>
-            </div>
-          )}
-
-          {previous.length > 0 && (
-            <div className={`${CARD} overflow-hidden`}>
-              <p className="px-4 py-3 text-[12px] font-semibold text-dim-900 border-b border-dim-100">Sessões anteriores</p>
-              {previous.map((n) => (
-                <details key={n.id} className="group border-b border-dim-100 last:border-0">
-                  <summary className="flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer list-none hover:bg-dim-50 [&::-webkit-details-marker]:hidden">
-                    <span className="min-w-0">
-                      <span className="block text-[12px] font-medium text-dim-900">{format(new Date(n.finalizedAt ?? n.createdAt), "d MMM yyyy", { locale: pt })}</span>
-                      <span className="block text-[11px] text-dim-500 truncate">{sessionTypeLabel(n.sessionType)}{byOther(n) && ` · ${byOther(n)}`}</span>
-                    </span>
-                    <RiskBadge level={n.riskLevel} />
-                  </summary>
-                  <div className="px-4 pb-3"><NoteSections note={n} /></div>
-                </details>
-              ))}
-            </div>
-          )}
-        </aside>
+        <aside id="note-context" className={`${ctxVisible ? "flex" : "hidden"} order-2 xl:order-none xl:flex flex-col gap-4 xl:sticky xl:top-24 xl:max-h-[calc(100vh-8rem)] xl:overflow-y-auto`}>{context}</aside>
       </div>
 
       <DiscardDraftModal

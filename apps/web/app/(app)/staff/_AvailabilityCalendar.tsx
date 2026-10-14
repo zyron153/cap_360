@@ -21,7 +21,7 @@ type Appt = { id: string; scheduledAt: string; durationMinutes: number; status: 
 type Block = { id: string; startDate: string; endDate: string; reason: string | null; status: string };
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: "#F59E0B", confirmed: "#13A3A3", checked_in: "#8B5CF6",
+  pending: "#F59E0B", confirmed: "#13A3A3", checked_in: "#8B5CF6", in_progress: "#0EA5E9",
   completed: "#10B981", cancelled: "#8E8EA8", no_show: "#EF4444",
 };
 
