@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Actions are pinned by commit SHA (workflows/*.yml); Dependabot bumps the SHA and the "# vN" comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /infra/docker
+    schedule: { interval: weekly }

@@ -46,8 +46,8 @@ containers. Containers are never published except nginx; service health is read 
 
 | Event | Workflow | What runs |
 |---|---|---|
-| Pull request to `master` / `staging` / `develop` | `ci.yml` | Lint & Typecheck · Unit Tests (incl. migration drift check) · Dependency audit · Docker build check |
-| Push to `master` / `develop` | `ci.yml` | same, minus the Docker check |
+| Pull request to `master` / `staging` | `ci.yml` | Lint & Typecheck · Unit Tests (incl. migration drift check and the API integration specs on a seeded DB) · Dependency audit · Docker build check |
+| Push to `master` | `ci.yml` | same, minus the Docker check |
 | Push to `staging` **or** "Run workflow" | `deploy-staging.yml` | `ci` (calls `ci.yml`) → build + push images → SSH deploy |
 | Push to `prod` **or** "Run workflow" on `prod` | `deploy-production.yml` | `guard` (prod only) → `ci` → build + push → **approval** → SSH deploy with DB backup |
 
@@ -315,7 +315,7 @@ Code/
 │                            (no k8s/ directory — ❌ no manifests exist;
 │                             no keycloak/ either — removed 2026-08-31)
 ├── .github/
-│   └── workflows/        # ci.yml, deploy-staging.yml, deploy-production.yml (§5)
+│   └── workflows/        # ci.yml, deploy-staging.yml, deploy-production.yml, dependabot.yml (§5)
 ├── scripts/vps/          # deploy.sh — runs on the VPS: migrate, up, health check, rollback (§0.3)
 ├── docker-compose.prod.yml  # staging + prod stack (§0)
 └── docker-compose.yml    # postgres + redis, dev only
@@ -440,7 +440,7 @@ pnpm db:push                               # throwaway local experiments only (p
 Three workflows (details, secrets and commands in §0):
 
 ```
-ci.yml                 PR to master/staging/develop, push to master/develop, and workflow_call
+ci.yml                 PR to master/staging, push to master, and workflow_call
   quality              Lint & Typecheck  — pnpm install, turbo typecheck + lint
   audit                Dependency audit  — pnpm audit --prod; critical must stay 0, high must not
                        exceed AUDIT_BASELINE_HIGH (32 on 2026-10-03; lower it as advisories are fixed)
