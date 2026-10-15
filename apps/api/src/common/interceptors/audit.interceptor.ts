@@ -38,9 +38,14 @@ export class AuditInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap(() => {
-        const segments = url.split("/").filter(Boolean);
-        const resource = segments[1] ?? "unknown";
-        const resourceId = segments[2] ?? undefined;
+        // The path only: `request.url` carries the query string, which used to end up in `resource` / `resourceId`
+        // ("GET /clinical-notes/<id>?x=…" → a resourceId longer than its VarChar(36) column → the insert failed, and
+        // the row — including a cross-author clinical-note read — was never written. Anyone could dodge the audit by
+        // appending a query string). The full URL, query included, is still kept in metadata.url.
+        const segments = url.split("?")[0].split("/").filter(Boolean);
+        // Truncated to the column widths as a backstop, so an odd path segment can never void the row either.
+        const resource = (segments[1] ?? "unknown").slice(0, 100);
+        const resourceId = segments[2]?.slice(0, 36);
         // A service (currently: Patients, Financeiro) may have recorded exactly what changed —
         // most mutations won't set this, and that's fine, the row is still useful without it.
         const diff = RequestContext.get()?.auditDiff;

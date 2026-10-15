@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PasswordSchema } from "./auth";
 
 const AvailabilitySchema = z.object({
   dayOfWeek: z.number().int().min(0).max(6),
@@ -26,37 +27,16 @@ export type CreateStaffDto = z.infer<typeof CreateStaffSchema>;
 export const UpdateStaffSchema = CreateStaffSchema.partial();
 export type UpdateStaffDto = z.infer<typeof UpdateStaffSchema>;
 
-// ─── Invitations ───────────────────────────────────────────────────────────
+// ─── Admin-set passwords ────────────────────────────────────────────────────
+// The admin chooses the password when creating a user (POST /staff) and can change it later
+// (PATCH /staff/:id/password, "Alterar senha" in Gestão de Acesso) — no email is sent and the user
+// isn't forced to change it. Same policy as every other password (PasswordSchema in auth.ts).
 
-export const InviteStaffSchema = CreateStaffSchema;
-export type InviteStaffDto = z.infer<typeof InviteStaffSchema>;
+export const CreateStaffAccountSchema = CreateStaffSchema.extend({ password: PasswordSchema });
+export type CreateStaffAccountDto = z.infer<typeof CreateStaffAccountSchema>;
 
-// Password policy: minimum 10 chars, at least one uppercase letter and one digit (see auth.ts's
-// ResetPasswordSchema/ChangePasswordSchema, which reuse the same policy).
-export const ActivateInvitationSchema = z.object({
-  fullName: z.string().min(2).max(150),
-  password: z.string().min(10).max(72).regex(/[A-Z]/, "password must contain an uppercase letter").regex(/\d/, "password must contain a digit"),
-});
-export type ActivateInvitationDto = z.infer<typeof ActivateInvitationSchema>;
-
-export interface StaffInvitationEntry {
-  id: string;
-  email: string;
-  fullName: string;
-  role: string;
-  jobTitle: string | null;
-  phone: string | null;
-  specialtyCode: string | null;
-  expiresAt: string;
-  createdAt: string;
-}
-
-export interface PublicInvitationInfo {
-  fullName: string;
-  email: string;
-  role: string;
-  expired: boolean;
-}
+export const SetStaffPasswordSchema = z.object({ password: PasswordSchema });
+export type SetStaffPasswordDto = z.infer<typeof SetStaffPasswordSchema>;
 
 // ─── Leave Requests ─────────────────────────────────────────────────────────
 

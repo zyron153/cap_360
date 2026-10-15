@@ -39,11 +39,12 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Prisma
-prisma/migrations/
-
 # Docker volumes
 pgdata/
 .env.prod
+
+# VPS deploy state (scripts/vps/deploy.sh): deployed image tag + pre-deploy DB dumps
+.deployed-tag
+backups/
 infra/nginx/certs/
 infra/nginx/conf.d/tls.conf

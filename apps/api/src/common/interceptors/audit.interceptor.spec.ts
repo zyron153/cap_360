@@ -56,6 +56,30 @@ describe("AuditInterceptor", () => {
     );
   });
 
+  it("keeps the query string out of resource/resourceId (it overflowed the VarChar(36) column, so appending ?x=… to a clinical-note read voided its audit row)", async () => {
+    reflector.getAllAndOverride.mockImplementation((key) => key === AUDIT_VIEW_KEY);
+    const id = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+    const padded = `/v1/clinical-notes/${id}?${"padding=".repeat(10)}`;
+
+    await firstValueFrom(interceptor.intercept(makeContext("GET", { url: padded }), nextHandler));
+    await firstValueFrom(interceptor.intercept(makeContext("GET", { url: "/v1/clinical-notes?q=maria&page=2" }), nextHandler));
+
+    const [byId, list] = prisma.auditLog.create.mock.calls.map((c) => c[0].data);
+    expect(byId).toMatchObject({ resource: "clinical-notes", resourceId: id });
+    expect(byId.resourceId).toHaveLength(36);
+    expect(byId.metadata.url).toBe(padded); // the full URL is still recorded, query and all
+    expect(list.resource).toBe("clinical-notes"); // not "clinical-notes?q=maria&page=2"
+    expect(list.resourceId).toBeUndefined();
+  });
+
+  it("truncates an over-long path segment to its column width instead of losing the whole audit row", async () => {
+    reflector.getAllAndOverride.mockReturnValue(false);
+    await firstValueFrom(interceptor.intercept(makeContext("PATCH", { url: `/v1/${"r".repeat(200)}/${"i".repeat(200)}` }), nextHandler));
+    const { resource, resourceId } = prisma.auditLog.create.mock.calls[0][0].data;
+    expect(resource).toHaveLength(100);
+    expect(resourceId).toHaveLength(36);
+  });
+
   it("includes the before/after diff in metadata when a service set one via RequestContext during the request", async () => {
     reflector.getAllAndOverride.mockReturnValue(false);
     const ctx = RequestContext.create();

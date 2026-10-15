@@ -9,6 +9,7 @@ import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { Modal } from "../../../components/ui/modal";
 import { useMessage } from "../../../components/ui/message-handler";
 import { validateScheduledAt } from "../../../lib/validate-schedule";
+import { getJson } from "../../../lib/get-json";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -64,6 +65,7 @@ const APPT_STATUS: Record<string, { lineState: string; card: string; avatar: str
   pending:    { lineState: "default", card: "gray",  avatar: "teal",  label: "Pendente",   pillCls: "bg-amber-100 text-amber-700"    },
   confirmed:  { lineState: "default", card: "teal",  avatar: "teal",  label: "Confirmada", pillCls: "bg-brand-100 text-brand-800"    },
   checked_in: { lineState: "active",  card: "teal",  avatar: "teal",  label: "Presente",   pillCls: "bg-violet-100 text-violet-700"  },
+  in_progress: { lineState: "active", card: "teal",  avatar: "teal",  label: "Em curso",   pillCls: "bg-sky-100 text-sky-700"        },
   completed:  { lineState: "done",    card: "green", avatar: "green", label: "Concluída",  pillCls: "bg-emerald-100 text-emerald-700" },
   cancelled:  { lineState: "cancel",  card: "red",   avatar: "gray",  label: "Cancelada",  pillCls: "bg-dim-100 text-dim-500"        },
   no_show:    { lineState: "cancel",  card: "red",   avatar: "gray",  label: "Faltou",     pillCls: "bg-red-100 text-red-600"        },
@@ -138,55 +140,55 @@ export default function DashboardPage() {
   /* ── Queries ── */
   const { data: todayAppts = [], isLoading: todayLoading } = useQuery<TodayAppt[]>({
     queryKey: ["appointments", "calendar", todayStr, todayStr],
-    queryFn:  () => fetch(`/api/appointments?from=${todayStr}&to=${todayStr}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${todayStr}&to=${todayStr}`),
     staleTime: 30_000,
   });
 
   const { data: monthAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", monthStart, monthEnd],
-    queryFn:  () => fetch(`/api/appointments?from=${monthStart}&to=${monthEnd}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${monthStart}&to=${monthEnd}`),
     staleTime: 60_000,
   });
 
   const { data: calAppts = [] } = useQuery<MonthAppt[]>({
     queryKey: ["appointments", "calendar", calMonthStart, calMonthEnd],
-    queryFn:  () => fetch(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${calMonthStart}&to=${calMonthEnd}`),
     staleTime: 60_000,
   });
 
   const { data: selectedAppts = [], isLoading: selectedLoading } = useQuery<TodayAppt[]>({
     queryKey: ["appointments", "calendar", selectedDay, selectedDay],
-    queryFn:  () => fetch(`/api/appointments?from=${selectedDay}&to=${selectedDay}`).then(r => r.json()),
+    queryFn:  () => getJson(`/api/appointments?from=${selectedDay}&to=${selectedDay}`),
     staleTime: 30_000,
   });
 
   const { data: patientsList } = useQuery<{ data: RecentPatient[] }>({
     queryKey: ["patients", "dashboard"],
-    queryFn:  () => fetch("/api/patients?limit=20").then(r => r.json()),
+    queryFn:  () => getJson("/api/patients?limit=20"),
     staleTime: 60_000,
   });
 
   const { data: invoicesData } = useQuery<{ data: InvoiceRow[] }>({
     queryKey: ["invoices", "dashboard"],
-    queryFn:  () => fetch("/api/invoices?limit=5").then(r => r.json()),
+    queryFn:  () => getJson("/api/invoices?limit=5"),
     staleTime: 30_000,
   });
 
   const { data: billingSummary } = useQuery<BillingSummary>({
     queryKey: ["bff", "billing-summary"],
-    queryFn:  () => fetch("/api/bff/billing-summary").then(r => r.json()),
+    queryFn:  () => getJson("/api/bff/billing-summary"),
     staleTime: 60_000,
   });
 
   const { data: healthPlans = [] } = useQuery<HealthPlan[]>({
     queryKey: ["health-plans", "all"],
-    queryFn:  () => fetch("/api/health-plans").then(r => r.json()),
+    queryFn:  () => getJson("/api/health-plans"),
     staleTime: 120_000,
   });
 
-  const { data: patients }    = useQuery<{ data: { id: string; fullName: string }[] }>({ queryKey: ["patients-list"],  queryFn: () => fetch("/api/patients?limit=100").then(r => r.json()), staleTime: 60_000 });
-  const { data: staffList }   = useQuery<{ id: string; fullName: string }[]>({ queryKey: ["staff-list"],   queryFn: () => fetch("/api/staff").then(r => r.json()), staleTime: 60_000 });
-  const { data: servicesList} = useQuery<{ id: string; name: string }[]>({   queryKey: ["services-list"], queryFn: () => fetch("/api/services").then(r => r.json()), staleTime: 60_000 });
+  const { data: patients }    = useQuery<{ data: { id: string; fullName: string }[] }>({ queryKey: ["patients-list"],  queryFn: () => getJson("/api/patients?limit=100"), staleTime: 60_000 });
+  const { data: staffList }   = useQuery<{ id: string; fullName: string }[]>({ queryKey: ["staff-list"],   queryFn: () => getJson("/api/staff"), staleTime: 60_000 });
+  const { data: servicesList} = useQuery<{ id: string; name: string }[]>({   queryKey: ["services-list"], queryFn: () => getJson("/api/services"), staleTime: 60_000 });
 
   /* ── Real-time ── */
   useEffect(() => {
@@ -251,7 +253,7 @@ export default function DashboardPage() {
 
   // Occupancy = active (checked_in + completed) / total today
   const occupancyPct = todayTotal > 0
-    ? Math.round((todayAppts.filter(a => a.status === "completed" || a.status === "checked_in").length / todayTotal) * 100)
+    ? Math.round((todayAppts.filter(a => a.status === "completed" || a.status === "checked_in" || a.status === "in_progress").length / todayTotal) * 100)
     : 0;
 
   // Health plans donut from real data
@@ -356,7 +358,7 @@ export default function DashboardPage() {
     <div className="flex flex-col gap-5">
 
       {/* ── KPI Stats ── */}
-      <div className="grid grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {STATS.map((s) => (
           <div key={s.label} className={`${CARD} p-[18px] flex flex-col gap-2.5 hover:shadow-[0_4px_12px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.04)] transition-shadow`}>
             <div className="flex items-center justify-between">
@@ -381,7 +383,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Main Grid ── */}
-      <div className="grid gap-5" style={{ gridTemplateColumns: "1fr 340px" }}>
+      <div className="grid gap-5 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px]">
 
         {/* Appointment Timeline */}
         <div className={CARD}>
@@ -419,7 +421,7 @@ export default function DashboardPage() {
                     <div className={`w-0.5 ${LINE_CLS[st.lineState]} rounded-sm shrink-0 relative`}>
                       <span className={`absolute top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full ${DOT_CLS[st.lineState]} border-2 border-white`}/>
                     </div>
-                    <div className={`flex-1 ${CARD_CLS[st.card]} rounded-[10px] px-3 py-2.5 flex items-center gap-2.5 border border-transparent hover:border-dim-200 hover:shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-all`}>
+                    <div className={`flex-1 min-w-0 ${CARD_CLS[st.card]} rounded-[10px] px-3 py-2.5 flex items-center gap-2.5 border border-transparent hover:border-dim-200 hover:shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-all`}>
                       <div className={`w-8 h-8 rounded-full ${AVATAR_CLS[st.avatar]} font-semibold text-[12px] flex items-center justify-center shrink-0`}>
                         {initials(appt.patient.fullName) || "?"}
                       </div>
@@ -427,7 +429,7 @@ export default function DashboardPage() {
                         <div className="font-semibold text-[13px] text-dim-900 truncate">{appt.patient.fullName ?? "Paciente removido"}</div>
                         <div className="text-[11px] text-dim-500 mt-0.5">{appt.service?.name ?? "—"}</div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2 shrink-0">
                         <span className="font-mono text-[10px] text-dim-500">{appt.staff?.fullName ?? "—"}</span>
                         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${st.pillCls}`}>{st.label}</span>
                       </div>
@@ -514,6 +516,7 @@ export default function DashboardPage() {
             <Plus className="w-2.5 h-2.5"/> Novo Paciente
           </button>
         </div>
+        <div className="overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
             <tr>{["Paciente","Telefone","Registado em","Plano"].map(h => (
@@ -542,10 +545,11 @@ export default function DashboardPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* ── Bottom Grid ── */}
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
         {/* Billing */}
         <div className={CARD}>
@@ -558,6 +562,7 @@ export default function DashboardPage() {
             </div>
             <button className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-dim-100 text-dim-600 hover:bg-dim-200 transition-colors">Ver Tudo</button>
           </div>
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>{["Paciente","Fatura","Valor","Estado"].map((h, i) => (
@@ -582,6 +587,7 @@ export default function DashboardPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
 
         {/* Bar chart — real data from monthAppts grouped by service */}

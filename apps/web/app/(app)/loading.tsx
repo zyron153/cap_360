@@ -11,7 +11,7 @@ export default function AppLoading() {
       </div>
 
       {/* KPI cards skeleton */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08)] p-5">
             <div className="w-9 h-9 bg-dim-100 rounded-[10px] mb-3" />

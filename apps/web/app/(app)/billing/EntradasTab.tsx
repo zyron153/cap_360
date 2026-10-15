@@ -226,8 +226,8 @@ function ManualIncomeSection() {
       </div>
 
       <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Entrada" description="Regista uma receita manual (ex: subsídios, outras receitas)" size="md">
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Descrição *</label>
             <input value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Ex: Subsídio câmara municipal" className={inputCls} />
           </div>
@@ -239,11 +239,11 @@ function ManualIncomeSection() {
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Valor (CVE) *</label>
             <input type="number" value={form.amount} onChange={(e) => set("amount", e.target.value)} placeholder="0" className={inputCls} />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Data *</label>
             <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} className={inputCls} />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
             <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Observações opcionais…" className={`${inputCls} resize-none`} />
           </div>

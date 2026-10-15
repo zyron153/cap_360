@@ -55,6 +55,34 @@ export class SessionService {
     await this.redis.del(`session:${id}`);
   }
 
+  /** Ends every open session of one staff member (used when an admin changes their password), so
+   * whoever still holds the old password — or a stolen session — is logged out at once. `exceptId`
+   * spares one session (the admin changing their own password keeps their current login).
+   *
+   * Sessions are keyed only by their random id, so this scans `session:*` and matches on the stored
+   * `staffId` instead of maintaining a per-user index that could drift. Fine at this scale (a clinic's
+   * handful of live sessions) and it only runs on an explicit admin action. Returns how many ended. */
+  async destroyAllForStaff(staffId: string, exceptId?: string): Promise<number> {
+    let ended = 0;
+    for await (const keys of this.redis.scanStream({ match: "session:*", count: 200 }) as AsyncIterable<string[]>) {
+      if (keys.length === 0) continue;
+      const values = await this.redis.mget(keys);
+      const doomed = keys.filter((key, i) => {
+        if (exceptId && key === `session:${exceptId}`) return false;
+        try {
+          return values[i] !== null && (JSON.parse(values[i] as string) as SessionData).staffId === staffId;
+        } catch {
+          return false; // not one of ours / unreadable — leave it alone
+        }
+      });
+      if (doomed.length > 0) {
+        await this.redis.del(...doomed);
+        ended += doomed.length;
+      }
+    }
+    return ended;
+  }
+
   // ── Login rate-limit / lockout (per-account, on top of the global IP throttle) ──────────
 
   async recordFailure(email: string): Promise<void> {

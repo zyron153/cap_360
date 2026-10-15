@@ -219,7 +219,7 @@ export function HealthPlanDetailBody({ id }: { id: string }) {
           </div>
         )}
 
-        <div className="px-6 py-5 grid grid-cols-2 gap-x-6 gap-y-4">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
           <div>
             <dt className="text-[10px] font-bold uppercase tracking-wide text-dim-400">Empresa</dt>
             <dd className="text-[13px] text-dim-900 font-medium mt-0.5 flex items-center gap-1.5">

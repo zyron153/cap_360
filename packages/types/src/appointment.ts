@@ -4,6 +4,7 @@ export const AppointmentStatus = {
   PENDING: "pending",
   CONFIRMED: "confirmed",
   CHECKED_IN: "checked_in",
+  IN_PROGRESS: "in_progress",
   COMPLETED: "completed",
   CANCELLED: "cancelled",
   NO_SHOW: "no_show",
@@ -44,6 +45,7 @@ export const UpdateAppointmentStatusSchema = z.object({
   status: z.enum([
     "confirmed",
     "checked_in",
+    "in_progress",
     "completed",
     "cancelled",
     "no_show",

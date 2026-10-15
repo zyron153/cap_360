@@ -33,8 +33,20 @@
 
 - ✅ **Password hashing:** argon2id (`PasswordService`, via the `argon2` npm package's native
   binding) — no plaintext or reversibly-encrypted password is ever stored
-- ✅ **Password policy:** min 10 chars, 1 uppercase, 1 digit (`ChangePasswordSchema`/
-  `ResetPasswordSchema`/`ActivateInvitationSchema`, enforced by Zod)
+- ✅ **Password policy:** min 10 chars, 1 uppercase, 1 digit (`PasswordSchema` in
+  `packages/types/src/auth.ts`, shared by `ChangePasswordSchema`, `ResetPasswordSchema` and the admin
+  routes, enforced by Zod; the web UI mirrors it to show the rules up front)
+- ✅ **Admin-set passwords (no email invitations):** an admin chooses a user's password when creating
+  the account (`POST /staff`) and can change it later (`PATCH /staff/:id/password`, "Alterar senha").
+  Only the argon2id hash is stored; the plaintext exists only in the request body (the audit
+  interceptor records method/URL, not bodies) — the API never returns or generates passwords, and the
+  "Gerar" button creates one in the browser with `crypto.getRandomValues`. An admin password change ends
+  **all of that user's open sessions** (`SessionService.destroyAllForStaff`; the admin's own session is
+  spared when they change their own password), so a compromised old password or a stolen session stops
+  working immediately. Trade-offs: there is no forced change on first login, so the admin knows the
+  user's initial password until the user changes it themselves (Settings → Alterar Palavra-passe or
+  the forgot-password email); and the self-service change / email reset don't end other sessions. The
+  dev `AUTH_BYPASS` only applies when there is no valid session (a real login cookie always wins)
 - ✅ **Brute-force protection, real and two-layered:**
   - Per-IP: `POST /auth/login` and `POST /auth/forgot-password` are throttled to 5 req/min
     (stricter than the global 300/min default) via `@nestjs/throttler`
@@ -96,23 +108,55 @@ See `ROLES-PERMISSIONS.md` for full permission matrix.
 
 ---
 
+### 3.1 Clinical-note access (M7)
+
+Notes are **author-only** — a doctor reads and edits only what they wrote; admin reads and edits all;
+nurse/receptionist/lab_tech/corporate_hr have no access (see `modules/M7-clinical-records-emr.md` §3).
+One deliberate, narrow exception (decided 2026-10-05, for a doctor covering a colleague): while a patient
+is **in treatment today** (an appointment today that is `checked_in`, `in_progress` or `completed`, put there by someone
+*other than the reader*), any doctor may *read* the other authors' **finalized** notes for that patient —
+read-only, never drafts, lapsing at the end of the Cabo Verde day, and every such read is audit-marked.
+The appointment records who checked the patient in and who completed it (`checkedInByStaffId` /
+`completedByStaffId`), so a doctor can't unlock a patient's notes by booking and checking them in
+themself. Residual weakness: a second person (reception or a colleague) doing that check-in still opens it
+— bounded to a day and audited; a stricter owner/admin-granted share was offered and not chosen.
+
+**The exception is reviewable.** `GET /clinical-notes/access-log` (admin only; a doctor gets 403) lists every
+cross-author read, newest first — who read, which patient, how many notes or which note and author — built from
+the audit marks. Verified against real doctor sessions (integration spec
+`clinical-note-discard-and-access-log`): doctor B reading doctor A's notes while the admin had checked the
+patient in produces exactly the list-read and by-id-read rows; A's reads of their own notes and the admin's
+reads produce none.
+
+**A hole closed (2026-10-06): appending a query string voided the audit row.** `AuditInterceptor` took
+`resource`/`resourceId` from the raw URL, so `GET /clinical-notes/<id>?x=…` overflowed `resourceId`
+(`VarChar(36)`), the insert failed (logged and swallowed — audit failures never break a request) and a
+cross-author read left no trace. The interceptor now uses the path only (the full URL stays in `metadata.url`)
+and truncates to the column widths. Regression-tested (unit, and live through the access log).
+
+**Writes.** A doctor may discard only their own **draft** (admin: any draft); a finalized note is never
+deletable, and neither is a draft that a prescription or referral refers to (the foreign keys are
+`ON DELETE RESTRICT`, so the database refuses too). A prescription/referral may reference only the caller's
+own note for that patient; an internal referral may only be addressed to an active doctor/admin other than
+the referrer. Not-yours is a 404 everywhere; an unresolvable reference inside a body is one generic 400.
+
 ## 4. Encryption
 
 ### 4.1 Data at Rest
 
 | Data | Encryption |
 |---|---|
-| PostgreSQL database | AES-256 via Hetzner/AWS volume encryption |
+| PostgreSQL database | Sensitive columns are AES-256-GCM encrypted by the app (`FIELD_ENCRYPTION_KEY`). 🟡 No volume-level encryption is configured on the Hostinger VPS (not verified) |
 | Redis cache | In-memory only; no sensitive data persisted to disk beyond session |
 | R2 file storage | AES-256 server-side encryption (Cloudflare R2 default) |
-| Backup files | AES-256 encrypted before upload to S3/R2 |
+| Backup files | 🟡 Today: gzip dumps in `backups/` on the VPS (dir 700, files 600), **not encrypted and not off-server**. Plan: encrypt before upload to B2/S3/R2 |
 
 ### 4.2 Data in Transit
 
-- All external communications: TLS 1.3
-- Internal service-to-service (within K8s cluster): mutual TLS (mTLS) enforced via service mesh (Linkerd or Istio)
-- Database connections: `sslmode=require` in PostgreSQL connection string
-- Redis: TLS enabled; auth password required
+- All external communications: TLS 1.2/1.3 (Let's Encrypt cert on nginx; plain HTTP for the domain redirects to HTTPS)
+- Internal service-to-service: ❌ no K8s/mTLS; the Compose network is private (only nginx publishes host ports)
+- Database connections: 🟡 no `sslmode` set — plain TCP inside the private Compose network
+- Redis: 🟡 no TLS and no password; reachable only on the private Compose network
 
 ### 4.3 Sensitive Fields
 
@@ -120,7 +164,15 @@ The following fields are encrypted at the application layer (in addition to disk
 
 - ✅ `patients.nif` — with a separate HMAC-SHA256 blind-index column for exact-match lookup, since AES-GCM ciphertext isn't searchable
 - ✅ `patients.dateOfBirth`
-- ❌ `clinical_notes.*`, `prescriptions.*` — not applicable yet: these tables don't exist (M7 is a UI mockup with no backend; see `DATABASE-SCHEMA.md` §8)
+- ✅ `clinical_notes.presentingConcerns/observations/assessment/plan/riskNotes` and `prescriptions.notes`,
+  `prescription_items.drugName/dosage/frequency/instructions` — encrypted on every write and decrypted on every
+  read in `ClinicalRecordsRepository` (no blind index: nothing searches clinical text). Structured metadata
+  (`riskLevel`, `sessionType`, `durationMinutes`, dates, ids) is plaintext on purpose so lists can filter and
+  order in SQL.
+- ❌ `referrals.reason` (free text, up to 1000 chars) is **not** encrypted — it can carry clinical content
+  ("needs psychiatric review for …"). A deliberate, documented scope decision of the original M7 build; flagged
+  for the owner to revisit (it needs an in-place re-encryption migration of existing rows). See
+  `modules/M7-clinical-records-emr.md` §4.
 
 Encryption is `EncryptionService` (Node's built-in `crypto`, AES-256-GCM, format
 `ivHex:authTagHex:dataHex`). **Key management does not match this section's target**: the key is
@@ -161,7 +213,9 @@ storage) before running more than one API replica in production.
 
 ### 5.4 HTTPS & Headers
 
-NGINX enforces:
+🟡 What `infra/nginx/tls.conf.example` actually sets today: HSTS `max-age=63072000` (no `includeSubDomains`), `X-Frame-Options DENY`, `X-Content-Type-Options nosniff`, `Referrer-Policy no-referrer-when-downgrade`; **no CSP yet**. The block below is the target.
+
+NGINX should enforce:
 ```nginx
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 add_header X-Content-Type-Options "nosniff" always;
@@ -182,7 +236,11 @@ Every mutating request (and any GET route explicitly marked `@AuditView()`) is w
 |---|---|
 | Patient record viewed | ✅ Two routes: `GET /patients/:id` and `GET /patients/:id/timeline`, via `@AuditView()`. Not every read is logged — only these, deliberately, to avoid auditing every list/search query |
 | Patients + Financeiro mutations get a before/after diff | ✅ `metadata.diff: { before, after }`, only the fields actually submitted — not a full-record dump |
-| Clinical note / prescription created | ❌ Not applicable — these tables don't exist (M7 mockup) |
+| Clinical note / prescription created or edited | ✅ Generic mutating-request rows (`POST`/`PATCH` on `clinical-notes`, `prescriptions`, …). Note reads (`GET /patients/:id/clinical-notes`, `/clinical-notes`, `/clinical-notes/:id`) are `@AuditView()`; a read that returns **another clinician's** notes (see §3.1) also records `metadata.diff.after = { basis: "patient in treatment today", … }` |
+| Cross-author clinical-note reads reviewable | ✅ `GET /clinical-notes/access-log` (admin only) over the marks above — see §3.1. `resource`/`resourceId` are the route path only (the query string used to leak into them and could void the row); the full URL is in `metadata.url` |
+| Clinical draft discarded | ✅ `DELETE /clinical-notes/:id` is a mutating request, so it is audited; the row's `metadata.diff.before = { patientId, authorStaffId, appointmentId, createdAt }` records whose draft it was (never its text) |
+| Denied attempts (404/403) at clinical notes | ❌ Not audited — the interceptor only logs requests that succeed, so a doctor probing a colleague's note id leaves nothing (ids are UUIDs, so this is probing-by-guess, not enumeration). Logging failed attempts would change the volume of `audit_log` for every route; left as an owner decision |
+| `metadata.url` keeps the query string | 🟡 Search terms typed into `GET /clinical-notes?q=…` (a patient name) are stored in `audit_log` as part of the URL. The table is admin-only and append-only, but it is PII the "erase a patient" flow does not reach |
 | Admin role escalation | ❌ Not implemented as a distinct action |
 | Login success/failure | 🟡 Real, but low-value: `POST /auth/*` is a mutating request, so it hits the generic audit interceptor like any other route — but only on success. A **successful** login/logout/forgot-password writes a row (`resource: "auth", resourceId: "login"/"logout"/"forgot-password"`), verified live. A **failed** login (wrong password, locked account) writes **nothing** — the interceptor's `tap()` only fires on the success channel, and a rejected login throws. Even the successful rows carry no actor (`actorId`/`actorEmail` are empty — `request.user` is never set for `@Public()` routes). Genuinely capturing login attempts (especially failures, which matter most for security monitoring) would need a dedicated write inside `AuthService`, not a side-effect of the generic interceptor |
 | File downloaded (exam result) | ❌ Not applicable — no exam-result download exists yet |
@@ -267,8 +325,11 @@ Meta-approved templates, so they only deliver inside the 24h window; no bot, no 
 - PostgreSQL accessible only from within the private VPC (not publicly exposed)
 - Redis accessible only from within the private VPC — now holds real security-sensitive state
   (sessions, login-lockout counters, password-reset tokens), not just job queues and slot locks
-- SSH access to servers via key pairs only (no password auth)
-- Automatic OS security patches enabled
+- SSH access to servers via key pairs only (no password auth) — ✅ on the VPS since 2026-10-03: password auth off, root `prohibit-password`, day-to-day work as the non-root `deploy` user (note: the `docker` group is root-equivalent)
+- Automatic OS security patches enabled — ✅ `unattended-upgrades`
+- ✅ ufw allows only 22, 80, 443, 8080, 8443 (staging); fail2ban on SSH; only nginx publishes container ports
+- ✅ Secrets: `.env.prod` is mode 600 on the VPS and never in git; CI uses environment-scoped GitHub secrets, one SSH key per environment, and the `PRODUCTION` environment requires a reviewer and only deploys from `prod`
+- 🟡 The GitHub repo is **public** and `Docs/VPS_CONFIG.md` lists the VPS IP and layout — decide: private repo (loses the required-reviewer gate on GitHub Free) or move that file out of git
 - Docker images: non-root user; read-only filesystem where possible
 - Dependency scanning via Snyk or GitHub Dependabot on CI/CD
 
@@ -288,3 +349,18 @@ See also: Cabo Verde data protection authority notification requirements (consul
 ---
 
 *CAP 360 · Security & Compliance v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
+
+## e-Fatura credentials (DNRE)
+
+- The OAuth client secret, the refresh token, the signing certificate (`.p12`/PEM) and its password
+  are stored AES-256-GCM encrypted (`EncryptionService`) in `integration_efatura_secrets`. No endpoint
+  returns them — only booleans (`hasClientSecret`, `connected`, `hasCertificate`) and the
+  certificate's subject/expiry. `GET /settings` filters both e-Fatura keys out, and
+  `PATCH /settings/integration/efatura*` is rejected.
+- The platform host is fixed in code (`https://services.efatura.cv`, `https://iam.efatura.cv/...`);
+  there is no admin-editable URL, so the server cannot be pointed at an internal address.
+- Signed documents are kept encrypted (`efatura_submissions.signedXml`): they contain the patient's
+  name and NIF. Error messages shown to staff are our own; raw platform bodies are never stored or logged.
+- Only an admin can configure the integration or change the clinic's name/NIF (the emitter of every document).
+- The signing key can sign invoices in the clinic's name: protect `FIELD_ENCRYPTION_KEY` and database
+  backups accordingly, and revoke/rotate the DNRE credentials if either leaks.

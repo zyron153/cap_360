@@ -1,6 +1,5 @@
 import { Test } from "@nestjs/testing";
 import { NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
-import { getQueueToken } from "@nestjs/bull";
 import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
 import { R2Service } from "../../common/services/r2.service";
@@ -8,6 +7,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
 import { ServicesService } from "../services/services.service";
 import { ParametrizacaoService } from "../parametrizacao/parametrizacao.service";
+import { EFaturaService } from "../efatura/efatura.service";
 import { generateReceiptPdf } from "./receipt.pdf";
 import { RequestContext } from "../../common/context/request-context";
 
@@ -27,17 +27,20 @@ const repo = {
   findItemForUpdate: jest.fn(),
   findAppointmentWithService: jest.fn(),
   updateItemAtomic: jest.fn(),
+  cancelAtomic: jest.fn(),
 };
 const r2 = { isConfigured: jest.fn(), upload: jest.fn(), signedUrl: jest.fn() };
 const prisma = {
-  eFaturaSubmission: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    upsert: jest.fn(),
-  },
   setting: { findUnique: jest.fn() },
 };
-const efaturaQueue = { add: jest.fn() };
+const efatura = {
+  reporting: jest.fn(),
+  enqueue: jest.fn(),
+  primaryFor: jest.fn(),
+  documents: jest.fn(),
+  retry: jest.fn(),
+  planVoid: jest.fn(),
+};
 const healthPlansService = { getActiveCoverage: jest.fn() };
 const servicesService = { create: jest.fn() };
 const parametrizacaoService = { update: jest.fn() };
@@ -63,7 +66,7 @@ describe("BillingService", () => {
         { provide: HealthPlansService, useValue: healthPlansService },
         { provide: ServicesService, useValue: servicesService },
         { provide: ParametrizacaoService, useValue: parametrizacaoService },
-        { provide: getQueueToken("efatura"), useValue: efaturaQueue },
+        { provide: EFaturaService, useValue: efatura },
       ],
     }).compile();
     service = mod.get(BillingService);
@@ -73,6 +76,9 @@ describe("BillingService", () => {
     // discount path. Without this default, every pre-existing create()/createDraft() test would
     // need its own mock just to avoid a hanging jest.fn() promise.
     healthPlansService.getActiveCoverage.mockResolvedValue(null);
+    // e-Fatura reporting is off unless a test switches it on.
+    efatura.reporting.mockResolvedValue({ enabled: false, goLiveAt: null });
+    efatura.enqueue.mockResolvedValue(undefined);
   });
 
   // The actual status-machine math (paid / partially_paid) now lives inside
@@ -82,7 +88,7 @@ describe("BillingService", () => {
   describe("recordPayment — guards and delegation to the atomic repository call", () => {
     beforeEach(() => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
-      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000" });
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000", efaturaIds: [] });
     });
 
     it("delegates to recordPaymentAtomic with the payment data and the invoice's current total", async () => {
@@ -91,7 +97,8 @@ describe("BillingService", () => {
         "inv-1",
         expect.objectContaining({ amount: 800, method: "bank_transfer" }),
         2000,
-        false
+        false,
+        { enabled: false, issueNew: false }
       );
     });
 
@@ -101,7 +108,8 @@ describe("BillingService", () => {
         "inv-1",
         expect.objectContaining({ recordedById: "staff-1" }),
         2000,
-        false
+        false,
+        { enabled: false, issueNew: false }
       );
     });
 
@@ -130,50 +138,55 @@ describe("BillingService", () => {
 
   describe("recordPayment — draft invoices (appointment auto-invoice) catching up on issuance", () => {
     beforeEach(() => {
-      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000" });
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000", efaturaIds: [] });
     });
 
-    it("marks the payment as issuing when the invoice was still a draft, and submits it to e-Fatura", async () => {
+    it("marks the payment as issuing when the invoice was still a draft, and queues the fiscal rows it created", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "draft" });
+      efatura.reporting.mockResolvedValue({ enabled: true, goLiveAt: null });
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000", efaturaIds: ["sub-issue", "sub-receipt"] });
 
-      await service.recordPayment("inv-1", { amount: 2000, method: "cash" });
+      const result = await service.recordPayment("inv-1", { amount: 2000, method: "cash" });
 
       expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
         "inv-1",
         expect.objectContaining({ amount: 2000, method: "cash" }),
         2000,
-        true
+        true,
+        { enabled: true, issueNew: true }
       );
-      expect(prisma.eFaturaSubmission.create).toHaveBeenCalledWith({
-        data: { invoiceId: "inv-1", status: "pending" },
-      });
-      expect(efaturaQueue.add).toHaveBeenCalledWith(
-        "submit",
-        { invoiceId: "inv-1" },
-        expect.objectContaining({ attempts: 3 })
+      expect(efatura.enqueue).toHaveBeenCalledWith("sub-issue");
+      expect(efatura.enqueue).toHaveBeenCalledWith("sub-receipt");
+      expect(result).toEqual({ id: "inv-1", status: "paid", amountPaid: "2000" }); // efaturaIds stays internal
+    });
+
+    it("does not issue a NEW fiscal document for a draft paid before the go-live date", async () => {
+      repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "draft" });
+      efatura.reporting.mockResolvedValue({ enabled: true, goLiveAt: new Date(Date.now() + 86_400_000) });
+
+      await service.recordPayment("inv-1", { amount: 2000, method: "cash" });
+
+      expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
+        "inv-1", expect.anything(), 2000, true, { enabled: true, issueNew: false }
       );
     });
 
-    it("does not re-submit to e-Fatura for an invoice that was already issued", async () => {
+    it("reports payments on an already-issued invoice too (receipt rows), without a new issue document", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "partially_paid" });
+      efatura.reporting.mockResolvedValue({ enabled: true, goLiveAt: null });
 
       await service.recordPayment("inv-1", { amount: 500, method: "cash" });
 
       expect(repo.recordPaymentAtomic).toHaveBeenCalledWith(
-        "inv-1",
-        expect.objectContaining({ amount: 500 }),
-        2000,
-        false
+        "inv-1", expect.objectContaining({ amount: 500 }), 2000, false, { enabled: true, issueNew: true }
       );
-      expect(prisma.eFaturaSubmission.create).not.toHaveBeenCalled();
-      expect(efaturaQueue.add).not.toHaveBeenCalled();
     });
   });
 
   describe("recordPayment — idempotency key replay", () => {
     beforeEach(() => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
-      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000" });
+      repo.recordPaymentAtomic.mockResolvedValue({ id: "inv-1", status: "paid", amountPaid: "2000", efaturaIds: [] });
     });
 
     it("returns the original result without recording again when the key was already used", async () => {
@@ -194,7 +207,8 @@ describe("BillingService", () => {
         "inv-1",
         expect.objectContaining({ idempotencyKey: "key-new" }),
         2000,
-        false
+        false,
+        { enabled: false, issueNew: false }
       );
     });
 
@@ -208,7 +222,7 @@ describe("BillingService", () => {
   describe("create — price-override visibility", () => {
     beforeEach(() => {
       repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0003");
-      repo.create.mockResolvedValue({});
+      repo.create.mockResolvedValue({ efaturaSubmissions: [] });
     });
 
     it("logs a warning when an admin overrides a line item's price", async () => {
@@ -344,7 +358,7 @@ describe("BillingService", () => {
   describe("create — health-plan discount", () => {
     beforeEach(() => {
       repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0004");
-      repo.create.mockResolvedValue({});
+      repo.create.mockResolvedValue({ efaturaSubmissions: [] });
     });
 
     it("adds no discount line when the patient has no active health plan", async () => {
@@ -417,7 +431,7 @@ describe("BillingService", () => {
   describe("createDraft", () => {
     it("creates a draft invoice with status=draft and correct totals", async () => {
       repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0002");
-      repo.create.mockResolvedValue({});
+      repo.create.mockResolvedValue({ efaturaSubmissions: [] });
 
       await service.createDraft({
         patientId: "patient-1",
@@ -439,7 +453,7 @@ describe("BillingService", () => {
 
     it("adds a health-plan discount line to the auto-generated draft too", async () => {
       repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0005");
-      repo.create.mockResolvedValue({});
+      repo.create.mockResolvedValue({ efaturaSubmissions: [] });
       healthPlansService.getActiveCoverage.mockResolvedValue({
         healthPlanId: "plan-1",
         coveragePercent: 50,
@@ -570,60 +584,122 @@ describe("BillingService", () => {
     });
   });
 
+  describe("create — e-Fatura reporting", () => {
+    const dto = { patientId: "patient-1", items: [{ serviceId: "service-1", description: "Consulta", quantity: 1, unitPrice: 1500 }] } as never;
+
+    beforeEach(() => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0001");
+      repo.findServiceById.mockResolvedValue({ id: "service-1", price: "1500" });
+    });
+
+    it("creates the fiscal-document row in the SAME insert as the invoice, then queues it", async () => {
+      efatura.reporting.mockResolvedValue({ enabled: true, goLiveAt: null });
+      repo.create.mockResolvedValue({ id: "inv-1", efaturaSubmissions: [{ id: "sub-1" }] });
+
+      await service.create(dto, ["admin"]);
+
+      expect(repo.create.mock.calls[0][0].efaturaSubmissions).toEqual({ create: { purpose: "issue" } });
+      expect(efatura.enqueue).toHaveBeenCalledWith("sub-1");
+    });
+
+    it("creates no fiscal row when e-Fatura is off", async () => {
+      repo.create.mockResolvedValue({ id: "inv-1", efaturaSubmissions: [] });
+
+      await service.create(dto, ["admin"]);
+
+      expect(repo.create.mock.calls[0][0].efaturaSubmissions).toBeUndefined();
+      expect(efatura.enqueue).not.toHaveBeenCalled();
+    });
+
+    it("creates no fiscal row for an invoice issued before the go-live date", async () => {
+      efatura.reporting.mockResolvedValue({ enabled: true, goLiveAt: new Date(Date.now() + 86_400_000) });
+      repo.create.mockResolvedValue({ id: "inv-1", efaturaSubmissions: [] });
+
+      await service.create(dto, ["admin"]);
+
+      expect(repo.create.mock.calls[0][0].efaturaSubmissions).toBeUndefined();
+    });
+  });
+
+  describe("create — invoice number collisions", () => {
+    const dto = { patientId: "patient-1", items: [{ serviceId: "service-1", description: "Consulta", quantity: 1, unitPrice: 1500 }] } as never;
+    const collision = () => Object.assign(new Error("Unique constraint failed"), { code: "P2002", meta: { target: ["invoiceNumber"] } });
+
+    beforeEach(() => repo.findServiceById.mockResolvedValue({ id: "service-1", price: "1500" }));
+
+    it("takes the next number when a concurrent create grabbed the same one", async () => {
+      repo.nextInvoiceNumber.mockResolvedValueOnce("INV-2026-0007").mockResolvedValueOnce("INV-2026-0008");
+      repo.create.mockRejectedValueOnce(collision()).mockResolvedValueOnce({ id: "inv-1", efaturaSubmissions: [] });
+
+      await service.create(dto, ["admin"]);
+
+      expect(repo.create).toHaveBeenCalledTimes(2);
+      expect(repo.create.mock.calls[1][0].invoiceNumber).toBe("INV-2026-0008");
+    });
+
+    it("does not swallow other errors, and gives up after a few collisions", async () => {
+      repo.nextInvoiceNumber.mockResolvedValue("INV-2026-0007");
+      repo.create.mockRejectedValue(new Error("db down"));
+      await expect(service.create(dto, ["admin"])).rejects.toThrow("db down");
+      expect(repo.create).toHaveBeenCalledTimes(1);
+
+      repo.create.mockReset();
+      repo.create.mockRejectedValue(collision());
+      await expect(service.create(dto, ["admin"])).rejects.toMatchObject({ code: "P2002" });
+      expect(repo.create).toHaveBeenCalledTimes(5);
+    });
+  });
+
   describe("getEFaturaStatus", () => {
-    it("returns the submission record for a known invoice", async () => {
-      const sub = { invoiceId: "inv-1", status: "accepted", atcud: "ABCDE-1" };
-      prisma.eFaturaSubmission.findUnique.mockResolvedValue(sub);
+    it("returns the invoice's own fiscal document", async () => {
+      const sub = { invoiceId: "inv-1", status: "accepted", iud: "CV1..." };
+      efatura.primaryFor.mockResolvedValue(sub);
       expect(await service.getEFaturaStatus("inv-1")).toEqual(sub);
     });
 
     it("throws NotFoundException when no submission exists", async () => {
-      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
+      efatura.primaryFor.mockResolvedValue(null);
       await expect(service.getEFaturaStatus("inv-x")).rejects.toThrow(NotFoundException);
+    });
+
+    it("lists every fiscal document of the invoice", async () => {
+      efatura.documents.mockResolvedValue([{ purpose: "issue" }, { purpose: "receipt" }]);
+      expect(await service.getEFaturaDocuments("inv-1")).toHaveLength(2);
     });
   });
 
   describe("retryEFatura", () => {
-    beforeEach(() => {
+    it("delegates to the e-Fatura service and reports how many documents were re-queued", async () => {
       repo.findByIdLite.mockResolvedValue(INVOICE);
-      prisma.eFaturaSubmission.upsert.mockResolvedValue({});
-      efaturaQueue.add.mockResolvedValue({});
+      efatura.retry.mockResolvedValue(2);
+      expect(await service.retryEFatura("inv-1")).toEqual({ queued: true, count: 2 });
     });
 
-    it("resets submission to 'pending' and clears error fields", async () => {
-      await service.retryEFatura("inv-1");
-      expect(prisma.eFaturaSubmission.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({
-            status: "pending",
-            errorCode: null,
-            errorMessage: null,
-          }),
-        })
-      );
-    });
-
-    it("enqueues a submit job with 3 attempts", async () => {
-      await service.retryEFatura("inv-1");
-      expect(efaturaQueue.add).toHaveBeenCalledWith(
-        "submit",
-        { invoiceId: "inv-1" },
-        expect.objectContaining({ attempts: 3 })
-      );
-    });
-
-    it("returns { queued: true }", async () => {
-      expect(await service.retryEFatura("inv-1")).toEqual({ queued: true });
+    it("reports queued: false when nothing needed a retry", async () => {
+      repo.findByIdLite.mockResolvedValue(INVOICE);
+      efatura.retry.mockResolvedValue(0);
+      expect(await service.retryEFatura("inv-1")).toEqual({ queued: false, count: 0 });
     });
 
     it("throws NotFoundException for an unknown invoice", async () => {
       repo.findByIdLite.mockResolvedValue(null);
       await expect(service.retryEFatura("inv-x")).rejects.toThrow(NotFoundException);
-      expect(efaturaQueue.add).not.toHaveBeenCalled();
+      expect(efatura.retry).not.toHaveBeenCalled();
     });
   });
 
   describe("cancel", () => {
+    const cancelled = { ...INVOICE, status: "cancelled" };
+
+    beforeEach(() => {
+      repo.findByIdLite.mockResolvedValue({ ...INVOICE, amountPaid: "0" });
+      repo.cancelAtomic.mockImplementation(async (_id: string, _data: unknown, before: (tx: unknown) => Promise<string[]>) => ({
+        invoice: cancelled,
+        efaturaIds: await before({} as never),
+      }));
+      efatura.planVoid.mockResolvedValue([]);
+    });
+
     it("throws NotFoundException for an unknown invoice", async () => {
       repo.findByIdLite.mockResolvedValue(null);
       await expect(service.cancel("inv-x", "Duplicado")).rejects.toThrow(NotFoundException);
@@ -632,35 +708,46 @@ describe("BillingService", () => {
     it("throws BadRequestException when the invoice is already fully paid", async () => {
       repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "paid" });
       await expect(service.cancel("inv-1", "Duplicado")).rejects.toThrow(BadRequestException);
-      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.cancelAtomic).not.toHaveBeenCalled();
     });
 
     it("is idempotent — returns the invoice as-is when already cancelled, without re-cancelling", async () => {
-      const cancelled = { ...INVOICE, status: "cancelled" };
       repo.findByIdLite.mockResolvedValue(cancelled);
       expect(await service.cancel("inv-1", "Duplicado")).toEqual(cancelled);
-      expect(repo.update).not.toHaveBeenCalled();
-      expect(efaturaQueue.add).not.toHaveBeenCalled();
+      expect(repo.cancelAtomic).not.toHaveBeenCalled();
+      expect(efatura.enqueue).not.toHaveBeenCalled();
     });
 
-    it("sets status to cancelled with the reason and a timestamp for an issued invoice with no E-Factura submission", async () => {
-      repo.findByIdLite.mockResolvedValue(INVOICE);
-      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
-      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
-
+    it("cancels with the reason and a timestamp, in one transaction with the fiscal planning", async () => {
       await service.cancel("inv-1", "Paciente desistiu");
 
-      expect(repo.update).toHaveBeenCalledWith(
+      expect(repo.cancelAtomic).toHaveBeenCalledWith(
         "inv-1",
-        expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu", cancelledAt: expect.any(Date) })
+        expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu", cancelledAt: expect.any(Date) }),
+        expect.any(Function)
       );
-      expect(efaturaQueue.add).not.toHaveBeenCalled();
+      expect(efatura.planVoid).toHaveBeenCalledWith(expect.anything(), "inv-1", "Paciente desistiu", false);
+    });
+
+    it("tells the e-Fatura planner whether money was already paid (credit note vs. void event)", async () => {
+      repo.findByIdLite.mockResolvedValue({ ...INVOICE, status: "partially_paid", amountPaid: "500" });
+      await service.cancel("inv-1", "Duplicado");
+      expect(efatura.planVoid).toHaveBeenCalledWith(expect.anything(), "inv-1", "Duplicado", true);
+    });
+
+    it("queues the void documents it was told about, after the transaction", async () => {
+      efatura.planVoid.mockResolvedValue(["void-1"]);
+      await service.cancel("inv-1", "Duplicado");
+      expect(efatura.enqueue).toHaveBeenCalledWith("void-1");
+    });
+
+    it("lets a planner conflict (document being sent right now) abort the cancellation", async () => {
+      efatura.planVoid.mockRejectedValue(new Error("em envio"));
+      await expect(service.cancel("inv-1", "Duplicado")).rejects.toThrow("em envio");
+      expect(efatura.enqueue).not.toHaveBeenCalled();
     });
 
     it("records the before/after status and reason in the audit diff", async () => {
-      repo.findByIdLite.mockResolvedValue(INVOICE);
-      prisma.eFaturaSubmission.findUnique.mockResolvedValue(null);
-      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
       const diffSpy = jest.spyOn(RequestContext, "setAuditDiff").mockImplementation(() => undefined);
 
       await service.cancel("inv-1", "Paciente desistiu");
@@ -670,38 +757,6 @@ describe("BillingService", () => {
         expect.objectContaining({ status: "cancelled", cancelReason: "Paciente desistiu" })
       );
       diffSpy.mockRestore();
-    });
-
-    it("also enqueues an E-Factura cancel job when the invoice was already accepted there", async () => {
-      repo.findByIdLite.mockResolvedValue(INVOICE);
-      prisma.eFaturaSubmission.findUnique.mockResolvedValue({
-        invoiceId: "inv-1",
-        status: "accepted",
-        efaturaRef: "REF123",
-      });
-      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
-
-      await service.cancel("inv-1", "Duplicado");
-
-      expect(efaturaQueue.add).toHaveBeenCalledWith(
-        "cancel",
-        { invoiceId: "inv-1", efaturaRef: "REF123" },
-        expect.objectContaining({ attempts: 3 })
-      );
-    });
-
-    it("does not enqueue an E-Factura cancel job when the submission was never accepted (still pending/rejected)", async () => {
-      repo.findByIdLite.mockResolvedValue(INVOICE);
-      prisma.eFaturaSubmission.findUnique.mockResolvedValue({
-        invoiceId: "inv-1",
-        status: "pending",
-        efaturaRef: null,
-      });
-      repo.update.mockResolvedValue({ ...INVOICE, status: "cancelled" });
-
-      await service.cancel("inv-1", "Duplicado");
-
-      expect(efaturaQueue.add).not.toHaveBeenCalled();
     });
   });
 

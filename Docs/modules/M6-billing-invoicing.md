@@ -11,7 +11,9 @@ Eliminates revenue leakage from manual and untracked billing. Auto-generates inv
 
 > **Implementation status:** invoice creation (auto-draft on Consulta completion + manual), payments
 > (idempotent, transactional, overpayment-guarded), cancellation, PDF receipts, and E-Fatura tax
-> submission are built and tested. ✅ **Health-plan co-pay is now computed** — a patient with an
+> reporting are built and tested — the e-Fatura part is now a full direct integration with DNRE,
+> documented in [`M6a-efatura-direct-integration.md`](M6a-efatura-direct-integration.md) (older
+> notes below about a single `EFaturaSubmission` per invoice and the `/api/v1/invoices` JSON call are superseded). ✅ **Health-plan co-pay is now computed** — a patient with an
 > active plan membership *with sessions remaining* gets an automatic negative "Desconto Plano de
 > Saúde" line on invoice creation (manual and auto-draft alike), sized from the plan product's
 > `coverageRules.coverage` % (`HealthPlansService.getActiveCoverage`) — the discount stops once the

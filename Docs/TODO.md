@@ -119,9 +119,42 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] PDF receipt generation (`generateReceiptPdf`, `pdfkit`) + R2 upload, with a placeholder-URL fallback when R2 isn't configured
 - [x] Auto-create draft invoice when an appointment's status → `completed`
 - [x] `recordPayment` runs insert+resum+status-update in one transaction, with a guard against `amountPaid` exceeding the invoice total
-- [x] `POST /invoices/:id/cancel` — rejects an already-paid invoice, idempotent on already-cancelled, triggers the (pre-existing but previously untriggered) E-Fatura cancel job when applicable
+- [x] `POST /invoices/:id/cancel` — rejects an already-paid invoice, idempotent on already-cancelled, voids or reverses the invoice's fiscal documents at DNRE (FDC event / credit note) in the same transaction
 - [x] Overdue-invoice detection — a pre-existing weekly job already emailed a digest of overdue invoices, but nothing ever set that status; it now marks `issued`/`partially_paid` invoices past `dueDate` as `overdue` first
-- [x] E-Fatura (Cabo Verde tax authority) submission via BullMQ queue + retry, with its own processor test suite
+- [~] E-Fatura direct integration with DNRE (`modules/M6a-efatura-direct-integration.md`): signed XML (XAdES-BES), OAuth2 + PKCE, FTE/FRE/TVE + RCE per payment, FDC/NCE voids, gap-free numbering, sweeper — validated against the official XSD and sample documents; **not yet exercised on Homologação**, offline/contingency mode not implemented, IVA/exemption treatment to confirm with the accountant — **may be replaced by the Techplace transport below**
+- [~] **E-Fatura through Techplace** (`modules/M6b-efatura-techplace.md`; api.techplace.cv, a CV invoicing vendor that reports to
+  DNRE for us) — phase 1 built 2026-10-06 behind `EFATURA_PROVIDER=techplace` (default `dnre`, so nothing changes until it is set);
+  replaces DNRE-direct only after Gate B. **Never run against Techplace** (no credentials). Its public API has no credit note, void,
+  DNRE status/IUD, QR or webhook, and `/fatura/sincronizador` records one full payment only.
+  - [x] Phase 1: Fatura-Recibo / Talão de Venda issue path, customer + product registration, unpaid Faturas / receipts / credit
+    notes / voids parked as `TECHPLACE_UNSUPPORTED`, total read back from `GET /venda/id`, a lost answer is never auto-resent
+    (`TECHPLACE_UNCERTAIN`), settings card + "Testar ligação", tests (mapper, client, service)
+  - [ ] **Send the 14 questions to Techplace** — Gmail draft to techplace.cv@gmail.com saved 2026-10-07, not sent when this was
+    written. 1–8 block the first live sale, 11 blocks Gate B
+  - [ ] Get a Techplace test entity + credentials (API key and/or login, entity id, user id, `FR`/`TV` codes, payment-method and
+    condition ids, IVA/unit ids); issue one Fatura-Recibo and one Talão on it, and confirm the four assumptions the code makes:
+    `preco_unid` tax-inclusive, `desconto_financeiro` an amount, `cliente_externo` = the patient's NIF, one payment method per sale
+  - [ ] **Create the e-Fatura series for CAPCV on the clinic's PE account (efatura.cv) and enter it in Ilhapay
+    (`Nº de Série`)** — until then Ilhapay refuses to create any document ("definir uma série … conta no portal PE"). Checked
+    2026-10-08 (`ilhapay.techplace.cv`, login `atendimento.psi`, read-only; see M6b): the PE account is still needed, so
+    Techplace does **not** remove that step. Still open (Q1): does the clinic also need its own ICP-CV certificate?
+  - [ ] Get the API side of CAPCV from Techplace: an api-key or CAIXA operator user + the entity/user uuids (the Ilhapay login
+    is rejected by `api.techplace.cv/auth`), and confirm a sale posted to the API shows up in Ilhapay (credit notes, receipts
+    and debit notes exist in the Ilhapay UI but not in the public API — Q11)
+  - [ ] Phase 2: bring the DNRE outcome back (IUD, QR, PDF) by polling or a signed webhook (Q3); until then a sale reads
+    "Emitida", not "Autorizada"
+  - [ ] Phase 2: unpaid Fatura + one receipt per later payment without an open cash-register session (Q10)
+  - [ ] **Gate B:** credit note + void against Techplace (Q11); until then voiding a sale already reported is done by hand in
+    Techplace (the void parks as `TECHPLACE_UNSUPPORTED`)
+  - [ ] After Gate B: delete DNRE-direct (`dfe/`, `efatura-auth|client.service.ts`, `test/fixtures/efatura-xsd`, the DNRE config
+    fields and settings UI, `efatura_counters`, the signed-XML columns, the `EFATURA_PROVIDER` switch), check prod holds no
+    fiscal data first, and rewrite `M6a` into the Techplace module doc
+  - [ ] Data protection: a data-processing agreement with Techplace (Q14) — it becomes a processor of patient name, NIF and
+    service names; reflect it in `SECURITY.md` §7 (patient data privacy) and its "e-Fatura credentials" section
+  - [ ] Known limit: if product registration answers "already exists" the product id cannot be read back — set
+    `services.techplaceProductId` by hand, and add a lookup once Techplace documents one
+  - [ ] Before enabling anywhere: set `EFATURA_PROVIDER=techplace` (+ optional `TECHPLACE_BASE_URL`) in the API env — the
+    `20261007000000_efatura_techplace` migration is already on dev and staging (see M7 note below)
 - [x] Price-override visibility (logged when an admin bills at a price other than the catalogue) + admin-only RBAC gate on who can override
 - [x] Financeiro module (not in the original design): Despesas (expenses, approval workflow, receipt upload), Entradas (manual income), Overview (`GET /financeiro/summary`)
 - [x] Financeiro Overview niche additions: receivables (outstanding/overdue invoices, a current snapshot), revenue by payer type (private vs. health-plan/company), revenue by service, no-show financial impact — all read from existing `Invoice`/`InvoiceItem`/`Appointment` data, no new tables
@@ -201,7 +234,7 @@ See `PERFORMANCE_UPGRADES.md` for the full list.
 - [x] Auth flow in Next.js (`middleware.ts`, checks the session cookie directly — no more
   Authorization-header translation, since the API now reads the cookie itself)
 - [x] API client in Next.js (`/api/*` rewrite proxy to the NestJS API)
-- [x] Integration test suite against a real dev DB (`supertest`, `apps/api/test/integration/`) — 4 specs / 9 tests covering booking conflict, patient erasure, invoice payment, staff invitation→activation→login; see `Docs/TESTING.md` §4
+- [x] Integration test suite against a real dev DB (`supertest`, `apps/api/test/integration/`) — 4 specs / 9 tests covering booking conflict, patient erasure, invoice payment, staff admin-set password→login→"Alterar senha" (sessions ended); see `Docs/TESTING.md` §4
 - [x] Sentry integration — wired in both `apps/api/src/main.ts` and `apps/web`'s `instrumentation(-client).ts`, no-op until `SENTRY_DSN`/`NEXT_PUBLIC_SENTRY_DSN` are set (no real DSN configured yet)
 
 ---
@@ -344,15 +377,121 @@ notes; admin sees everything) rather than a patient-clinician assignment table t
 nowhere else. See `Docs/modules/M7-clinical-records-emr.md` v2.0 for the full shape — it no longer
 resembles the original SOAP/ICD-10 design, which was written before the client became CAP.
 
+- [x] **Doctor register reworked (2026-10-03).** The note used to be written in a modal on the
+  patient's profile — a different place from the queue where the checked-in patient appears —
+  never linked to the appointment, with no draft, no edit UI, and a worklist that only showed the
+  last 100 notes *across all doctors* before filtering to the caller's own. Now: a note editor page
+  (autosaved server-side drafts, patient context + previous plan beside the form, quick phrases,
+  smart defaults, "Guardar e concluir consulta"), a day queue with per-patient note state, and a
+  filtered history. Backend: `ClinicalNote.finalizedAt` (null = draft; migration back-fills
+  existing notes), one shared finalize rule, appointment-belongs-to-patient validation, the author
+  scope pushed into the query, and `PATCH` now re-checks completeness (the risk-detail re-check the
+  old comment promised was never implemented).
+  - [x] **Limits closed (2026-10-04).** (1) Quick phrases are admin-editable: four `FRASE_*`
+    Parametrizações groups, falling back to a suggested set while empty. (2) History is paged
+    (`page`/`limit`, "Carregar mais"). (3) One note per appointment per clinician
+    (`@@unique([appointmentId, authorStaffId])`; a repeat POST continues the draft, 409 once final;
+    six concurrent first-saves verified → one note). (4) A doctor can switch the day queue to
+    "Todos" to cover for a colleague. (5) The app shell is responsive: a drawer sidebar below `lg`,
+    and the six routes whose header rows could not wrap (`/appointments`, `/billing`,
+    `/health-plans`, `/staff`, `/parametrizacoes`, `/access`) now wrap — guarded by
+    `e2e/responsive-shell.spec.ts` (no horizontal overflow at 390 and 820px on 14 routes).
+  - [x] **The four open items closed (2026-10-05).**
+    1. *Two tabs / last write wins* — every editor `PATCH` carries `expectedUpdatedAt` and is a
+       compare-and-set in one statement; a loss is a 409 `NOTE_CHANGED` + the current note, and the
+       editor shows "Carregar a versão guardada" / "Manter a minha versão". A repeat create for an
+       appointment is now a 409 as well (it used to *continue* the draft, which would have overwritten the
+       other tab). Verified live: 6 simultaneous first-saves → 1×201 + 5×409; 2 racing saves → 1×200 + 1×409.
+    2. *Covering doctor can't see the colleague's notes* — **decided: option A, "treating today"**: while
+       the patient has an appointment today that is `checked_in`/`completed`, any doctor reads the other
+       authors' *finalized* notes (never drafts), read-only, lapsing at end of day, audit-marked. Documented in
+       `M7` §3.1, `SECURITY.md` §3.1 and `ROLES-PERMISSIONS.md` (whose §3.3/§4.1 still said M7 didn't exist).
+       Proven with two real doctor logins in `clinical-note-access.integration-spec.ts`.
+    3. *Cramped phone layouts* — measured, not guessed. Making 37 `grid-cols-N` grids responsive was the
+       easy part; a stricter check (clipped / squeezed / sideways-scroll, on every tab) then found 20 views
+       the old overflow check had passed: tables clipped inside `overflow-hidden` cards (now each in its own
+       `overflow-x-auto`), four pages with a fixed-width vertical nav beside the content (billing, health
+       plans, settings, parametrizações: now a scrollable tab strip below `lg`), the dashboard's inline
+       `1fr 340px` layout, the appointments calendar (one day at a time below 768px), the WhatsApp inbox
+       (master-detail below 768px) and a handful of rows that could not wrap. Guarded by
+       `e2e/responsive-shell.spec.ts` on 14 routes × every tab at 390 and 820px.
+    4. *Topbar* — the two chips are live (unconfirmed appointments in the next 7 days; active plans ending
+       within 7 days; admin/receptionist only) and the bell lists them with a dot only when there is
+       something; the search box is a real patient combobox. Guarded by `e2e/topbar.spec.ts`.
+  - [x] **The smaller open items closed (2026-10-05, second pass).**
+    1. *Self-unlock of the "treating today" rule* — the status endpoint now records who checked the patient in
+       and who completed the appointment (`checkedInByStaffId` / `completedByStaffId`, migration
+       `20261005000200`), and the read rule needs someone *other than the reader* to have done either. Proven with
+       two real doctors: B's own check-in and completion (or completing straight from `confirmed`) unlocks nothing;
+       reception completing it does; an unknown actor (system caller, or a row from before this) still qualifies.
+       The editor says why instead of showing no history. Trade-off accepted: in a clinic with no reception, a
+       covering doctor who checks the patient in themself won't see the colleague's notes (admin still does).
+    2. *Phone search* — below 768px a search icon opens a bar over the topbar (same combobox, same results list).
+    3. */exams and /visits* — still mock-only and unreachable (middleware redirects them). Instead of unverifiable
+       UI work on dead pages there is a tripwire in `e2e/responsive-shell.spec.ts` that fails the moment either is
+       un-hidden, telling whoever does it to add them to the phone-width check in the same change.
+  - [x] **Hardening pass by two parallel agents (2026-10-06).** *Backend:* a draft can be discarded
+    (`DELETE /clinical-notes/:id`, author/admin, drafts only, audited without its text); an admin report of
+    cross-author reads (`GET /clinical-notes/access-log`); the audit interceptor no longer records a query
+    string as the "resource" (a `?`-suffixed URL used to dodge the cross-author-read mark — a real hole, fixed,
+    the full URL stays in `metadata.url`); prescription/referral links to a note are validated and their FKs are
+    `RESTRICT` (migration `20261006000000`, plus a partial index for the report, `…000100`); referral status
+    moves follow `REFERRAL_STATUS_TRANSITIONS`; invoice numbers are `MAX+1` under the advisory lock (a deleted
+    non-newest invoice made `COUNT+1` collide and every create 500). *UI:* the two-tab conflict is a per-section
+    3-way merge with a side-by-side choice (`M7` §2.1), "Descartar rascunho", the admin tab "Acessos entre
+    clínicos", prescriptions with several medicines + duration/instructions, referrals with a colleague picker and
+    status buttons, "Carregar mais" on the profile's lists. *Tests:* 799 unit (41 suites), 40 integration across the
+    clinical + invoice specs, 84 Playwright (`clinical-note-draft`, `-editor`, `clinical-extras`, `topbar`,
+    `responsive-shell`). The first full browser run found two wrong tests (not product bugs); both fixed.
+  - [ ] **Decisions the pass left for the clinic/owner** (each was implemented the conservative way):
+    narrow "treating today" to the appointment's own doctor (today any doctor qualifies); encrypt
+    `Referral.reason` (it is plain text while note text is AES-GCM); audit *failed* 403/404 reads, not only
+    successes; `?q=` search terms (PII) are kept in `audit_log.metadata.url`; whether an admin should create
+    prescriptions/referrals (the permission matrix says no, the code allows it); make the cross-author-read audit
+    write synchronous and fail-closed; whether the referrer may mark their own referral declined/completed;
+    whether an admin can be an internal referral target.
+  - [ ] Still open (smaller): two people can still arrange the "treating today" unlock (reception or a colleague
+    checking in on a doctor's behalf) — bounded to a day and audited; an owner/admin-granted share was offered
+    and not chosen. `health-plans.repository.ts` numbers renewals with the same `COUNT+1` pattern invoices had.
+    The compiled APIs on :4000/:4001 must be rebuilt/restarted for the new endpoints and `MAX+1` numbering; the
+    dev DB has a placeholder patient "AG1 numbering placeholder" with a cancelled invoice `INV-2026-0008`
+    (inserted to cover a gap) to delete afterwards. Three pre-existing integration tests (booking-conflict ×2,
+    health-plan-renewal ×1) fail only because Dr. Silva's dev availability is a single Thursday 10–11 slot.
+    The dev DB holds leftover e2e/integration notes (it had 0 before this work) and two `E2E Paciente…` patients
+    from 2026-09-06/07; clean them with SQL scoped to those rows (children first).
+  - [x] **Dev and staging DBs are caught up with the schema (2026-10-06).** `20261007000000_efatura_techplace`
+    (`services.techplaceProductId`, `efatura_submissions.externalId/externalCode`) was missing from `maissaude_dev`
+    while the regenerated Prisma client already queried it (39 of 40 integration tests 500'd). Applied to dev with
+    `prisma db execute --file … --schema prisma/schema.prisma` (the dev DB's migration history differs from the
+    repo's, so not `migrate deploy`); a schema diff afterwards is empty. **Staging** got it, and the five clinical
+    migrations before it, from the `Deploy Staging` run of 2026-10-06 19:40Z (dispatched from
+    `fix/dashboard-403-shows-404`, which contains them): the deploy job's `migrate` step ended "All migrations have
+    been successfully applied", and CI's from-scratch apply of all 10 migrations passed. Production is untouched
+    (`prod` still points at an older commit). **Still to do locally:** the compiled APIs on :4000/:4001 were not
+    restarted, so they run the old build (old Prisma client, `COUNT+1` invoice numbers, no new endpoints) until they
+    are rebuilt: stop them, `cd packages/database && npx prisma generate`, `cd apps/api && npx nest build`,
+    `node --enable-source-maps dist\main`.
 ### M8 — Staff & Resource Scheduler
 
 **Backend**
-- [x] Staff CRUD, invitations, weekly recurring availability
+- [x] Staff CRUD, admin-set passwords, weekly recurring availability
 - [x] `StaffShift`, `LeaveRequest` models with repository methods
-- [x] Invitation activation hashes the invitee's own chosen password (argon2id) directly — no
-  external identity provider is involved anymore, so the transactional-rollback machinery this
-  used to need (delete an orphaned Keycloak user if the local `Staff` write failed) is gone;
-  there's nothing external left to get out of sync with
+- [x] ~~Invitation activation hashes the invitee's own chosen password~~ — replaced 2026-10-02/03: the
+  email-invitation flow is removed (no `/staff/invite`, `/staff/invitations*`, `/public/invitations*`,
+  `send-invite` job or `/activate` page; the `staff_invitations` table stays only as a legacy,
+  unused model). **The admin chooses the password:** `POST /staff` takes a `password` (same policy as
+  every other password, `PasswordSchema`) and `PATCH /staff/:id/password` ("Alterar senha") changes it
+  later; only the argon2id hash is stored, the API never generates or returns one, and there is no
+  forced change on first login. A password change by an admin ends all of that user's open sessions
+  (`SessionService.destroyAllForStaff`, a `session:*` scan; the admin's own session is spared when
+  they change their own). A temporary-password / `Staff.mustChangePassword` design shipped briefly
+  and was removed (column dropped by migration `20261004000200_drop_staff_must_change_password`).
+  See `API-SPEC.md` §7.
+- [x] Fix (2026-10-03): a freshly created user's "change my password" always failed with "Palavra-passe
+  atual incorreta" in dev — `SessionAuthGuard`'s `AUTH_BYPASS` branch ignored the login cookie and ran
+  every request as the seeded admin, so the change was verified against the admin's password. The
+  bypass now applies only when there is no valid session (a stale/ended session or deactivated account
+  still falls back to the admin); production is unaffected. Covered by guard unit tests.
 - [x] Room/equipment conflict detection (see M1 — same underlying fix)
 - [x] Staff deactivation — `DELETE /staff/:id` (admin-only, self-deactivation blocked), soft-deletes via the
   `deletedAt` column that already existed and was already used by every staff read path but had no write
@@ -361,7 +500,7 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
 - [x] ~~Leave request submission/approval endpoints (see M1 note — schema and availability-logic support exist, no way to create one via the API)~~ — corrected: same duplicate/contradictory line as M1's own corrected copy above; `POST /staff/me/leave-requests` etc. all exist
 
 **Frontend**
-- [x] Staff identity lifecycle (invite/edit/deactivate) consolidated into **Gestão de Acesso →
+- [x] Staff identity lifecycle (create with an admin-set password/edit/change password/deactivate) consolidated into **Gestão de Acesso →
   Utilizadores** as the one canonical place — the Staff page's own "Novo Colaborador"/"Editar"
   actions and Settings' separate "Utilizadores" tab (a near-duplicate, independently-built) are
   both removed. Staff page (`Equipa & Turnos`) is now a read-only roster of the same data, plus
@@ -371,7 +510,7 @@ resembles the original SOAP/ICD-10 design, which was written before the client b
   all), **Perfis** (the existing role-permission matrix, simplified to the 5 real `StaffRole` values
   — dropped the old "create an arbitrary custom profile" flow, which produced profiles that could
   never actually be assigned to anyone since `Staff.role` is a fixed Prisma enum), and
-  **Utilizadores** (the consolidated lifecycle above, plus pending-invitation visibility/cancel).
+  **Utilizadores** (the consolidated lifecycle above; the Add User form asks for the password + confirmation with a "Gerar" button (random strong password, revealed so it can be copied with "Copiar"), a show/hide eye per field and the password rules listed up front, ticking off live; each row has "Alterar senha", which opens a modal with the same fields).
   Settings' own duplicate "Gestão de Acesso" tab (`components/settings/AccessTab.tsx`, a
   byte-for-byte copy of the same Perfis logic) is deleted outright.
 - [x] Shift overrides — `StaffShift` was previously dead code: no CRUD endpoints anywhere, and its
@@ -455,6 +594,7 @@ psychology clinic with no ultrasound/ECG imaging use case.
 - [x] ~~Helmet headers in `main.ts`~~ — corrected: `app.use(helmet())` is already the second line of `bootstrap()`; this line was stale
 - [ ] OWASP ZAP scan in CI
 - [ ] Quarterly penetration test plan
+- [ ] Branch protection, Dependabot/secret scanning/CodeQL and triage of the 32 high `pnpm audit` findings — see "Repository protection & vulnerability checks" under DevOps below
 
 See `SECURITY.md` for the full, section-by-section implementation status.
 
@@ -499,14 +639,51 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 
 ### DevOps
 - [ ] Pre-deploy blockers found 2026-09-25 (see PROGRESS.md): prod compose + real CI deploy, API Dockerfile fixes, `NEXT_PUBLIC_API_URL` build arg, audit-log trigger SQL step, real admin bootstrap + seed production guard, boot-time env validation, drop `--accept-data-loss` from CI `db:push`
-- [ ] Staging/production environments — not live
+- [x] Staging live 2026-10-03 on the Hostinger VPS: https://staging.cap360.tech:8443 (see VPS_CONFIG.md)
+- [x] Staging redeployed 2026-10-06 from branch `fix/dashboard-403-shows-404` (`staging-286b298`: the "404 after login" fix for doctor/nurse/lab_tech + the `proxy-addr` critical-advisory pin that had been failing the audit gate; also shipped the 5 commits staging was behind, 6 migrations applied, data intact)
+- [ ] **Merge `fix/dashboard-403-shows-404` into `master`** — it was deployed from the branch, so a deploy from `master` brings the "404 after login" crash and the red audit gate back until it lands
+- [ ] Doctor/nurse/lab_tech UI vs API (found 2026-10-06, not fixed — a permissions decision): the sidebar still offers "Planos de Saúde" (`defaultPerms`) and "WhatsApp Hub" (unmapped) to roles whose API calls 403, and those pages (and any other `fetch().then(r => r.json())`) are likely to show the same "404" card. Either hide them per role or make every query throw on `!res.ok`; verify with a real doctor login on staging (`tst@mail.cv`)
+- [ ] Production — environment `PRODUCTION` (reviewer, `prod` branch only), secrets, `/opt/cap360-prod` (`.env.prod`, cert, `tls.conf`) are ready and the first run was triggered 2026-10-03; still to do: approve it, seed the prod admin (>= 12-char password), back up prod `FIELD_ENCRYPTION_KEY` off the server, add the prod backup cron
+- [ ] VPS follow-ups: confirm Hostinger weekly snapshots are on; pin the SSH host key in the deploy workflows (`fingerprint:`); close `8443` in ufw if staging stops needing it; the GHCR read PAT on the VPS expires (renew it); smoke-test a file upload after the multer 2.4 bump (`FileInterceptor` has no automated test)
 - [ ] Sentry, Grafana/Prometheus, Loki — not set up
-- [ ] Automated PostgreSQL backups
+- [x] Nightly local PostgreSQL backups: `scripts/vps/backup.sh` (cron on staging, restore drilled 2026-10-03)
+- [ ] Off-server encrypted copy of the backups (e.g. rclone to Backblaze B2) and a restore drill on prod — required before real patient data
 - [ ] Uptime monitoring
+
+### Repository protection & vulnerability checks — TODO, not done yet (noted 2026-10-03)
+Nothing below is configured: GitHub has no branch protection, `.github/dependabot.yml` doesn't exist and
+CodeQL / secret scanning aren't set up. Do this before real patient data goes live (and before more
+people get push access).
+- [ ] **Branch protection / rulesets** (GitHub → Settings → Rules) on `master`: require a PR + at least one
+  review, require the `ci.yml` checks to pass (`Lint & Typecheck`, `Unit Tests`, `Dependency audit`,
+  `Docker build check`), block force-push and deletion, require up-to-date branches. Consider the same for
+  `staging`. **Effect on deployments:** protecting `master` alone changes nothing for staging — `deploy-staging.yml`
+  runs on a push to `staging` or a manual "Run workflow", and `deploy-production.yml` runs on a push to `prod` or a manual run on `prod`
+  (gated by the `PRODUCTION` environment's required reviewers, which need a public repo or a paid plan). Protecting `staging` itself means a deploy must come from a PR
+  merge into it (or a manual run), not a direct push — set that up first so the deploy flow isn't surprised.
+  Note `ci.yml` only runs its `pull_request` jobs for PRs targeting `master`/`staging`/`develop`, so those
+  are the branches a required-checks rule can use.
+- [ ] **Vulnerability checks:**
+  - triage the dependency-audit baseline (0 critical / **32 high** prod findings at 2026-10-03, see PROGRESS.md):
+    upgrade, replace, or write down why each is accepted; the CI `pnpm audit` step is already a ratchet (fails above
+    `AUDIT_BASELINE_HIGH`=32 / critical 0; the multer override took the real count to 27) — lower the baseline as
+    advisories are fixed, down to 0
+  - enable Dependabot alerts + security updates and add `.github/dependabot.yml` (npm workspaces, GitHub Actions,
+    Dockerfiles)
+  - enable GitHub secret scanning + push protection, and run a one-off history scan (gitleaks/trufflehog)
+    for anything that was ever committed (`.env*`, keys, certificates)
+  - enable CodeQL code scanning (JS/TS) and add an image scan (Trivy/Grype) to the Docker build check
+  - the existing "OWASP ZAP scan in CI" item under Security above belongs with these
+  - review what the repo exposes: `Docs/VPS_CONFIG.md` holds the VPS IP and domain layout — confirm the repo is
+    private, or move that file out of git
 
 ---
 
 ## Immediate Next Steps
+
+- [ ] **Prod reference data:** staging got the Parametrizações + `services` data from dev on 2026-10-06 (one-off copy,
+  [DEPLOYMENT.md](DEPLOYMENT.md) §0.4); prod starts empty. Agree with the clinic which groups/prices go live and load
+  them the same way, or make the seed ship them (the seed is dev-only and hard-codes dev's `TIPO_SERVICO` → service links).
 
 REVIEW.md's entire fix list (Sections 1–5, incl. all of §4) is now closed. Section 6 is a
 redesign exercise, not an implementation task. What remains in this file below is all

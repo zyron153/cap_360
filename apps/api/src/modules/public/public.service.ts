@@ -3,7 +3,7 @@ import { AppointmentsService } from "../appointments/appointments.service";
 import { PatientsService } from "../patients/patients.service";
 import { ServicesService } from "../services/services.service";
 import { StaffService } from "../staff/staff.service";
-import { AvailabilityQuery, PublicBookingDto, ActivateInvitationDto } from "@cap/types";
+import { AvailabilityQuery, PublicBookingDto } from "@cap/types";
 
 @Injectable()
 export class PublicService {
@@ -16,14 +16,6 @@ export class PublicService {
 
   getServices() {
     return this.servicesService.findAll();
-  }
-
-  getInvitation(token: string) {
-    return this.staffService.getPublicInvitation(token);
-  }
-
-  activateInvitation(token: string, dto: ActivateInvitationDto) {
-    return this.staffService.activateInvitation(token, dto);
   }
 
   async getStaff() {

@@ -1,18 +1,15 @@
-import { Injectable, NotFoundException, ConflictException, GoneException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
-import { randomBytes } from "crypto";
-import { UpdateStaffDto, InviteStaffDto, ActivateInvitationDto, ChangePasswordDto, CreateLeaveRequestDto, LeaveRequestDecisionDto, UpsertStaffShiftDto } from "@cap/types";
+import { Injectable, NotFoundException, ConflictException, UnauthorizedException, BadRequestException, ForbiddenException } from "@nestjs/common";
+import { CreateStaffAccountDto, SetStaffPasswordDto, UpdateStaffDto, ChangePasswordDto, CreateLeaveRequestDto, LeaveRequestDecisionDto, UpsertStaffShiftDto } from "@cap/types";
 import { StaffRepository } from "./staff.repository";
 import { PasswordService } from "../../common/services/password.service";
-import { NotificationsService } from "../notifications/notifications.service";
-
-const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+import { SessionService } from "../auth/session.service";
 
 @Injectable()
 export class StaffService {
   constructor(
     private readonly repo: StaffRepository,
     private readonly password: PasswordService,
-    private readonly notifications: NotificationsService,
+    private readonly sessions: SessionService,
   ) {}
 
   findAll() {
@@ -46,74 +43,49 @@ export class StaffService {
 
     const ok = await this.password.verify(staff.passwordHash, dto.currentPassword);
     if (!ok) throw new UnauthorizedException("Palavra-passe atual incorreta.");
+    if (dto.newPassword === dto.currentPassword) {
+      throw new BadRequestException("A nova palavra-passe tem de ser diferente da atual.");
+    }
 
     const passwordHash = await this.password.hash(dto.newPassword);
     await this.repo.updatePasswordHash(id, passwordHash);
   }
 
-  // ─── Invitations ───────────────────────────────────────────────────────────
+  // ─── Admin-set passwords ───────────────────────────────────────────────────
+  // The admin chooses the password (no email is sent, no forced change). Only its argon2id hash is
+  // persisted; the plaintext exists in the request body and nowhere else.
 
-  async invite(dto: InviteStaffDto, invitedBy?: string) {
-    const existingStaff = await this.repo.findByEmail(dto.email);
-    if (existingStaff) throw new ConflictException(`Já existe um utilizador com o email ${dto.email}`);
-
-    const existingInvite = await this.repo.findInvitationByEmail(dto.email);
-    if (existingInvite) throw new ConflictException(`Já existe um convite pendente para ${dto.email}`);
-
-    const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
-    const invitation = await this.repo.createInvitation(dto, token, expiresAt, invitedBy);
-
-    await this.notifications.sendInvite(dto.email, dto.fullName, token);
-
-    // token is otherwise never selectable again (INVITATION_SELECT omits it, by design — it's
-    // a bearer credential for the activation endpoint) — returned once here, only to the admin
-    // who just created it, as a copy-link fallback for when the invite email doesn't arrive.
-    return { ...invitation, token };
-  }
-
-  listInvitations() {
-    return this.repo.findPendingInvitations();
-  }
-
-  async cancelInvitation(id: string) {
-    const invite = await this.repo.findInvitationById(id);
-    if (!invite) throw new NotFoundException(`Invitation ${id} not found`);
-    await this.repo.deleteInvitation(id);
-    return { ok: true };
-  }
-
-  async getPublicInvitation(token: string) {
-    const invite = await this.repo.findInvitationByToken(token);
-    if (!invite || invite.acceptedAt) throw new NotFoundException("Convite inválido ou já utilizado");
-    return {
-      fullName: invite.fullName,
-      email: invite.email,
-      role: invite.role,
-      expired: invite.expiresAt.getTime() < Date.now(),
-    };
-  }
-
-  async activateInvitation(token: string, dto: ActivateInvitationDto) {
-    const invite = await this.repo.findInvitationByToken(token);
-    if (!invite || invite.acceptedAt) throw new NotFoundException("Convite inválido ou já utilizado");
-    if (invite.expiresAt.getTime() < Date.now()) throw new GoneException("Este convite expirou");
+  async create(dto: CreateStaffAccountDto) {
+    const existing = await this.repo.findByEmail(dto.email);
+    if (existing) throw new ConflictException(`Já existe um utilizador com o email ${dto.email}`);
 
     const passwordHash = await this.password.hash(dto.password);
-    const staff = await this.repo.create({
+    return this.repo.create({
       fullName: dto.fullName.trim(),
-      email: invite.email,
-      role: invite.role,
+      email: dto.email,
+      role: dto.role,
       passwordHash,
-      jobTitle: invite.jobTitle,
-      phone: invite.phone,
-      specialtyCode: invite.specialtyCode,
-      companyId: invite.companyId,
-      availability: (invite.availability as { dayOfWeek: number; startTime: string; endTime: string }[] | null) ?? undefined,
+      jobTitle: dto.jobTitle,
+      phone: dto.phone,
+      specialtyCode: dto.specialtyCode,
+      companyId: dto.companyId,
+      availability: dto.availability,
     });
+  }
 
-    await this.repo.markInvitationAccepted(invite.id);
-    return staff;
+  /** Admin "Alterar senha": replaces a user's password and ends their open sessions, so whoever
+   * still has the old password (or a stolen session) is logged out immediately and has to sign in
+   * with the new one. `currentSessionId` is the caller's own session: when an admin changes their
+   * own password it is spared, so they aren't logged out of the screen they're using. */
+  async setPassword(id: string, dto: SetStaffPasswordDto, requesterId: string, currentSessionId?: string) {
+    const staff = await this.repo.findById(id);
+    if (!staff) throw new NotFoundException(`Staff ${id} not found`);
+
+    const passwordHash = await this.password.hash(dto.password);
+    await this.repo.updatePasswordHash(id, passwordHash);
+
+    const ended = await this.sessions.destroyAllForStaff(id, id === requesterId ? currentSessionId : undefined);
+    return { sessionsEnded: ended };
   }
 
   // ─── Leave Requests ────────────────────────────────────────────────────────

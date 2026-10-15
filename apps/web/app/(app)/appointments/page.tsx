@@ -78,6 +78,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending:    "#F59E0B",
   confirmed:  "#13A3A3",
   checked_in: "#8B5CF6",
+  in_progress: "#0EA5E9",
   completed:  "#10B981",
   cancelled:  "#8E8EA8",
   no_show:    "#EF4444",
@@ -87,6 +88,7 @@ const STATUS_LEGEND = [
   { key: "pending",    label: "Pendente",   color: "#F59E0B" },
   { key: "confirmed",  label: "Confirmada", color: "#13A3A3" },
   { key: "checked_in", label: "Presente",   color: "#8B5CF6" },
+  { key: "in_progress", label: "Em curso",  color: "#0EA5E9" },
   { key: "completed",  label: "Concluída",  color: "#10B981" },
   { key: "cancelled",  label: "Cancelada",  color: "#8E8EA8" },
   { key: "no_show",    label: "Faltou",     color: "#EF4444" },
@@ -96,6 +98,7 @@ const STATUS_PILL: Record<string, string> = {
   pending:    "bg-amber-100 text-amber-700",
   confirmed:  "bg-brand-100 text-brand-800",
   checked_in: "bg-violet-100 text-violet-700",
+  in_progress: "bg-sky-100 text-sky-700",
   completed:  "bg-emerald-100 text-emerald-700",
   cancelled:  "bg-dim-100 text-dim-500",
   no_show:    "bg-red-100 text-red-600",
@@ -109,6 +112,7 @@ const TRANSITIONS: Record<string, { status: string; label: string; primary: bool
                { status: "cancelled",  label: "Cancelar",       primary: false }],
   checked_in: [{ status: "completed",  label: "Concluída",      primary: true  },
                { status: "no_show",    label: "Faltou",         primary: false }],
+  in_progress: [{ status: "completed", label: "Concluída",      primary: true  }],
 };
 
 const CARD = "bg-white rounded-[16px] border border-dim-200 shadow-[0_1px_4px_rgba(0,0,0,.08),0_0_0_1px_rgba(0,0,0,.03)] overflow-hidden";
@@ -122,7 +126,9 @@ const BLANK_APPT = {
 };
 
 export default function AppointmentsPage() {
-  const { isLoading: permLoading, can, canDo } = usePermissions();
+  const { isLoading: permLoading, can, canDo, isAdmin, me, role } = usePermissions();
+  const canWriteNotes = isAdmin || me?.role === "doctor"; // the clinical-notes module is admin/doctor only
+  const canCheckIn = isAdmin || role === "receptionist"; // reception checks patients in; the API refuses anyone else
   const router = useRouter();
   const [view, setView] = useState<"calendar" | "list" | "waitlist">("calendar");
   const [newOpen, setNewOpen] = useState(false);
@@ -394,7 +400,7 @@ export default function AppointmentsPage() {
 
   const events = filteredAppts.map((a) => ({
     id: a.id,
-    title: `${a.patient.fullName} — ${a.service.name}`,
+    title: `${a.patient.fullName ?? "Paciente removido"} — ${a.service.name}`,
     start: a.scheduledAt,
     end: new Date(new Date(a.scheduledAt).getTime() + a.durationMinutes * 60_000).toISOString(),
     backgroundColor: STATUS_COLORS[a.status] ?? "#8E8EA8",
@@ -424,14 +430,14 @@ export default function AppointmentsPage() {
     <div className="flex flex-col gap-5">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-[22px] font-bold text-dim-900">Agendamentos</h1>
           <p className="text-[13px] text-dim-500 mt-0.5">Calendário de consultas e marcações</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* View toggle */}
-          <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1">
+          <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1 max-w-full overflow-x-auto">
             <button
               onClick={() => setView("calendar")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
@@ -474,7 +480,7 @@ export default function AppointmentsPage() {
       </div>
 
       {/* Quick stats */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         {[
           { label: "Este mês", value: today,     cls: "bg-dim-100 text-dim-700" },
           { label: "Pendentes", value: pending,   cls: "bg-amber-50 text-amber-700 border border-amber-200/80" },
@@ -487,7 +493,7 @@ export default function AppointmentsPage() {
           </div>
         ))}
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             onClick={() => setTodayOnly((v) => !v)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-opacity"
@@ -559,6 +565,7 @@ export default function AppointmentsPage() {
               <p className="text-[13px] font-medium text-dim-600">Sem marcações este mês</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr>
@@ -595,7 +602,7 @@ export default function AppointmentsPage() {
                     </td>
                     <td className="px-5 py-3 border-b border-dim-100">
                       <div className="flex items-center justify-end gap-3">
-                        {a.status === "confirmed" && (
+                        {a.status === "confirmed" && canCheckIn && (
                           <button
                             onClick={() => statusMutation.mutate({ id: a.id, status: "checked_in" })}
                             disabled={statusMutation.isPending}
@@ -616,6 +623,7 @@ export default function AppointmentsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -646,6 +654,7 @@ export default function AppointmentsPage() {
               <p className="text-[13px] font-medium text-dim-600">Ninguém em lista de espera</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
                 <tr>
@@ -720,14 +729,15 @@ export default function AppointmentsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
     </div>
 
     <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Marcação" description="Agende uma nova consulta ou procedimento" size="md">
-      <div className="px-6 py-5 grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Paciente *</label>
           <PatientPicker value={form.patientId} onSelect={(id) => set("patientId", id)} />
         </div>
@@ -766,7 +776,7 @@ export default function AppointmentsPage() {
             className={inputCls}
           />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-2">Horário Disponível *</label>
           {!form.serviceId || !form.staffId || !form.apptDate ? (
             <p className="text-[12px] text-dim-400">Selecione serviço, médico/a e data para ver os horários.</p>
@@ -796,11 +806,11 @@ export default function AppointmentsPage() {
             </div>
           )}
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
           <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Observações opcionais…" className={`${inputCls} resize-none`} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="flex items-center gap-2 text-[13px] font-medium text-dim-800 cursor-pointer">
             <input type="checkbox" checked={form.recurring} onChange={(e) => set("recurring", e.target.checked)} className="w-4 h-4 rounded border-dim-300 text-brand-700 focus:ring-brand-500" />
             Tornar recorrente
@@ -820,7 +830,7 @@ export default function AppointmentsPage() {
               <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">A cada</label>
               <input type="number" min={1} value={form.interval} onChange={(e) => set("interval", e.target.value)} className={inputCls} />
             </div>
-            <div className="col-span-2 flex gap-4 text-[13px] text-dim-700">
+            <div className="sm:col-span-2 flex gap-4 text-[13px] text-dim-700">
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="radio" name="endType" checked={form.endType === "count"} onChange={() => set("endType", "count")} />
                 Nº de sessões
@@ -899,7 +909,7 @@ export default function AppointmentsPage() {
             </div>
             {TRANSITIONS[detail.status] && !completingOpen && (
               <div className="flex gap-2">
-                {TRANSITIONS[detail.status].map(({ status, label, primary }) => (
+                {TRANSITIONS[detail.status].filter((t) => t.status !== "checked_in" || canCheckIn).map(({ status, label, primary }) => (
                   <button
                     key={status}
                     disabled={statusMutation.isPending}
@@ -921,6 +931,14 @@ export default function AppointmentsPage() {
                   </button>
                 ))}
               </div>
+            )}
+            {(detail.status === "checked_in" || detail.status === "in_progress" || detail.status === "completed") && canWriteNotes && (
+              <Link
+                href={`/records/note?appointmentId=${detail.id}&returnTo=/appointments`}
+                className="text-[12px] font-semibold px-3 py-1.5 rounded-[8px] border border-dim-200 text-dim-700 hover:bg-dim-50 transition-colors"
+              >
+                {detail.status === "completed" ? "Ver nota" : "Registar nota"}
+              </Link>
             )}
             {detail.status === "completed" && (
               <button

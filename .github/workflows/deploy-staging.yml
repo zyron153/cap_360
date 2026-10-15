@@ -1,0 +1,104 @@
+name: Deploy Staging
+
+# Push to `staging` (or a manual run from the Actions tab) -> CI -> build + push images to GHCR ->
+# SSH to the VPS and run scripts/vps/deploy.sh (migrate, up -d, restart nginx, health check, auto
+# rollback). Manual commands, rollback and the VPS checklist: Docs/DEPLOYMENT.md.
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+# Queue instead of cancelling: killing the SSH session mid-deploy could leave the stack half-updated.
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/cms
+  # Env-prefixed so a commit built for staging and later for prod never shares a tag (the web
+  # bundle bakes in an env-specific API URL).
+  IMAGE_TAG: staging-${{ github.sha }}
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build & push images
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/api.Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_TAG }}
+          # links the GHCR package to this repo, so GITHUB_TOKEN keeps push access on later runs
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build & push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.STAGING_PUBLIC_APP_URL }}
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-web:${{ env.IMAGE_TAG }}
+          # links the GHCR package to this repo, so GITHUB_TOKEN keeps push access on later runs
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Environment-scoped secrets resolve to empty strings without this.
+    environment: STAGING
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_VM_IP }}
+          username: ${{ secrets.STAGING_VM_USER }}
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd /opt/cap360-staging
+
+            # Check out exactly the commit the images were built from (compose + nginx config come
+            # from this checkout). Detached on purpose, so any branch can be deployed manually.
+            git fetch --prune origin
+            git checkout --detach ${{ github.sha }}
+
+            bash scripts/vps/deploy.sh staging ${{ env.IMAGE_TAG }}
+
+      # From the runner, so it also covers firewall/routing; informational only (the blocking
+      # health check already ran on the VPS).
+      - name: External check (non-blocking)
+        continue-on-error: true
+        run: curl -fsS --max-time 15 "${{ vars.STAGING_PUBLIC_APP_URL }}/health"

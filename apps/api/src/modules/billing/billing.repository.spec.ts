@@ -11,6 +11,7 @@ const tx = {
   invoice: { update: jest.fn() },
   invoiceItem: { update: jest.fn(), findMany: jest.fn() },
   appointment: { update: jest.fn() },
+  eFaturaSubmission: { findFirst: jest.fn(), create: jest.fn() },
 };
 
 const prisma = {
@@ -106,6 +107,100 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
     });
   });
 
+  describe("recordPaymentAtomic — fiscal (e-Fatura) rows are written in the same transaction", () => {
+    const pay = { amount: 500, method: "cash" as never, paidAt: new Date() };
+
+    beforeEach(() => {
+      tx.payment.create.mockResolvedValue({ id: "pay-1" });
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: "500" } });
+      tx.invoice.update.mockResolvedValue({ id: "inv-1", status: "partially_paid", amountPaid: "500", issuedAt: null });
+      tx.eFaturaSubmission.create.mockImplementation(async ({ data }: { data: { purpose: string } }) => ({ id: `new-${data.purpose}`, ...data }));
+    });
+
+    it("writes nothing fiscal when e-Fatura is off", async () => {
+      const r = await repo.recordPaymentAtomic("inv-1", pay, 2000, false);
+      expect(tx.eFaturaSubmission.create).not.toHaveBeenCalled();
+      expect(r.efaturaIds).toEqual([]);
+    });
+
+    it("adds a receipt row for a payment on an invoice that already has its issue document", async () => {
+      tx.eFaturaSubmission.findFirst.mockResolvedValue({ id: "primary-1", status: "accepted" });
+
+      const r = await repo.recordPaymentAtomic("inv-1", pay, 2000, false, { enabled: true, issueNew: true });
+
+      expect(tx.eFaturaSubmission.create).toHaveBeenCalledTimes(1);
+      expect(tx.eFaturaSubmission.create).toHaveBeenCalledWith({
+        data: { invoiceId: "inv-1", purpose: "receipt", paymentId: "pay-1", referencesId: "primary-1" },
+      });
+      expect(r.efaturaIds).toEqual(["new-receipt"]);
+    });
+
+    it("a draft's first payment creates the issue document AND its receipt row", async () => {
+      tx.eFaturaSubmission.findFirst.mockResolvedValue(null);
+
+      const r = await repo.recordPaymentAtomic("inv-1", pay, 2000, true, { enabled: true, issueNew: true });
+
+      expect(tx.eFaturaSubmission.create).toHaveBeenNthCalledWith(1, { data: { invoiceId: "inv-1", purpose: "issue" } });
+      expect(tx.eFaturaSubmission.create).toHaveBeenNthCalledWith(
+        2,
+        { data: { invoiceId: "inv-1", purpose: "receipt", paymentId: "pay-1", referencesId: "new-issue" } }
+      );
+      expect(r.efaturaIds).toEqual(["new-issue", "new-receipt"]);
+    });
+
+    it("does not report a draft that is paid before the go-live date", async () => {
+      tx.eFaturaSubmission.findFirst.mockResolvedValue(null);
+      const r = await repo.recordPaymentAtomic("inv-1", pay, 2000, true, { enabled: true, issueNew: false });
+      expect(tx.eFaturaSubmission.create).not.toHaveBeenCalled();
+      expect(r.efaturaIds).toEqual([]);
+    });
+
+    it("does not report a payment on an invoice that was never reported", async () => {
+      tx.eFaturaSubmission.findFirst.mockResolvedValue(null);
+      await repo.recordPaymentAtomic("inv-1", pay, 2000, false, { enabled: true, issueNew: true });
+      expect(tx.eFaturaSubmission.create).not.toHaveBeenCalled();
+    });
+
+    it("re-queues an issue document that was parked waiting for payment", async () => {
+      tx.eFaturaSubmission.findFirst.mockResolvedValue({ id: "primary-1", status: "pending" });
+      const r = await repo.recordPaymentAtomic("inv-1", pay, 2000, false, { enabled: true, issueNew: true });
+      expect(r.efaturaIds).toEqual(["new-receipt", "primary-1"]);
+    });
+
+    it("a payment that exceeds the total still rolls back before any fiscal row is written", async () => {
+      tx.payment.aggregate.mockResolvedValue({ _sum: { amount: "2500" } });
+      await expect(repo.recordPaymentAtomic("inv-1", pay, 2000, false, { enabled: true, issueNew: true })).rejects.toThrow(BadRequestException);
+      expect(tx.eFaturaSubmission.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cancelAtomic — invoice cancellation + fiscal planning in one transaction", () => {
+    it("runs the planner and the invoice update inside the same transaction, planner first", async () => {
+      const order: string[] = [];
+      tx.invoice.update.mockImplementation(async () => (order.push("update"), { id: "inv-1", status: "cancelled" }));
+
+      const r = await repo.cancelAtomic("inv-1", { status: "cancelled" }, async (t) => {
+        expect(t).toBe(tx);
+        order.push("plan");
+        return ["void-1"];
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(order).toEqual(["plan", "update"]);
+      expect(r).toEqual({ invoice: { id: "inv-1", status: "cancelled" }, efaturaIds: ["void-1"] });
+    });
+
+    it("does not cancel the invoice when the planner refuses (e.g. document being sent)", async () => {
+      tx.invoice.update.mockClear();
+      await expect(
+        repo.cancelAtomic("inv-1", { status: "cancelled" }, async () => {
+          throw new Error("em envio");
+        })
+      ).rejects.toThrow("em envio");
+      expect(tx.invoice.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe("updateItemAtomic — item edit + optional appointment duration in one transaction", () => {
     beforeEach(() => {
       tx.invoiceItem.update.mockResolvedValue({});
@@ -170,5 +265,43 @@ describe("BillingRepository — patient NIF decryption on findById", () => {
     prisma.invoice.findUnique.mockResolvedValue(null);
     const invoice = await repo.findById("inv-x");
     expect(invoice).toBeNull();
+  });
+
+  describe("nextInvoiceNumber — highest issued + 1, never COUNT + 1", () => {
+    const txRaw = { $executeRaw: jest.fn(), $queryRaw: jest.fn() };
+    const sqlOf = (call: unknown[]) => (call[0] as TemplateStringsArray).join("?");
+
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-10-06T12:00:00Z"));
+      prisma.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(txRaw));
+      txRaw.$executeRaw.mockResolvedValue(1);
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      prisma.$transaction.mockImplementation((cb: (t: unknown) => unknown) => cb(tx));
+    });
+
+    it("formats the next number from the highest sequence this year, zero-padded to four digits", async () => {
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 93n }]);
+      expect(await repo.nextInvoiceNumber()).toBe("INV-2026-0093");
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 12345n }]);
+      expect(await repo.nextInvoiceNumber()).toBe("INV-2026-12345"); // padStart never truncates
+    });
+
+    it("reads MAX of the numeric suffix of this year's numbers (a gap can't make it collide); it does not count rows", async () => {
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 1n }]);
+      await repo.nextInvoiceNumber();
+      const call = txRaw.$queryRaw.mock.calls[0];
+      expect(sqlOf(call)).toMatch(/MAX\(/);
+      expect(sqlOf(call)).not.toMatch(/COUNT\(/i);
+      expect(call.slice(1)).toEqual(["^INV-2026-([0-9]+)$", "INV-2026-%"]); // the year's prefix, as bound parameters
+    });
+
+    it("still takes the per-year advisory lock inside the transaction", async () => {
+      txRaw.$queryRaw.mockResolvedValue([{ next_seq: 1n }]);
+      await repo.nextInvoiceNumber();
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(sqlOf(txRaw.$executeRaw.mock.calls[0])).toMatch(/pg_advisory_xact_lock/);
+    });
   });
 });

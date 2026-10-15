@@ -88,6 +88,35 @@ describe("SessionAuthGuard", () => {
       expect(ctx.__request.user).toMatchObject({ roles: ["admin"] });
     });
 
+    describe("with AUTH_BYPASS=true and a login cookie", () => {
+      beforeEach(() => {
+        process.env.AUTH_BYPASS = "true";
+        process.env.NODE_ENV = "development";
+      });
+
+      it("uses the real session's user instead of the seeded admin", async () => {
+        sessions.get.mockResolvedValue({ staffId: "s1", email: "ana@cap.cv", roles: ["receptionist"] });
+        const ctx = makeContext({ cap_session: "good" });
+        await expect(guard().canActivate(ctx)).resolves.toBe(true);
+        expect(ctx.__request.user).toEqual({ sub: "s1", email: "ana@cap.cv", roles: ["receptionist"] });
+      });
+
+      it("falls back to the seeded admin for a stale cookie (session expired / unknown)", async () => {
+        sessions.get.mockResolvedValue(null);
+        const ctx = makeContext({ cap_session: "stale" });
+        await expect(guard().canActivate(ctx)).resolves.toBe(true);
+        expect(ctx.__request.user).toMatchObject({ roles: ["admin"] });
+      });
+
+      it("falls back to the seeded admin when the cookie's account has since been deactivated", async () => {
+        sessions.get.mockResolvedValue({ staffId: "s1", email: "ana@cap.cv", roles: ["receptionist"] });
+        staffRepo.findById.mockResolvedValue(null);
+        const ctx = makeContext({ cap_session: "good" });
+        await expect(guard().canActivate(ctx)).resolves.toBe(true);
+        expect(ctx.__request.user).toMatchObject({ roles: ["admin"] });
+      });
+    });
+
     it("never bypasses in production, even if AUTH_BYPASS=true", async () => {
       process.env.AUTH_BYPASS = "true";
       process.env.NODE_ENV = "production";

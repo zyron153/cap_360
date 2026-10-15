@@ -7,8 +7,10 @@
 > header involved. See the **Authentication** section below.
 > **Content-Type:** `application/json` (all bodies are validated with Zod via a shared `ZodValidationPipe`)
 > **Error format:** `{ "statusCode": 400, "message": "...", "error": "Bad Request" }`
-> **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) skips
-> session verification entirely for local development.
+> **Dev auth bypass:** `AUTH_BYPASS=true` (only honoured when `NODE_ENV !== "production"`) makes
+> requests with **no valid login session** run as the seeded admin, for local development. A valid
+> session cookie always wins over it — so logging in as someone else in dev really is that user;
+> a stale/ended session or a deactivated account falls back to the admin.
 
 This document reflects the routes and body shapes that actually exist in
 `apps/api/src/modules/*/*.controller.ts` and `packages/types/src/*.ts`. Field names are the real
@@ -137,12 +139,16 @@ Response 201: Waitlist entry
 
 ### PATCH `/appointments/:id/status`
 ```
-Body: { "status": "confirmed | checked_in | completed | cancelled | no_show",
+Body: { "status": "confirmed | checked_in | in_progress | completed | cancelled | no_show",
   "cancellationReason": "string (optional)", "durationMinutes": "1-600 (optional)" }
 Response 200: Updated appointment (plus "invoiceWarning": string, only present if the auto-draft
               invoice below failed). Marking "completed" auto-creates a draft invoice for the service.
 Response 400: requested status isn't a valid transition from the appointment's current status
+Response 403: `checked_in` by anyone but reception/admin, or `in_progress` by anyone but a doctor/admin
 ```
+**"Em curso" (2026-10-14).** Reception checks the patient in (`checked_in`); the doctor then starts the consultation
+(`checked_in → in_progress`, stamps `startedAt`) and concludes it (`in_progress → completed`). `in_progress` may only
+be completed or cancelled. `checked_in → completed` is still accepted (reception closing a visit without a doctor).
 `durationMinutes` is the actual time spent, confirmed when marking "completed" — it's written onto
 the appointment and, when the service has a known standard duration, scales the auto-created draft
 invoice's price: `unitPrice = (durationMinutes / service.durationMinutes) * service.price`. Omit it
@@ -288,7 +294,8 @@ Body:
   "items": [ { "serviceId": "uuid, required", "description": "string", "quantity": 1, "unitPrice": number } ],
   "notes": "string (optional)", "dueDate": "YYYY-MM-DD (optional)"
 }
-Response 201: Invoice with computed totals; E-Fatura submission queued automatically
+Response 201: Invoice with computed totals. If e-Fatura is enabled and the invoice is issued after the go-live date,
+its fiscal document row is created in the same insert and queued for DNRE.
 ```
 A catalogued `serviceId` billed at a price other than `services.price` is a price override —
 always logged, and **admin-only** (non-admins get `403`). An item with no `serviceId` (off-
@@ -334,18 +341,39 @@ and edits to a custom (no `serviceId`) line item are unrestricted.
 Response 200: Invoice with status "cancelled"
 Response 400: cannot cancel a fully paid invoice
 ```
-Idempotent on an already-cancelled invoice (returns it unchanged). If the invoice's E-Fatura
-submission had already been `accepted` by the tax authority, also enqueues an E-Fatura cancel job.
+Idempotent on an already-cancelled invoice (returns it unchanged). The invoice and its fiscal documents
+change in one transaction: a document that never reached DNRE is cancelled locally and will never be
+sent; an authorized one is voided with an FDC event (nothing paid) or reversed with a credit note
+(partially paid FTE); a document that is being sent right now answers `409` (retry in a moment).
 
 #### GET `/invoices/:id/efatura`
 ```
-Response 200: EFaturaSubmission record
-Response 404: no submission exists for this invoice
+Response 200: the invoice's own fiscal document (FTE/FRE/TVE) — never includes the signed XML
+Response 404: the invoice is not reported to DNRE
+```
+
+#### GET `/invoices/:id/efatura/documents`
+```
+Response 200: every fiscal document of the invoice, oldest first: issue, receipts (RCE), credit note / cancel event
 ```
 
 #### POST `/invoices/:id/efatura/retry`
 ```
-Response 202: { "queued": true } — resets the submission to "pending" and re-enqueues it
+Response 202: { "queued": boolean, "count": number }
+```
+Re-queues the documents in `error`, `rejected` or `pending`. A rejected document is re-prepared (its
+data may have been fixed) but keeps its number; one that failed technically is re-sent exactly as
+signed, after asking DNRE whether it already holds it. Accepted documents are never touched.
+
+#### `/efatura` — roles: admin (direct integration with DNRE, see `modules/M6a-efatura-direct-integration.md`)
+```
+GET    /efatura/config               — settings + status: hasClientSecret, connected, hasCertificate, ready, missing[] (secrets are never returned)
+PATCH  /efatura/config               — any subset of the non-secret settings (+ write-only oauthClientSecret)
+POST   /efatura/certificate          — { file: base64 .p12/.pfx or PEM text, password } — validated before it is stored
+DELETE /efatura/certificate
+POST   /efatura/oauth/authorize      — { url }: where to send the browser for the taxpayer's consent (Authorization Code + PKCE)
+GET    /efatura/oauth/callback       — DNRE redirects here (the Redirect URI registered in the PE); sends the admin on to /settings
+POST   /efatura/oauth/disconnect
 ```
 
 There is still no standalone `POST /invoices/:id/issue` and no `GET /invoices/:id/pdf` — a receipt
@@ -479,34 +507,49 @@ DELETE /services/:id       roles: admin
 
 ---
 
-## 7. Staff & Invitations (M8)
+## 7. Staff & Admin-set Passwords (M8)
 
 **Controller roles (default):** admin, receptionist, doctor, nurse
 
 ```
 GET    /staff/me                                    — resolves the caller's own staff record from the session
-PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below
+PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below; 400 if newPassword === currentPassword
 GET    /staff                                       — active staff list
-GET    /staff/invitations         roles: admin       — pending invitations
-DELETE /staff/invitations/:id     roles: admin
 GET    /staff/:id
-POST   /staff/invite              roles: admin       body: CreateStaffSchema shape (see below) — sends the invite email, does not create a Staff row yet
+POST   /staff                     roles: admin       body: CreateStaffAccountSchema (see below) — creates the user with the password the admin chose; 201 with the created staff; 409 if the email exists
+PATCH  /staff/:id/password        roles: admin       body: { password } — sets that user's password ("Alterar senha") and ends their open sessions; 200 { sessionsEnded }; 404 if unknown
 PATCH  /staff/:id                 roles: admin
 ```
 
 ```
-Invite body:
+Create body:
 {
-  "fullName": "string (2-150)", "email": "string", "role": "admin | doctor | nurse | receptionist | lab_tech",
+  "fullName": "string (2-150)", "email": "string", "role": "admin | doctor | nurse | receptionist | lab_tech | corporate_hr",
+  "password": "string — 10-72 chars, an uppercase letter and a digit (PasswordSchema)",
   "jobTitle": "string (optional)", "phone": "string (optional)", "specialtyCode": "string (optional)",
+  "companyId": "uuid (optional, corporate_hr only)",
   "availability": [ { "dayOfWeek": 0-6, "startTime": "HH:MM", "endTime": "HH:MM" } ]
 }
 ```
 
-Activation (public, token-based — see §9) hashes the password the invitee chose (argon2id) and
-creates the local `staff` row directly — no external system is involved, so there's nothing to
-leave orphaned on a partial failure. ❌ No MFA/TOTP of any kind exists — that was a Keycloak
-feature (never actually enforced for pre-existing accounts even then) and has no replacement.
+**The admin chooses the password** — when creating a user and later with "Alterar senha" in Gestão de
+Acesso. There is no email invitation (removed: no `/staff/invite`, `/staff/invitations*` or
+`/public/invitations*`), no server-generated password and no forced change on first login (a
+temporary-password / `mustChangePassword` design existed briefly and was removed; the column is
+dropped by migration `20261004000200_drop_staff_must_change_password`). Only the argon2id hash is
+stored; the plaintext exists in the request body and nowhere else. The web form's "Gerar" button
+generates a random password in the browser (`generatePassword` in `apps/web/lib/password-policy.ts`)
+that the admin can copy and pass on.
+
+`PATCH /staff/:id/password` ends every open session of that user (`SessionService.destroyAllForStaff`,
+which scans `session:*` for the user's `staffId` — no per-user index to drift), so whoever still holds
+the old password, or a stolen session, is logged out at once and has to sign in with the new one. When
+an admin changes **their own** password, their current session is spared. The self-service routes
+(`PATCH /staff/me/password`, and the email reset flow under Authentication above) don't end other
+sessions. In dev, the `AUTH_BYPASS` admin fallback applies to an ended session, so a revoked session
+looks like the admin rather than a 401 — the 401 is covered by the integration spec, which runs
+without the bypass. ❌ No MFA/TOTP of any kind exists — that was a Keycloak feature (never actually
+enforced for pre-existing accounts even then) and has no replacement.
 
 There is no `POST /staff/:id/shifts` or `POST /staff/:id/leave` endpoint — `StaffShift` and
 `LeaveRequest` rows exist in the schema and are honoured by the appointments-availability logic,
@@ -550,8 +593,6 @@ GET  /public/services                          — active services for the booki
 GET  /public/staff                             — staff list for the booking widget
 GET  /public/availability      query: serviceId, staffId?, date
 POST /public/bookings          body: PublicBookingSchema (below)
-GET  /public/invitations/:token                — staff invitation preview (fullName, email, role, expired)
-POST /public/invitations/:token/activate       body: { fullName, password } — see §7
 ```
 
 ```
@@ -576,10 +617,10 @@ Response 201: the created Appointment (patient found-or-created by phone; consen
 ### `/settings` — roles: admin, receptionist, doctor, nurse (mutations narrower, see below)
 ```
 GET   /settings                                                 — all settings keyed by name
-PATCH /settings/clinic              roles: admin, receptionist  — business hours, address, etc. (JSON)
+PATCH /settings/clinic              roles: admin, receptionist  — validated; only an admin may change `name` and `nif` (they are the emitter of every fiscal document)
 PATCH /settings/notifications       roles: admin, receptionist  — feature toggles (wa_confirm, wa_cancel, wa_reminder, email_daily, email_overdue)
 PATCH /settings/access-control      roles: admin
-PATCH /settings/integration/:key    roles: admin                — e.g. integration_whatsapp, integration_email_smtp, integration_efatura credentials
+PATCH /settings/integration/:key    roles: admin                — e.g. integration_whatsapp, integration_email_smtp (e-Fatura has its own /efatura API and is rejected here)
 ```
 
 ### `/parametrizacao` — roles: admin, receptionist, doctor, nurse, lab_tech (mutations: admin only)

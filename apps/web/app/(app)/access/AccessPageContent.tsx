@@ -8,9 +8,10 @@ import {
   FlaskConical, Receipt, ClipboardList, UserCog,
   Home, BarChart2, Settings2, SlidersHorizontal,
 } from "lucide-react";
-import type { StaffInvitationEntry } from "@cap/types";
 import { useMessage } from "../../../components/ui/message-handler";
 import { Modal } from "../../../components/ui/modal";
+import { NewPasswordFields } from "../../../components/ui/new-password-fields";
+import { PASSWORD_RULE_SUMMARY, isValidPassword } from "../../../lib/password-policy";
 import { defaultPerms, type PageKey, type PagePerms, type RolePerms, type AccessControl } from "../../../lib/access-control";
 import { StaffForm, toApiBody, toFormValues, type ApiStaff, type ParamOption } from "../../../components/staff/StaffForm";
 
@@ -90,6 +91,60 @@ function ConfirmModal({ title, message, confirmLabel, onConfirm, onClose, pendin
   );
 }
 
+/** "Alterar senha": the admin sets a new password for a user (or for themselves). The user's open
+ * sessions are ended by the API, so they have to sign in again with the new password. */
+function ChangePasswordModal({ staff, onClose, onDone }: { staff: ApiStaff; onClose: () => void; onDone: () => void }) {
+  const { addMessage } = useMessage();
+  const [pw, setPw] = useState({ password: "", confirm: "" });
+  const [errors, setErrors] = useState<{ password?: string; confirm?: string }>({});
+
+  const mutation = useMutation({
+    mutationFn: () => fetch(`/api/staff/${staff.id}/password`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw.password }),
+    }).then(async (r) => {
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(typeof e.message === "string" ? e.message : "Erro ao alterar a palavra-passe"); }
+      return r.json() as Promise<{ sessionsEnded: number }>;
+    }),
+    onSuccess: ({ sessionsEnded }) => {
+      addMessage("Success", `Palavra-passe de ${staff.fullName} alterada.${sessionsEnded > 0 ? " As sessões abertas foram terminadas." : ""}`);
+      onDone();
+    },
+    onError: (e: Error) => addMessage("Error", e.message),
+  });
+
+  function submit(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (!isValidPassword(pw.password)) { setErrors({ password: `A palavra-passe deve ter ${PASSWORD_RULE_SUMMARY}.` }); return; }
+    if (pw.password !== pw.confirm) { setErrors({ confirm: "As palavras-passe não coincidem." }); return; }
+    setErrors({});
+    mutation.mutate();
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Alterar senha" description={`${staff.fullName} · ${staff.email}`} size="lg">
+      <form onSubmit={submit} className="p-5 flex flex-col gap-4">
+        <NewPasswordFields
+          password={pw.password}
+          confirm={pw.confirm}
+          onChange={(next) => { setPw(next); setErrors({}); }}
+          inputCls={inputCls}
+          errors={errors}
+        />
+        <p className="text-[11px] text-dim-500">Se o utilizador tiver sessões abertas, serão terminadas e terá de entrar com a nova palavra-passe.</p>
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
+          <button type="submit" disabled={mutation.isPending} className="px-4 py-2 text-[13px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 disabled:opacity-50 transition-colors">
+            {mutation.isPending ? "A guardar…" : "Guardar palavra-passe"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+
 /* ── Organização — Company entities ──────────────────────────────────────── */
 
 function CompanyFormModal({ company, onClose, onSaved }: { company: Company | null; onClose: () => void; onSaved: () => void }) {
@@ -122,7 +177,7 @@ function CompanyFormModal({ company, onClose, onSaved }: { company: Company | nu
           <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">NIF *</label>
           <input required className={inputCls} value={form.taxId} onChange={(e) => setForm((f) => ({ ...f, taxId: e.target.value }))} />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Email</label>
             <input type="email" className={inputCls} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
@@ -268,6 +323,7 @@ function PermsModal({ role, perms, onSave, onClose }: {
     <Modal open onClose={onClose} title={`Permissões — ${role.valor}`}>
       <div className="flex flex-col" style={{ maxHeight: "70vh" }}>
         <div className="overflow-y-auto flex-1">
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left">
             <thead className="sticky top-0 z-10 bg-dim-50">
               <tr>
@@ -312,6 +368,7 @@ function PermsModal({ role, perms, onSave, onClose }: {
               })}
             </tbody>
           </table>
+          </div>
         </div>
         <div className="px-5 py-3 border-t border-dim-100 flex justify-end gap-2 bg-white">
           <button type="button" onClick={onClose} className="px-4 py-2 text-[13px] font-medium text-dim-600 hover:text-dim-900 transition-colors">Cancelar</button>
@@ -416,7 +473,7 @@ function ProfilesSection() {
   );
 }
 
-/* ── Utilizadores — full lifecycle: invite, edit, deactivate ─────────────── */
+/* ── Utilizadores — full lifecycle: create (admin sets the password), edit, change password, deactivate ── */
 
 function UsersSection() {
   const qc = useQueryClient();
@@ -424,16 +481,12 @@ function UsersSection() {
   const [addOpen, setAddOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<ApiStaff | null>(null);
   const [deactivating, setDeactivating] = useState<ApiStaff | null>(null);
+  const [changingPassword, setChangingPassword] = useState<ApiStaff | null>(null);
 
   const { data: staffList = [], isLoading } = useQuery<ApiStaff[]>({
     queryKey: ["bff-staff"],
     queryFn: () => fetch("/api/bff/staff").then((r) => r.json()),
     staleTime: 60_000,
-  });
-  const { data: invitations = [] } = useQuery<StaffInvitationEntry[]>({
-    queryKey: ["staff-invitations"],
-    queryFn: () => fetch("/api/staff/invitations").then((r) => r.json()),
-    staleTime: 30_000,
   });
   const { data: jobTitleOptions = [] } = useQuery<ParamOption[]>({
     queryKey: ["parametrizacao", "FUNCAO"],
@@ -447,12 +500,14 @@ function UsersSection() {
   });
 
   const createMut = useMutation({
-    mutationFn: (body: object) => fetch("/api/staff/invite", {
+    mutationFn: (body: object) => fetch("/api/staff", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    }).then(async (r) => { if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.message ?? "Erro ao enviar convite"); } }),
+    }).then(async (r) => {
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(typeof e.message === "string" ? e.message : "Erro ao criar utilizador"); }
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["staff-invitations"] });
-      addMessage("Success", "Convite enviado com sucesso! O colaborador vai receber um email para ativar a conta.");
+      qc.invalidateQueries({ queryKey: ["bff-staff"] });
+      addMessage("Success", "Utilizador criado com sucesso! Já pode entrar com a palavra-passe definida.");
       setAddOpen(false);
     },
     onError: (e: Error) => addMessage("Error", e.message),
@@ -467,13 +522,6 @@ function UsersSection() {
       addMessage("Success", "Alterações guardadas com sucesso!");
       setEditingStaff(null);
     },
-    onError: (e: Error) => addMessage("Error", e.message),
-  });
-
-  const cancelInviteMut = useMutation({
-    mutationFn: (id: string) => fetch(`/api/staff/invitations/${id}`, { method: "DELETE" })
-      .then((r) => { if (!r.ok) throw new Error("Erro ao cancelar convite"); }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["staff-invitations"] }); addMessage("Success", "Convite cancelado."); },
     onError: (e: Error) => addMessage("Error", e.message),
   });
 
@@ -492,16 +540,13 @@ function UsersSection() {
     lab_tech:     "bg-amber-50 text-amber-700 ring-amber-200/80",
     corporate_hr: "bg-dim-100 text-dim-600 ring-dim-200/80",
   };
-  const totalRows = staffList.length + invitations.length;
 
   return (
     <div className={CARD}>
       <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
         <div>
           <h3 className="font-display text-[14px] font-semibold text-dim-900">Utilizadores</h3>
-          <p className="text-[11px] text-dim-400 mt-0.5">
-            {staffList.length} colaboradores{invitations.length > 0 ? ` · ${invitations.length} convite(s) pendente(s)` : ""}
-          </p>
+          <p className="text-[11px] text-dim-400 mt-0.5">{staffList.length} colaboradores</p>
         </div>
         <button onClick={() => setAddOpen(true)} className="inline-flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold bg-brand-700 text-white rounded-[10px] hover:bg-brand-800 transition-colors">
           <Plus style={{ width: 14, height: 14 }} /> Adicionar Utilizador
@@ -510,38 +555,14 @@ function UsersSection() {
 
       {isLoading ? (
         <div className="px-5 py-8 text-center text-[13px] text-dim-400">A carregar utilizadores…</div>
-      ) : totalRows === 0 ? (
+      ) : staffList.length === 0 ? (
         <div className="px-5 py-8 text-center text-[13px] text-dim-400">Sem utilizadores registados.</div>
       ) : (
         <div className="divide-y divide-dim-100">
-          {invitations.map((inv) => {
-            const initials = inv.fullName.split(" ").filter(Boolean).slice(0, 2).map((n) => n[0]).join("").toUpperCase();
-            const expired = new Date(inv.expiresAt).getTime() < Date.now();
-            return (
-              <div key={`inv-${inv.id}`} className="px-5 py-3.5 flex items-center justify-between hover:bg-dim-50/60 transition-colors opacity-80">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-dim-100 text-dim-500 font-semibold text-[11px] flex items-center justify-center shrink-0 border border-dashed border-dim-300">{initials}</div>
-                  <div>
-                    <p className="text-[13px] font-medium text-dim-700">{inv.fullName}</p>
-                    <p className="text-[11px] text-dim-400">{inv.email}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${expired ? "bg-red-50 text-red-600 ring-1 ring-red-200/80" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200/80"}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${expired ? "bg-red-400" : "bg-amber-400 animate-pulse"}`} />
-                    {expired ? "Convite Expirado" : "Convite Pendente"}
-                  </span>
-                  <button onClick={() => cancelInviteMut.mutate(inv.id)} disabled={cancelInviteMut.isPending} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-500 rounded-[8px] hover:border-red-300 hover:text-red-600 transition-colors">
-                    Cancelar Convite
-                  </button>
-                </div>
-              </div>
-            );
-          })}
           {staffList.map((s) => {
             const initials = s.fullName.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
             return (
-              <div key={s.id} className="px-5 py-3.5 flex items-center justify-between hover:bg-dim-50/60 transition-colors">
+              <div key={s.id} className="px-5 py-3.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 hover:bg-dim-50/60 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-brand-700 flex items-center justify-center text-[11px] font-semibold text-white shrink-0">{initials}</div>
                   <div>
@@ -549,10 +570,13 @@ function UsersSection() {
                     <p className="text-[11px] text-dim-400">{s.email}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full ring-1 ${roleBadgeCls[s.role] ?? "bg-dim-100 text-dim-500"}`}>
                     {ROLE_LABELS[s.role] ?? s.role}
                   </span>
+                  <button onClick={() => setChangingPassword(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
+                    Alterar senha
+                  </button>
                   <button onClick={() => setEditingStaff(s)} className="text-[11px] font-semibold px-3 py-1.5 border border-dim-200 text-dim-600 rounded-[8px] hover:border-brand-400 hover:text-brand-700 transition-colors">
                     Editar
                   </button>
@@ -566,11 +590,12 @@ function UsersSection() {
         </div>
       )}
 
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar Utilizador" description="Envia um convite por email para ativar a conta" size="lg">
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Adicionar Utilizador" description="Cria a conta com a palavra-passe que definir. Pode alterá-la mais tarde com “Alterar senha”" size="lg">
         <StaffForm
-          onSave={(form) => createMut.mutate(toApiBody(form))}
+          withPassword
+          onSave={(form) => createMut.mutate({ ...toApiBody(form), password: form.password })}
           onCancel={() => setAddOpen(false)}
-          submitLabel="Enviar Convite"
+          submitLabel="Criar Utilizador"
           saving={createMut.isPending}
           jobTitleOptions={jobTitleOptions}
           specialtyOptions={specialtyOptions}
@@ -590,6 +615,10 @@ function UsersSection() {
           />
         )}
       </Modal>
+
+      {changingPassword && (
+        <ChangePasswordModal staff={changingPassword} onClose={() => setChangingPassword(null)} onDone={() => setChangingPassword(null)} />
+      )}
 
       {deactivating && (
         <ConfirmModal
@@ -612,7 +641,7 @@ export default function AccessPageContent() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-[22px] font-bold text-dim-900 flex items-center gap-2">
             <Users className="text-brand-600" style={{ width: 22, height: 22 }} />
@@ -620,7 +649,7 @@ export default function AccessPageContent() {
           </h1>
           <p className="text-[13px] text-dim-500 mt-0.5">Organizações, perfis de permissões e utilizadores</p>
         </div>
-        <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1">
+        <div className="flex items-center gap-1 bg-dim-100 rounded-[10px] p-1 max-w-full overflow-x-auto">
           <TabButton active={tab === "organica"} onClick={() => setTab("organica")} icon={Building2}>Organização</TabButton>
           <TabButton active={tab === "perfis"} onClick={() => setTab("perfis")} icon={ShieldCheck}>Perfis</TabButton>
           <TabButton active={tab === "utilizadores"} onClick={() => setTab("utilizadores")} icon={Users}>Utilizadores</TabButton>

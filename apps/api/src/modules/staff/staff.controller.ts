@@ -2,7 +2,8 @@ import { Controller, Get, Post, Patch, Delete, Body, Param, ParseUUIDPipe, Query
 import { StaffService } from "./staff.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
-import { UpdateStaffSchema, UpdateStaffDto, InviteStaffSchema, InviteStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
+import { SESSION_COOKIE_NAME } from "../auth/session.service";
+import { CreateStaffAccountSchema, CreateStaffAccountDto, SetStaffPasswordSchema, SetStaffPasswordDto, UpdateStaffSchema, UpdateStaffDto, ChangePasswordSchema, ChangePasswordDto, CreateLeaveRequestSchema, CreateLeaveRequestDto, LeaveRequestDecisionSchema, LeaveRequestDecisionDto, UpsertStaffShiftSchema, UpsertStaffShiftDto } from "@cap/types";
 
 @Controller("staff")
 @Roles("admin", "receptionist", "doctor", "nurse")
@@ -30,18 +31,6 @@ export class StaffController {
   @Get()
   findAll() {
     return this.service.findAll();
-  }
-
-  @Get("invitations")
-  @Roles("admin")
-  listInvitations() {
-    return this.service.listInvitations();
-  }
-
-  @Delete("invitations/:id")
-  @Roles("admin")
-  cancelInvitation(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.cancelInvitation(id);
   }
 
   // ─── Leave Requests ────────────────────────────────────────────────────────
@@ -139,13 +128,24 @@ export class StaffController {
     return this.service.findById(id);
   }
 
-  @Post("invite")
+  // Creates the user with the password the admin chose — no email is sent.
+  @Post()
   @Roles("admin")
-  invite(
-    @Body(new ZodValidationPipe(InviteStaffSchema)) dto: InviteStaffDto,
-    @Req() req: { user: { email?: string } },
+  create(@Body(new ZodValidationPipe(CreateStaffAccountSchema)) dto: CreateStaffAccountDto) {
+    return this.service.create(dto);
+  }
+
+  // "Alterar senha" in Gestão de Acesso: an admin sets another user's password (or their own) and the
+  // user's open sessions end. Declared after `me/password` so "me" never reaches the :id route.
+  @Patch(":id/password")
+  @Roles("admin")
+  @HttpCode(HttpStatus.OK)
+  setPassword(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Req() req: { user: { sub: string }; cookies?: Record<string, string> },
+    @Body(new ZodValidationPipe(SetStaffPasswordSchema)) dto: SetStaffPasswordDto,
   ) {
-    return this.service.invite(dto, req.user.email);
+    return this.service.setPassword(id, dto, req.user.sub, req.cookies?.[SESSION_COOKIE_NAME]);
   }
 
   @Patch(":id")

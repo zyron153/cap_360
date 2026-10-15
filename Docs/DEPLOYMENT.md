@@ -1,14 +1,13 @@
 # CAP 360 — Deployment Guide
 
-> **Version:** 1.1 · **Date:** updated 2026-08-30 against the current implementation
+> **Version:** 1.3 · **Date:** updated 2026-10-03 (VPS live, domain + TLS, `prod` branch, backups); the rest against the implementation of 2026-08-30
 > Covers: local development, staging, and production environments.
 
 > **Implementation status:** local development (docker-compose + `pnpm dev`) is real, with several
 > concrete detail differences noted inline below. **Kubernetes/Helm, Vault, and the automated
 > backup/rollback procedures in §6, §7, §9, §10 are entirely aspirational** — there is no `infra/k8s/`
-> directory in this repo, no Helm chart, and no Vault integration. The real CI/CD pipeline (§5) is
-> much smaller than described, and — a genuine bug found while writing this — **its test job
-> currently references the wrong package name**, likely breaking it. There is no
+> directory in this repo, no Helm chart, and no Vault integration. The real CI/CD pipeline and single-VPS deploy are
+> described in §0 and §5 (rewritten 2026-10-03). There is no
 > `apps/whatsapp-hub` and no `apps/mobile`; the monorepo has exactly two apps, `api` and `web`.
 > **2026-08-31: Keycloak has been removed** — no more `keycloak` service, no `infra/keycloak/`,
 > auth is now self-hosted (argon2id + Redis sessions, see `SECURITY.md` §2). All references to it
@@ -16,57 +15,267 @@
 
 ---
 
-## 0. Production runbook — single VPS (Docker Compose)
+## 0. Deploy runbook — one VPS, two stacks (Docker Compose + GHCR)
 
-> **Status 2026-09-26:** structure and configs are prepared; **no VPS and no domain exist yet**.
-> Nothing below has been run against a real server. The Kubernetes material further down is
-> superseded by this for the first launch.
+> **Status 2026-10-03:** pipeline, scripts and configs are written; `scripts/vps/deploy.sh` was
+> rehearsed locally against Docker Desktop (migrate → up → health check → forced-failure rollback,
+> see §0.8). **The VPS now exists** (Hostinger KVM 2, Ubuntu 24.04, `179.198.220.184`; hardened, Docker +
+> certbot installed, `deploy` user and `/opt/cap360-*` created — see [VPS_CONFIG.md](VPS_CONFIG.md)) and the
+> domain `cap360.tech` points at it with a Let's Encrypt cert already issued (§0.7). Still never run: the GitHub Actions
+> workflows and the first deploy to the box. The Kubernetes material further down is superseded by this
+> for the first launch.
 
-**Pieces (all in the repo):** `infra/docker/{api,web}.Dockerfile`, `docker-compose.prod.yml`,
-`infra/nginx/{nginx.conf,conf.d/app.conf,tls.conf.example}`, `.env.prod.example`, and the
-`deploy-production` job in `.github/workflows/ci.yml` (push to `master` → build/push images to GHCR
-→ SSH deploy → `/v1/health` smoke test; the `production` GitHub environment is the manual gate).
+Staging and production share **one VPS** and are fully separate stacks: own directory, own compose
+project name (hence own volumes and containers), own `.env.prod`, own image-tag prefix.
 
-**Stack:** postgres, redis, `migrate` (one-shot), `api`, `web`, `nginx`, plus `seed` (profile
-`tools`). `migrate` runs `prisma db push` **without** `--accept-data-loss` (a destructive schema
-change aborts the deploy) and applies `prisma/manual-sql/audit-log-immutable.sql` (the append-only
-trigger) on every deploy — the SQL is idempotent.
+| | Staging | Production |
+|---|---|---|
+| Directory on the VPS | `/opt/cap360-staging` | `/opt/cap360-prod` |
+| Compose project (`-p`) | `cap360-staging` | `cap360-prod` |
+| nginx host ports | **8080** / 8443 (`HTTP_PORT` / `HTTPS_PORT` in its `.env.prod`) | 80 / 443 (defaults) |
+| Image tags | `ghcr.io/<owner>/cms-{api,web}:staging-<commit sha>` | `…:prod-<commit sha>` |
+| Trigger | push to `staging`, or manual | push to **`prod`**, or manual on `prod` (reviewer approval every run) |
+| GitHub environment | `STAGING` | `PRODUCTION` (required reviewers) |
 
-### When the VPS exists
-1. Install Docker + Compose plugin; create a deploy user; clone the repo to `$DEPLOY_PATH`.
-2. `cp .env.prod.example .env.prod` and fill it in (generate `POSTGRES_PASSWORD` and
-   `FIELD_ENCRYPTION_KEY`; **back the encryption key up off-server** — losing it makes patient NIF/DOB
-   and clinical notes unrecoverable). Until a domain exists use `http://<vps-ip>` for `WEB_URL` and
-   `ALLOWED_ORIGINS`.
-3. GitHub → repo secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`, `DEPLOY_PATH`; repo variable
-   `PUBLIC_APP_URL` (used as the web build's `NEXT_PUBLIC_API_URL` and the smoke-test URL);
-   environment `production` with required reviewers.
-4. Make the GHCR packages readable from the server (`docker login ghcr.io` with a read-only PAT).
-5. First deploy: push to `master`, or on the server
-   `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d`, then create the first admin:
-   `docker compose --env-file .env.prod -f docker-compose.prod.yml --profile tools run --rm seed`.
-   Afterwards remove `ADMIN_PASSWORD` from `.env.prod`.
+The compose file is the same `docker-compose.prod.yml` for both. Every command passes `-p
+cap360-<env>` explicitly — the default project name is the directory name, and a mismatch with what
+the stack was created with means **new, empty volumes** (an empty database) plus duplicate
+containers. Containers are never published except nginx; service health is read from Docker.
 
-### When the domain exists (enable HTTPS)
-1. Point DNS at the VPS; obtain certs (e.g. certbot) into `infra/nginx/certs/` as `fullchain.pem` +
-   `privkey.pem`.
-2. `cp infra/nginx/tls.conf.example infra/nginx/conf.d/tls.conf`, replace `YOUR_DOMAIN`, and turn
-   `conf.d/app.conf`'s server body into `return 301 https://$host$request_uri;`.
-3. Update `.env.prod` (`WEB_URL`, `ALLOWED_ORIGINS` → `https://<domain>`) and the `PUBLIC_APP_URL`
-   variable, redeploy (the web image bakes the URL at build time, so it must be rebuilt).
+### 0.1 Branch flow and workflows
 
-### Known gaps
-- **Backups:** none configured. Needs a nightly `pg_dump` (off-server) and a restore drill before real
-  patient data goes in.
+| Event | Workflow | What runs |
+|---|---|---|
+| Pull request to `master` / `staging` / `develop` | `ci.yml` | Lint & Typecheck · Unit Tests (incl. migration drift check) · Dependency audit · Docker build check |
+| Push to `master` / `develop` | `ci.yml` | same, minus the Docker check |
+| Push to `staging` **or** "Run workflow" | `deploy-staging.yml` | `ci` (calls `ci.yml`) → build + push images → SSH deploy |
+| Push to `prod` **or** "Run workflow" on `prod` | `deploy-production.yml` | `guard` (prod only) → `ci` → build + push → **approval** → SSH deploy with DB backup |
+
+Deploys are gated on CI: `ci.yml` is also a reusable workflow (`workflow_call`) that both deploy
+workflows run first, so a red CI blocks the deploy and a deploy only ever ships a commit that
+passed. A push to `staging` is not in `ci.yml`'s own `push` list because `deploy-staging.yml`
+already runs it. Production ships the **`prod`** branch: release with `git push origin master:prod` (fast-forward from a green
+`master`) or "Run workflow" on `prod`. The `guard` job refuses any other ref, the `PRODUCTION` environment only
+allows deployments from `prod`, and its required reviewer approves every run. `prod` is not in `ci.yml`'s own
+`push` list because `deploy-production.yml` already runs it.
+
+**Branch protection → required status checks:** `Lint & Typecheck`, `Unit Tests`, `Dependency
+audit`, `Docker build check`.
+
+Concurrency: both deploy workflows queue (`cancel-in-progress: false`) — a deploy is never
+cancelled mid-rebuild or mid-SSH.
+
+### 0.2 GitHub setup
+
+| Where | Name | Notes |
+|---|---|---|
+| Environment `STAGING` (secrets) | `STAGING_VM_IP`, `STAGING_VM_USER`, `STAGING_SSH_PRIVATE_KEY` | Jobs must declare `environment:` or these resolve to empty strings |
+| Environment `PRODUCTION` (secrets) | `PRODUCTION_VM_IP`, `PRODUCTION_VM_USER`, `PRODUCTION_SSH_PRIVATE_KEY` | + **Required reviewers** = the manual approval gate (created 2026-10-03: reviewer `zyron153`, self-review allowed, branch policy `master` only). Required reviewers on environments need a **public** repo or a paid plan — making this repo private on GitHub Free silently drops the gate |
+| Repo variable | `STAGING_PUBLIC_APP_URL` | e.g. `http://<vps-ip>:8080` — baked into the staging **web image** at build time and used for the non-blocking external check |
+| Repo variable | `PUBLIC_APP_URL` | e.g. `http://<vps-ip>` (later `https://<domain>`) — same, for production |
+
+No registry secrets: the build pushes to GHCR with the run's `GITHUB_TOKEN`. Changing a URL
+variable needs a **rebuild** (re-run the deploy), not just a restart.
+
+### 0.3 What a deploy does (`scripts/vps/deploy.sh <staging|prod> <image-tag>`)
+
+The workflow SSHes in, checks out the exact commit the images were built from (detached, so any
+branch can be deployed by hand) and runs the script from that checkout:
+
+1. `docker compose pull api web` (skip with `SKIP_PULL=1`).
+2. `up -d --wait postgres redis`.
+3. **Prod only (`BACKUP=1`)**: `pg_dump | gzip` into `backups/cap360-prod-<utc>.sql.gz` (mode 700
+   dir, last 7 kept). A failed or corrupt dump aborts the deploy before anything changes.
+4. `run --rm migrate` — `prisma migrate deploy` + the idempotent audit-log trigger SQL. **Before** the
+   services are recreated, so new code never queries columns that don't exist yet, and a failing
+   migration leaves the running stack untouched. Never `db push`, never `--accept-data-loss`.
+5. `up -d --remove-orphans`, then **`restart nginx`** — nginx resolves `upstream` hostnames once at
+   startup, so without this the recreated api/web have new IPs and every `/v1/*` and `/socket.io/`
+   request is a 502.
+6. Poll up to 180 s (`HEALTH_TIMEOUT`) until every container with a healthcheck is `healthy` **and**
+   `curl http://127.0.0.1:<HTTP_PORT>/health` (nginx → API `/v1/health`) returns 200. This runs on the
+   VPS, so it doesn't depend on the runner's route to the box.
+7. Success → write the tag to `.deployed-tag`, keep the 3 newest images per service for this
+   environment (the other environment's tag prefix is never touched).
+   **Failure** (health timeout, or `up -d` itself failing because `web` depends on a healthy `api`) →
+   print `compose ps` plus the log tail of every unhealthy container and of nginx, roll back to the
+   tag in `.deployed-tag` (`up -d --no-deps api web` + nginx restart + re-check), and **exit 1
+   either way** so the run is red. A first deploy has nothing to roll back to.
+
+After the script, the workflow does one non-blocking `curl` of `<URL>/health` from the runner.
+
+### 0.4 VPS prerequisites checklist
+
+You can't verify these from CI; run them on the VPS (as root/sudo unless noted).
+
+```bash
+# 1. Docker + Compose plugin
+docker --version && docker compose version          # Compose v2.20+; `curl` must exist too
+
+# 2. Deploy user, in the docker group, with the CI public key
+adduser --disabled-password --gecos "" deploy && usermod -aG docker deploy
+install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+echo "<public key matching STAGING_SSH_PRIVATE_KEY>" >> /home/deploy/.ssh/authorized_keys
+# (add the PRODUCTION key too when it exists; chown deploy: + chmod 600 authorized_keys)
+
+# 3. Deploy directories
+install -d -o deploy -g deploy /opt/cap360-staging /opt/cap360-prod
+
+# 4. Read-only deploy key so `git fetch` works non-interactively (as deploy)
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/cap360_deploy
+cat ~/.ssh/cap360_deploy.pub     # GitHub → repo → Settings → Deploy keys → add, "Allow write access" OFF
+printf 'Host github.com\n  IdentityFile ~/.ssh/cap360_deploy\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+ssh -T git@github.com            # accept the host key once
+git clone git@github.com:zyron153/cap_360.git /opt/cap360-staging
+git clone git@github.com:zyron153/cap_360.git /opt/cap360-prod       # when prod is created
+
+# 5. GHCR read access (as deploy; classic PAT with only read:packages)
+echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
+
+# 6. Firewall: 22 plus the published nginx ports
+ufw allow 22/tcp && ufw allow 80,443/tcp && ufw allow 8080,8443/tcp
+
+# 7. Before the FIRST run: confirm nothing from this repo already exists under another name
+docker compose ls && docker volume ls    # expect nothing named cap360-*; if a stack exists, STOP —
+                                         # its project name must be cap360-<env> or you get empty volumes
+```
+
+Per environment, once:
+
+```bash
+cd /opt/cap360-staging                    # or /opt/cap360-prod
+cp .env.prod.example .env.prod && chmod 600 .env.prod && $EDITOR .env.prod
+#  - GHCR_OWNER, POSTGRES_PASSWORD, FIELD_ENCRYPTION_KEY (fresh per env; back the key up OFF the server —
+#    losing it makes patient NIF/DOB and clinical notes unrecoverable), ADMIN_EMAIL/ADMIN_PASSWORD
+#  - staging only: HTTP_PORT=8080, HTTPS_PORT=8443, and WEB_URL / ALLOWED_ORIGINS = http://<vps-ip>:8080
+#  - NODE_ENV is fixed to `production` by the compose file (staging passes the same env validation)
+```
+
+Then trigger the first deploy (push to `staging` / "Run workflow") and create the first admin:
+
+```bash
+cd /opt/cap360-staging
+export IMAGE_TAG=$(cat .deployed-tag)
+docker compose -p cap360-staging --env-file .env.prod -f docker-compose.prod.yml --profile tools run --rm seed
+# afterwards remove ADMIN_PASSWORD from .env.prod
+```
+
+**Reference data (Parametrizações) is not seeded in staging/prod** — the seed only creates the admin, so every
+Parametrizações group starts empty. Staging got a one-off copy from the dev DB on 2026-10-06: the 46 live
+`parametrizacoes` rows (9 groups) plus the 7 active `services` rows, in one transaction that aborts if either table
+is non-empty (a re-run refuses; there is no sync). **`TIPO_SERVICO.codigo` is a `services.id`**, so that group can't be
+copied without the `services` rows — the copy would leave dangling links (null `codigo` is the supported "sem
+preço definido" state). Name the columns in `COPY` (`services` has a different physical column order on dev and
+staging). The dev prices are now on staging. Prod has no such data yet — decide it with the clinic before go-live.
+
+`.env.prod` is never written by the deploy and never in git. **Changing it needs a recreate, not a
+restart** (`restart` keeps the env from container creation time and silently ignores the edit):
+`docker compose … up -d --force-recreate api` (or `web`).
+
+### 0.5 Manual deploy, rollback, day-to-day
+
+A shell helper makes the commands short (staging shown; use `prod` / `/opt/cap360-prod` for prod):
+
+```bash
+cd /opt/cap360-staging
+dc() { docker compose -p cap360-staging --env-file .env.prod -f docker-compose.prod.yml "$@"; }
+export IMAGE_TAG=$(cat .deployed-tag)   # the tag that is currently deployed
+
+dc ps                                   # status + health
+dc logs -f --tail 100 api               # also: web, nginx, postgres, migrate
+curl -i http://127.0.0.1:8080/health    # through nginx, same probe the deploy uses
+```
+
+**Manual deploy** (no GitHub run; the images for that commit must already exist in GHCR, i.e. a CI
+run built them):
+
+```bash
+git fetch --prune origin && git checkout --detach <commit-sha>
+bash scripts/vps/deploy.sh staging staging-<commit-sha>        # prod: BACKUP=1 bash … prod prod-<sha>
+```
+
+**Manual rollback** — images only, no rebuild. List what is still on the box (3 per service are kept):
+
+```bash
+docker image ls 'ghcr.io/*/cms-api' --format '{{.Tag}}\t{{.CreatedAt}}'
+export IMAGE_TAG=staging-<previous-sha>
+dc up -d --no-deps api web && dc restart nginx && echo "$IMAGE_TAG" > .deployed-tag
+curl -fsS http://127.0.0.1:8080/health
+```
+
+`--no-deps` is deliberate: it skips the `migrate` service, whose older image may not know the newer
+migrations. To redeploy an older commit through the pipeline instead, "Run workflow" on that branch
+(staging) — production only deploys the tip of `prod`.
+
+**Prod database restore** (from a pre-deploy dump): stop the api first (`dc stop api web`), then
+`gunzip -c backups/<file>.sql.gz | dc exec -T postgres psql -U cap -d cap` into an **empty** database
+(recreate it, or restore into a scratch project first — practice this before it's needed).
+
+### 0.6 Known limits
+
+- **DB schema changes are NOT rolled back.** A rollback restores the previous images against the
+  newer schema, so every production migration must be backward compatible with the previous release
+  (add columns/tables first, remove them a release later). Prod's pre-deploy dump is the escape hatch.
+- A rollback also leaves the *new* `docker-compose.prod.yml` / nginx config in place (only images
+  change). Config-breaking changes need a manual fix.
+- Backups are local to the VPS: the last 7 pre-deploy dumps (prod only) plus the nightly
+  `scripts/vps/backup.sh <staging|prod>` (cron, newest 14 kept, gzip-verified, failure leaves no file; restore
+  drilled on staging 2026-10-03). **There is still no off-server copy** — needed before real patient data goes
+  in (see Known gaps and VPS_CONFIG.md Phase 8).
+- SSH host keys aren't pinned in the workflows (`appleboy/ssh-action` accepts any host key). Pin with
+  its `fingerprint:` input once the VPS exists if that matters.
+- No `COMPOSE_PARALLEL_LIMIT` / build retry: nothing is built on the VPS (the Prisma engine download
+  happens in the GitHub runner's `docker build`; re-run the workflow if it flakes).
+- CI runs Node 22 (pnpm 11 in `package.json` needs ≥ 22.13) while the Docker images run Node 20.
+- **The `Dependency audit` gate drifts with the advisory feed**, and it blocks deploys (they gate on `ci`): on
+  2026-10-03 the first staging run passed at 32 high and the next one, an hour later, failed at 33. Fixed by
+  pinning `multer: ">=2.3.0"` in **both** `pnpm-workspace.yaml` (`overrides:`, read by pnpm 11) and `package.json`
+  (`pnpm.overrides`, read by pnpm 9 — the Dockerfiles install with pnpm 9 and fail `--frozen-lockfile` with
+  `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH` if the two disagree or one is missing; the first attempt put it in the
+  workspace file only and broke the image build). `@nestjs/platform-express` 10 pins
+  2.0.2; highs 33 → 27, 643 API tests pass). Multer's upload path (`FileInterceptor` in the patients and
+  financeiro controllers) has no automated test — smoke-test an upload after the next deploy. `AUDIT_BASELINE_HIGH`
+  stays at 32 to leave headroom; when a deploy goes red on it, check which advisory is new before raising it.
+  Again on 2026-10-06: a new **critical** (`proxy-addr` 2.0.7, IP spoofing via IPv4-mapped IPv6 trust subnets, pulled in by
+  `express`) failed the gate (critical 1/0) and skipped build + deploy. Fixed the same way — `proxy-addr: ">=2.0.8"` in
+  both override blocks, critical 1 → 0, high 29. Check a lockfile change under pnpm 9 in a scratch copy of the manifests
+  (`npx pnpm@9 install --frozen-lockfile --lockfile-only`), never in the repo: pnpm 9 offers to wipe `node_modules`.
+
+### 0.7 Domain and HTTPS — `cap360.tech` (prod)
+Domain `cap360.tech` was claimed on 2026-10-03; **prod = `https://cap360.tech`**, staging stays on
+`http://<vps-ip>:8080` (it can get `staging.cap360.tech` + a `:8443` cert later). The A record is set and the cert was issued on
+2026-10-03 (expires 2027-01-01, certbot renews it). The exact order of work, with the certbot
+renewal hooks, is in [VPS_CONFIG.md](VPS_CONFIG.md) Phase 9. In short:
+1. DNS `A @ → <vps-ip>`; issue the cert with `certbot certonly --standalone -d cap360.tech` (certbot is
+   already installed on the VPS) while nothing listens on :80, and copy `fullchain.pem` + `privkey.pem`
+   into `/opt/cap360-prod/infra/nginx/certs/` (a certbot deploy hook does this on every renewal).
+2. `sed 's/YOUR_DOMAIN/cap360.tech/g' infra/nginx/tls.conf.example > infra/nginx/conf.d/tls.conf`. **Do not
+   edit `conf.d/app.conf`**: `tls.conf` carries the :80 → :443 redirect for the domain, while `app.conf`'s
+   default server must keep answering `127.0.0.1/health` with 200 for `deploy.sh` (a blanket 301 there fails
+   every deploy's health check) — and the tracked file stays unmodified so `git checkout` on deploy is clean.
+3. `.env.prod`: `WEB_URL` / `ALLOWED_ORIGINS` = `https://cap360.tech`; repo variable `PUBLIC_APP_URL` =
+   `https://cap360.tech`, set **before** the first prod build (the web image bakes the URL in, so changing
+   it later means a rebuild).
+
+### 0.8 Verification status and known gaps
+- **Rehearsed locally (Docker Desktop, 2026-10-03):** `deploy.sh` end to end against a throwaway
+  `cap360-staging` project with the **real API image** (locally built) and a stub web container (the
+  real web image also builds; it just wasn't part of the run) — (1) success path: baseline `migrate
+  deploy` + audit trigger, `up -d`, nginx restart, health poll, `/health` 200 through nginx, tag
+  recorded; (2) a release whose API never becomes healthy: `up -d` itself fails on the dependency, the
+  script rolls back to the previous tag, the stack is healthy again, `.deployed-tag` is unchanged and
+  the exit code is 1. **Never executed:** the GitHub Actions workflows themselves, the GHCR
+  push/pull (`SKIP_PULL=1` locally), the SSH step, the `PRODUCTION` approval gate, the `BACKUP=1`
+  path, `prune`, and anything on a real VPS. `actionlint`, `shellcheck`, `bash -n` and `docker
+  compose config` are clean; typecheck, lint and unit tests pass.
+- **Backups:** only the prod pre-deploy dump above. Needs a nightly `pg_dump` (off-server) and a
+  restore drill before real patient data goes in.
 - **WhatsApp:** Meta needs a public HTTPS webhook URL — blocked on the domain.
 - **MFA:** not implemented for any role (launching without it was an explicit decision).
-- Verified locally: both images build; the API image loads all modules and `assertProdEnv` runs;
-  compose syntax (`config -q`) and nginx syntax (`nginx -t`) pass. **Never executed:** the compose
-  stack end-to-end, the `migrate`/`seed` services, and the CI deploy job.
 - **Lesson (image hygiene):** dev `.env` files exist in `apps/api`, `apps/web` and `packages/database`,
   not just the root — `.dockerignore` must use `**/.env`. A first build leaked them into both images
-  (never pushed). After any Dockerfile/.dockerignore change, scan the image:
-  `docker run --rm --entrypoint sh <img> -c 'find /app -name ".env*" -not -path "*/node_modules/*"'`.
+  (never pushed). The `Docker build check` job now fails a PR whose image contains `.env*` files; to
+  check by hand: `docker run --rm --entrypoint sh <img> -c 'find /app -name ".env*" -not -path "*/node_modules/*"'`.
 
 ---
 
@@ -106,7 +315,9 @@ Code/
 │                            (no k8s/ directory — ❌ no manifests exist;
 │                             no keycloak/ either — removed 2026-08-31)
 ├── .github/
-│   └── workflows/        # ci.yml only — no separate security.yml
+│   └── workflows/        # ci.yml, deploy-staging.yml, deploy-production.yml (§5)
+├── scripts/vps/          # deploy.sh — runs on the VPS: migrate, up, health check, rollback (§0.3)
+├── docker-compose.prod.yml  # staging + prod stack (§0)
 └── docker-compose.yml    # postgres + redis, dev only
 ```
 
@@ -190,62 +401,68 @@ straight before removal, for what it's worth.
 
 ## 4. Database Migrations
 
-🟡 **This project's actual day-to-day workflow does not use `prisma migrate`.** Schema changes
-during this repo's history have been applied with `prisma db push --skip-generate
---accept-data-loss` directly against the dev database — there are only **two** real migration
-files, both from the initial June commits (`20260615101124_init`,
-`20260618000001_add_company_public_holidays`); every schema change since (encryption columns,
-recurring appointments, Financeiro, composite indexes, and more) exists in `schema.prisma` and the
-live dev database but was **never captured as a migration file**. This means the migration
-directory does not reflect the current schema, and `prisma migrate deploy` would not produce a
-database matching `schema.prisma` today.
+✅ **Since 2026-10-03 committed migrations are the source of truth.** The old history (2 files from
+June, which predated most of `schema.prisma`) was replaced by a single baseline,
+`packages/database/prisma/migrations/20261003000000_baseline`, generated from the schema
+(`prisma migrate diff --from-empty --to-schema-datamodel`) and verified against a scratch Postgres:
+`migrate deploy` applies cleanly and `migrate diff` against `schema.prisma` reports no drift. No
+database existed anywhere that depended on the old files. (`.gitignore` used to ignore
+`prisma/migrations/`; that rule was removed.)
 
 ```bash
-# What's actually used, day to day:
+# Day to day: edit schema.prisma, then
 cd packages/database
-pnpm exec prisma db push --skip-generate --accept-data-loss
-pnpm db:generate   # regenerate the Prisma client after schema.prisma changes
+pnpm db:migrate --name add_something      # prisma migrate dev: creates + applies + regenerates the client
+git add prisma/migrations                  # commit the new folder with the schema change
 
-# The migrate:* scripts exist in package.json but are not the working pattern:
-pnpm db:migrate         # prisma migrate dev — unused since June
-pnpm db:migrate:prod    # prisma migrate deploy — this is what CI actually calls (see §5's bug)
-pnpm db:reset           # prisma migrate reset --force — DESTROYS the local DB, needs explicit permission
-pnpm db:studio          # Prisma Studio
+pnpm db:migrate:prod                       # prisma migrate deploy — what CI, staging and prod run
+pnpm db:reset                              # prisma migrate reset --force — DESTROYS the local DB, needs explicit permission
+pnpm db:push                               # throwaway local experiments only (passes --accept-data-loss!)
 ```
+
+- **CI** (`Unit Tests` job) runs `migrate deploy` on an empty Postgres, then `prisma migrate diff
+  --from-url … --to-schema-datamodel schema.prisma --exit-code`: a `schema.prisma` change with no
+  migration fails the build (this is what left the old migrations stale).
+- **Staging/prod** run `prisma migrate deploy` in the compose `migrate` service, followed by
+  `manual-sql/audit-log-immutable.sql` (the append-only trigger, which Prisma can't represent; it is
+  idempotent and re-applied on every deploy). `db execute` needs an explicit `--schema`. **Never
+  `db push` on staging/prod, never `--accept-data-loss`.**
+- **Backward compatibility:** a rollback restores the previous images but not the schema (§0.6), so
+  each migration must work with the previous release's code.
+- **Existing local DB created with the old `db push` flow:** one-time `pnpm db:reset` (then
+  `pnpm db:seed`; re-apply the audit trigger SQL if you rely on it locally). Mixing `db:push` with
+  `db:migrate` afterwards will ask for a reset again.
 
 ---
 
 ## 5. CI/CD Pipeline (GitHub Actions)
 
-The real pipeline (`.github/workflows/ci.yml`) is 4 jobs on push/PR to `main`/`develop` — no
-`staging` branch:
+Three workflows (details, secrets and commands in §0):
 
 ```
-quality          → pnpm install, turbo run typecheck, turbo run lint
-test             → real postgres:16 + redis:7 service containers, then:
-                    pnpm --filter @cms/database run db:generate     ⚠️ SEE BUG BELOW
-                    pnpm --filter @cms/database run db:migrate:prod ⚠️ SEE BUG BELOW
-                    pnpm turbo run test
-build            → docker build + push api.Dockerfile / web.Dockerfile to GHCR
-                    (only on push to main; needs quality+test to pass first)
-deploy-staging   → 🎭 STUB — just `echo`s a kubectl command, doesn't run one; then a real
-                    curl smoke-test against a staging URL that likely doesn't exist
-deploy-production→ 🎭 STUB — same: echoes kubectl, doesn't execute it
+ci.yml                 PR to master/staging/develop, push to master/develop, and workflow_call
+  quality              Lint & Typecheck  — pnpm install, turbo typecheck + lint
+  audit                Dependency audit  — pnpm audit --prod; critical must stay 0, high must not
+                       exceed AUDIT_BASELINE_HIGH (32 on 2026-10-03; lower it as advisories are fixed)
+  test                 Unit Tests        — postgres:16 + redis:7 services, migrate deploy, migration
+                       drift check against schema.prisma, then turbo test
+  docker-check         Docker build check — PRs only: builds api + web (no push), fails if the image
+                       contains .env files
+
+deploy-staging.yml     push to staging + workflow_dispatch
+  ci -> build (push cms-api/cms-web:staging-<sha> to GHCR) -> deploy (environment STAGING, SSH,
+  scripts/vps/deploy.sh staging)
+
+deploy-production.yml  push to prod + workflow_dispatch, `prod` only
+  guard -> ci -> build (…:prod-<sha>) -> deploy (environment PRODUCTION = manual approval, SSH,
+  BACKUP=1 scripts/vps/deploy.sh prod)
 ```
 
-> ⚠️ **Real bug found while writing this doc:** the `test` job's `db:generate` and
-> `db:migrate:prod` steps target package `@cms/database` — but the package was renamed to
-> `@cap/database` during the rebrand (`packages/database/package.json`). `pnpm --filter
-> @cms/database ...` won't resolve to anything, so **CI likely fails or silently no-ops these two
-> steps** on every run. Combined with §4's finding (the two checked-in migrations don't match the
-> current schema even if `db:migrate:prod` did run), the `test` job's database is probably not in
-> the state the tests assume. The workflow also still says `maissaude`/`cms` throughout
-> (`POSTGRES_DB: maissaude_test`, `IMAGE_PREFIX: .../cms`) — cosmetic vs. the rebrand, but
-> consistent with this file not having been touched since before it.
-
-There is no branch called `staging`, no automatic staging deploy, no manual-approval gate, and no
-automatic rollback — `deploy-staging`/`deploy-production` are placeholders that print a command
-rather than run one.
+Both deploy workflows gate on `ci`, queue instead of cancelling, record nothing on the runner, and
+end with a non-blocking external `/health` check. Images are tagged `<env>-<commit sha>` (never a
+floating tag): the web bundle bakes in an env-specific `NEXT_PUBLIC_API_URL`, so a commit built for
+staging and later for prod must not share a tag. Automatic rollback is implemented in
+`scripts/vps/deploy.sh` (§0.3); manual rollback in §0.5.
 
 ---
 
@@ -353,9 +570,11 @@ spec:
 
 ## 7. Backup Strategy
 
-❌ **Not implemented.** No backup CronJob, no S3 bucket, no restoration-test job was found
-anywhere in this repo. Treat this section as a plan, not a running process — production data today
-has no documented backup path.
+🟡 **Local only.** `scripts/vps/deploy.sh` with `BACKUP=1` (production deploys) takes a local `pg_dump`
+before migrating and keeps the last 7 (§0.3), and `scripts/vps/backup.sh <staging|prod>` (nightly cron,
+newest 14 kept) does the same on a schedule; a restore into a scratch DB was drilled on staging. There is
+still no off-server copy (no S3/B2 bucket) and no scheduled restoration-test job, so treat the S3 commands
+below as a plan, not a running process.
 
 ### 7.1 PostgreSQL
 
@@ -398,27 +617,20 @@ Terminus's standard shape, not the custom one below:
 }
 ```
 
-❌ No Kubernetes probes poll it (§6) — nothing in this repo currently calls it on a schedule
-besides the CI smoke-test `curl` steps (§5).
+❌ No Kubernetes probes poll it (§6) and nothing calls it on a schedule. It is used by the Compose
+healthchecks (`/v1/health`, on `127.0.0.1`) and by `scripts/vps/deploy.sh`, which requires 200 from
+nginx's `/health` (proxied to it) after every deploy (§0.3).
 
 ---
 
 ## 9. Rollback Procedure
 
-❌ **Aspirational** — there's no live K8s deployment to roll back (§6). A real rollback today would
-mean reverting the git commit and re-running the (currently broken, §5) CI pipeline.
+✅ **Real now (single-VPS Compose, not Kubernetes):** a failed health check after a deploy rolls back
+automatically to the previous image tag, and `docker compose` rollback by hand is two commands. See
+§0.3 (automatic) and §0.5 (manual). Limits: images only — **the DB schema is not rolled back**
+(§0.6), so migrations must be backward compatible; prod has a pre-deploy `pg_dump` (§0.3, §0.5).
 
-```bash
-# Rollback API to previous image
-kubectl rollout undo deployment/api -n maissaude-prod
-
-# Rollback DB migration (if needed — use with caution)
-cd packages/database
-pnpm prisma migrate resolve --rolled-back <migration_name>
-
-# Verify rollback
-kubectl rollout status deployment/api -n maissaude-prod
-```
+The `kubectl` / Helm material in §6 is aspirational; there is no cluster to roll back.
 
 ---
 
@@ -441,4 +653,26 @@ Never commit `.env.production` to the repository. Use `1Password` or `Vault` for
 
 ---
 
-*CAP 360 · Deployment Guide v1.2 · updated 2026-08-31 — Keycloak removed, self-hosted auth*
+*CAP 360 · Deployment Guide v1.3 · updated 2026-10-03 — VPS, cap360.tech + TLS, prod branch, nightly backups*
+
+## e-Fatura (DNRE) — go-live checklist
+
+1. In the Plataforma Eletrónica: adesão, certificates, *Proprietário de Software* (software code,
+   transmitter, **OAuth Redirect URI**), LED, emitter (see `EFATURA_INTEGRATION.docx`).
+2. The Redirect URI must be the public https URL that reaches the API's callback through the web
+   proxy: `https://<web-host>/api/efatura/oauth/callback`. The same string goes into
+   *Configurações → Integrações → E-Fatura CV → Redirect URI*.
+3. Redis must be available (OAuth state, access-token cache, queue) and `FIELD_ENCRYPTION_KEY` set.
+4. Configure in the UI as admin, upload the certificate, press *Autorizar ligação*, start in
+   **Homologação** (repository 2). To smoke-test in Principal without legal effect, switch on
+   *Marcar documentos como amostra* (DNRE deletes specimens after 24 h).
+5. The first invoice number of a (year, LED, type) is 1. If the LED was already used this year by
+   another tool, seed `efatura_counters.lastNumber` with its last number before enabling.
+6. Optional overrides (tests/staging only): `EFATURA_BASE_URL`, `EFATURA_IAM_URL`.
+
+### Techplace transport (instead of the above)
+
+Set `EFATURA_PROVIDER=techplace` in the API env (default `dnre`); optional `TECHPLACE_BASE_URL`
+(default `https://api.techplace.cv`). Steps 1–2 and the certificate/OAuth parts of 4–5 do not apply:
+configure the Techplace card in the UI instead. Not yet run against Techplace — read
+[`modules/M6b-efatura-techplace.md`](modules/M6b-efatura-techplace.md) (assumptions, open questions) before enabling.

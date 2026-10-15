@@ -3,8 +3,10 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Stethoscope, AlertCircle } from "lucide-react";
+import { PasswordInput } from "../../../components/ui/password-input";
+import { PasswordChecklist } from "../../../components/ui/password-checklist";
+import { PASSWORD_MAX_LENGTH, PASSWORD_RULE_SUMMARY, isValidPassword, passwordPolicyItems } from "../../../lib/password-policy";
 
-const PASSWORD_RE = /^(?=.*[A-Z])(?=.*\d).{10,}$/;
 const inputCls = "w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-[13px] text-slate-900 placeholder:text-slate-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all";
 
 function ResetPasswordCard() {
@@ -17,11 +19,14 @@ function ResetPasswordCard() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const rules = passwordPolicyItems(password);
+  const confirmRule = [{ label: "As duas palavras-passe coincidem", met: confirm.length > 0 && confirm === password }];
+
   async function submit(ev: React.FormEvent) {
     ev.preventDefault();
     setError(null);
     if (!token) { setError("Link de recuperação inválido — falta o token."); return; }
-    if (!PASSWORD_RE.test(password)) { setError("A palavra-passe deve ter pelo menos 10 caracteres, uma maiúscula e um número."); return; }
+    if (!isValidPassword(password)) { setError(`A palavra-passe deve ter ${PASSWORD_RULE_SUMMARY}.`); return; }
     if (password !== confirm) { setError("As palavras-passe não coincidem."); return; }
 
     setSubmitting(true);
@@ -64,19 +69,20 @@ function ResetPasswordCard() {
 
             <form onSubmit={submit} className="space-y-3.5">
               {error && (
-                <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
+                <div role="alert" className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
                   <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                   <p className="text-xs text-red-700">{error}</p>
                 </div>
               )}
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Nova Palavra-passe</label>
-                <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••••" autoComplete="new-password" />
-                <p className="text-[10px] text-slate-400 mt-1">Mínimo 10 caracteres, com maiúscula e número.</p>
+                <PasswordInput className={inputCls} toggleLabel="nova palavra-passe" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••••" autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} />
+                <PasswordChecklist items={rules} className="mt-2.5" />
               </div>
               <div>
                 <label className="block text-[12px] font-semibold text-slate-700 mb-1.5">Confirmar Palavra-passe</label>
-                <input type="password" className={inputCls} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••••" autoComplete="new-password" />
+                <PasswordInput className={inputCls} toggleLabel="confirmação da palavra-passe" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••••" autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} />
+                <PasswordChecklist items={confirmRule} className="mt-2.5" />
               </div>
 
               <button

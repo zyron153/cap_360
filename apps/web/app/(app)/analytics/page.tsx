@@ -126,7 +126,7 @@ export default function AnalyticsPage() {
   if (analyticsLoading || !analytics) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {Array.from({ length: 4 }).map((_, i) => <div key={i} className={`${CARD} h-28 animate-pulse`} />)}
         </div>
         <div className={`${CARD} h-56 animate-pulse`} />
@@ -175,7 +175,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { icon: Calendar,   label: "Consultas",         display: analytics.totalAppointments.toString(),         sub: "no período selecionado", bg: "bg-brand-50",   cls: "text-brand-600"   },
           { icon: Users,      label: "Pacientes Activos", display: analytics.activePatients.toString(),            sub: "últimos 12 meses",       bg: "bg-violet-50",  cls: "text-violet-600"  },
@@ -244,10 +244,10 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Revenue + Plan distribution */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* Revenue line chart */}
-        <div className={`${CARD} col-span-2`}>
+        <div className={`${CARD} lg:col-span-2`}>
           <div className="px-5 py-4 border-b border-dim-100 flex items-center justify-between">
             <div>
               <h2 className="font-display text-[14px] font-semibold text-dim-900">Receita Mensal</h2>
@@ -341,7 +341,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Top services + Peak hours */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
         {/* Top services */}
         <div className={CARD}>

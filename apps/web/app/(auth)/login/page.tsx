@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { Stethoscope, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { PasswordInput } from "../../../components/ui/password-input";
 
 const inputCls = "w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-[13px] text-slate-900 placeholder:text-slate-400 bg-white focus:outline-none focus:border-brand-500 focus:shadow-[0_0_0_3px_rgba(19,163,163,.12)] transition-all";
 
@@ -10,7 +11,6 @@ function LoginCard() {
   const params = useSearchParams();
   const router = useRouter();
   const next = params.get("next") ?? "/dashboard";
-  const activated = params.get("activated") === "1";
   const reset = params.get("reset") === "1";
 
   const [email, setEmail] = useState("");
@@ -66,12 +66,6 @@ function LoginCard() {
                 <p className="text-xs text-red-700">{error}</p>
               </div>
             )}
-            {activated && !error && (
-              <div className="flex items-start gap-2 text-left bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                <p className="text-xs text-emerald-700">Conta ativada com sucesso! Inicie sessão para continuar.</p>
-              </div>
-            )}
             {reset && !error && (
               <div className="flex items-start gap-2 text-left bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
@@ -99,8 +93,7 @@ function LoginCard() {
                     Esqueceu-se?
                   </a>
                 </div>
-                <input
-                  type="password"
+                <PasswordInput
                   className={inputCls}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

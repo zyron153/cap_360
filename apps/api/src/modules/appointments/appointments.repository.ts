@@ -81,7 +81,7 @@ export class AppointmentsRepository {
       where: {
         staffId,
         scheduledAt: { gte: dayStart, lte: dayEnd },
-        status: { in: ["pending", "confirmed", "checked_in"] },
+        status: { in: ["pending", "confirmed", "checked_in", "in_progress"] },
         deletedAt: null,
       },
       select: { scheduledAt: true, durationMinutes: true },
@@ -97,7 +97,7 @@ export class AppointmentsRepository {
       where: {
         roomId,
         scheduledAt: { gte: dayStart, lte: dayEnd },
-        status: { in: ["pending", "confirmed", "checked_in"] },
+        status: { in: ["pending", "confirmed", "checked_in", "in_progress"] },
         deletedAt: null,
       },
       select: { scheduledAt: true, durationMinutes: true },

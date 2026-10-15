@@ -9,6 +9,8 @@ describe("SessionService", () => {
     del: jest.fn(),
     expire: jest.fn(),
     incr: jest.fn(),
+    mget: jest.fn(),
+    scanStream: jest.fn(),
   };
   let service: SessionService;
 
@@ -53,6 +55,48 @@ describe("SessionService", () => {
     it("deletes the session key on destroy", async () => {
       await service.destroy("abc123");
       expect(redis.del).toHaveBeenCalledWith("session:abc123");
+    });
+  });
+
+  describe("destroyAllForStaff", () => {
+    const session = (staffId: string) => JSON.stringify({ staffId, email: `${staffId}@cap.cv`, roles: ["doctor"] });
+    const scanning = (...pages: string[][]) => ({
+      async *[Symbol.asyncIterator]() {
+        for (const page of pages) yield page;
+      },
+    });
+
+    it("deletes only that staff member's sessions, across scan pages", async () => {
+      redis.scanStream.mockReturnValue(scanning(["session:a", "session:b"], ["session:c"]));
+      redis.mget
+        .mockResolvedValueOnce([session("s1"), session("s2")])
+        .mockResolvedValueOnce([session("s1")]);
+
+      const ended = await service.destroyAllForStaff("s1");
+
+      expect(ended).toBe(2);
+      expect(redis.del).toHaveBeenCalledWith("session:a");
+      expect(redis.del).toHaveBeenCalledWith("session:c");
+      expect(redis.del).not.toHaveBeenCalledWith("session:b");
+    });
+
+    it("spares the session named in exceptId (an admin changing their own password stays logged in)", async () => {
+      redis.scanStream.mockReturnValue(scanning(["session:keep", "session:other"]));
+      redis.mget.mockResolvedValueOnce([session("s1"), session("s1")]);
+
+      const ended = await service.destroyAllForStaff("s1", "keep");
+
+      expect(ended).toBe(1);
+      expect(redis.del).toHaveBeenCalledWith("session:other");
+      expect(redis.del).not.toHaveBeenCalledWith("session:keep");
+    });
+
+    it("ignores expired and unreadable entries, and deletes nothing when none match", async () => {
+      redis.scanStream.mockReturnValue(scanning(["session:gone", "session:junk"]));
+      redis.mget.mockResolvedValueOnce([null, "not json"]);
+
+      await expect(service.destroyAllForStaff("s1")).resolves.toBe(0);
+      expect(redis.del).not.toHaveBeenCalled();
     });
   });
 

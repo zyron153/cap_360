@@ -20,10 +20,19 @@ Next.js App Router routes for the `apps/web` application.
 
 | Path | File | Description |
 |---|---|---|
-| `/login` | `(auth)/login/page.tsx` | Real email + password form — posts to `/api/auth/login` |
-| `/activate` | `(auth)/activate/page.tsx` | Staff invitation acceptance (token from `POST /staff/invite`'s email) — not in the original doc at all |
+| `/login` | `(auth)/login/page.tsx` | Real email + password form (show/hide button on the password field) — posts to `/api/auth/login` |
 | `/forgot-password` | `(auth)/forgot-password/page.tsx` | Not in the original doc — added 2026-08-31 with the Keycloak removal |
-| `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email |
+| `/reset-password` | `(auth)/reset-password/page.tsx` | Same — token-based, linked from the forgot-password email; every password field has a show/hide button and the new-password rules (10+ characters, uppercase, digit, confirmation matches) are listed up front and tick off live. The same pieces back Settings → Alterar Palavra-passe and, in Gestão de Acesso, the Add User form and "Alterar senha" modal (`components/ui/new-password-fields.tsx`: password + confirm + "Gerar"/"Copiar"). Shared: `components/ui/password-input.tsx`, `components/ui/password-checklist.tsx`, `lib/password-policy.ts` (mirrors the API's policy — the API stays the source of truth) |
+
+> There is no `/change-password` or `/activate` page: users are created with a password the admin sets
+> (no email invitation) and aren't forced to change it on first login.
+
+### Error pages
+
+| Scope | File | Behaviour |
+|---|---|---|
+| Whole app | `app/not-found.tsx` | 404 card ("Página não encontrada") with an **Ir para o login** button → `/login`. Full-screen (`fixed inset-0`), so it also hides the `(app)` sidebar/topbar |
+| `(app)` pages | `(app)/error.tsx` | Re-exports the same 404 card as the error boundary. A stale/invalid session passes the middleware's cookie-presence check, the API answers 401 and pages then crash on the error object (e.g. the dashboard's `todayAppts.filter`) — the user gets the 404 + login button instead of the raw crash. Side effect: any runtime error in an `(app)` page shows this card — a **403** does the same (a doctor's dashboard asked for `/api/health-plans` and `.filter` threw, so doctors saw "404" right after login; fixed 2026-10-06, and nothing in the server logs shows it). The proper fix is for query functions to throw on `!res.ok` (`lib/get-json.ts`, used by the dashboard and the patient `PlanModal`; other pages still use bare `fetch().then(r => r.json())`) and to send 401s to `/login` |
 
 ❌ No `/login/callback` page, and no `apps/web/app/api/auth/*` Route Handlers at all anymore — the
 old OAuth/PKCE exchange with Keycloak is gone. `/api/auth/*` now reaches the API's own real

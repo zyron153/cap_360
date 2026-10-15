@@ -76,7 +76,13 @@ CREATE INDEX ON staff(role);
 CREATE INDEX ON staff("deletedAt");
 ```
 
-### 1.3 `staff_invitations`
+### 1.3 `staff_invitations` — legacy, unused
+
+> The email-invitation flow was replaced by admin-created users, whose password the admin sets
+> (`POST /staff`, "Alterar senha" — API-SPEC.md §7). Nothing reads or writes this table any more; it
+> stays in `schema.prisma` (marked legacy) only so existing rows aren't dropped. Safe to remove with
+> its own migration. (`staff."mustChangePassword"` existed briefly for a forced-change flow and was
+> dropped by `20261004000200_drop_staff_must_change_password`.)
 
 ```sql
 CREATE TABLE staff_invitations (
@@ -98,11 +104,6 @@ CREATE TABLE staff_invitations (
 CREATE INDEX ON staff_invitations(email);
 CREATE INDEX ON staff_invitations(token);
 ```
-
-Activation (`StaffService.activateInvitation`) hashes the invitee's own chosen password
-(argon2id) and creates the local `staff` row directly — no external identity provider is involved,
-so there's nothing that can be left orphaned on a partial failure (that used to be a real concern
-when this created a Keycloak user first; removed along with Keycloak).
 
 No auth session data lives in Postgres at all: sessions, login-lockout counters, and
 password-reset tokens are all Redis-only (`SessionService`) — see `SECURITY.md` §2.1.
@@ -157,12 +158,14 @@ CREATE TABLE appointments (
   "scheduledAt"        TIMESTAMPTZ NOT NULL,
   "durationMinutes"    INT NOT NULL DEFAULT 30,
   status               VARCHAR(20) NOT NULL DEFAULT 'pending',
-  -- pending | confirmed | checked_in | completed | cancelled | no_show
+  -- pending | confirmed | checked_in | in_progress | completed | cancelled | no_show  (startedAt: when the doctor started)
   source               VARCHAR(20) NOT NULL DEFAULT 'web',  -- web | whatsapp | phone | walk_in
   notes                VARCHAR(500),
   "cancellationReason" VARCHAR(300),
   "checkedInAt"        TIMESTAMPTZ,
   "completedAt"        TIMESTAMPTZ,
+  "checkedInByStaffId" VARCHAR(36),           -- who checked the patient in (no FK; NULL = unknown: system action, or a row from before this existed)
+  "completedByStaffId" VARCHAR(36),           -- who completed it (same). Evidence for the clinical-note "treating today" read rule (M7 §3.1)
   "idempotencyKey"     VARCHAR(100) UNIQUE,   -- retried create() replays the original instead of duplicating
   "seriesId"           UUID REFERENCES appointment_series(id),
   "seriesIndex"        INT,                    -- 1-based position within the series, display only
@@ -449,7 +452,7 @@ a result, there is nowhere in the current schema for that file reference to live
 ```sql
 CREATE TABLE invoices (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, xact-advisory-lock-guarded sequence
+  "invoiceNumber" VARCHAR(20) NOT NULL UNIQUE,  -- INV-2026-0001, xact-advisory-lock-guarded; next = MAX(this year's suffix) + 1 (it was COUNT + 1, which collided on the first gap)
   "patientId"     UUID NOT NULL REFERENCES patients(id),
   "appointmentId" UUID UNIQUE REFERENCES appointments(id),  -- one invoice per appointment; NULLs
                                                              -- (manual invoices) are unrestricted
@@ -530,31 +533,64 @@ CREATE INDEX ON payments("invoiceId");
 
 No `card` payment method, no `received_by` staff reference — never implemented.
 
-### 6.4 `efatura_submissions`
+### 6.4 `efatura_submissions` and `efatura_counters`
+
+One row per fiscal document (or event) sent to the Cabo Verde e-Fatura platform (DNRE). An invoice
+has one `issue` document (FTE, FRE or TVE — decided when it is prepared), one `receipt` (RCE) per
+payment while it is an FTE, and — if it is later voided — a `cancel` event (FDC) or a `credit_note`
+(NCE). See `modules/M6a-efatura-direct-integration.md`.
 
 ```sql
+CREATE TYPE "EFaturaPurpose" AS ENUM ('issue', 'receipt', 'credit_note', 'cancel');
+-- EFaturaStatus: pending | submitting | accepted | rejected | cancelled | error | not_required
+
 CREATE TABLE efatura_submissions (
-  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "invoiceId"    UUID NOT NULL UNIQUE REFERENCES invoices(id) ON DELETE CASCADE,
-  status         VARCHAR(20) NOT NULL DEFAULT 'pending',
-  -- pending | submitting | accepted | rejected | cancelled | error
-  atcud          VARCHAR(100),
-  "efaturaRef"   VARCHAR(100),
-  "errorCode"    VARCHAR(50),
-  "errorMessage" VARCHAR(500),
-  "retryCount"   INT NOT NULL DEFAULT 0,
-  "submittedAt"  TIMESTAMPTZ,
-  "acceptedAt"   TIMESTAMPTZ,
-  "createdAt"    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  "updatedAt"    TIMESTAMPTZ NOT NULL
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "invoiceId"        UUID NOT NULL REFERENCES invoices(id) ON DELETE RESTRICT,
+  purpose            "EFaturaPurpose" NOT NULL DEFAULT 'issue',
+  "paymentId"        UUID UNIQUE REFERENCES payments(id) ON DELETE RESTRICT,   -- receipts only
+  "referencesId"     UUID REFERENCES efatura_submissions(id),                   -- receipt/NCE/FDC -> the issue document
+  status             "EFaturaStatus" NOT NULL DEFAULT 'pending',
+  "documentTypeCode" INT,            -- 1 FTE, 2 FRE, 3 TVE, 4 RCE, 5 NCE; NULL for events / until prepared
+  year               INT,
+  "ledCode"          INT,
+  serie              VARCHAR(20),
+  "documentNumber"   INT,            -- gap-free per (year, LED, type)
+  "repositoryCode"   INT,            -- 1 Principal, 2 Homologação, 3 Teste
+  iud                VARCHAR(45) UNIQUE,   -- 45-char document id (24-char id for events)
+  "issuedAt"         TIMESTAMPTZ,    -- issue date/time stamped in the document
+  "signedXml"        TEXT,           -- final signed XML, AES-256-GCM encrypted (contains patient name/NIF)
+  reason             VARCHAR(500),
+  "errorCode"        VARCHAR(50),
+  "errorMessage"     VARCHAR(500),
+  "retryCount"       INT NOT NULL DEFAULT 0,
+  "submittedAt"      TIMESTAMPTZ,
+  "acceptedAt"       TIMESTAMPTZ,    -- authorization time returned by the platform
+  "createdAt"        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "updatedAt"        TIMESTAMPTZ NOT NULL,
+  UNIQUE (year, "ledCode", "documentTypeCode", "documentNumber")
 );
 
+CREATE INDEX ON efatura_submissions("invoiceId");
 CREATE INDEX ON efatura_submissions(status);
+
+CREATE TABLE efatura_counters (
+  year INT NOT NULL, "ledCode" INT NOT NULL, "documentTypeCode" INT NOT NULL,
+  "lastNumber" INT NOT NULL DEFAULT 0,
+  PRIMARY KEY (year, "ledCode", "documentTypeCode")
+);
 ```
 
-Submission to the Cabo Verde tax authority (SAF-T CV / mw.efatura.cv) runs via a BullMQ queue with
-retry; `patient.nif` is decrypted just before building the payload. Not present in the original
-design doc at all — added when E-Fatura was actually built.
+The identity of a document (number, IUD, issue time, signed XML) is assigned once, inside the
+transaction that bumps `efatura_counters`, and never changes — a retry re-sends exactly what was
+signed. `ON DELETE RESTRICT`: fiscal evidence cannot disappear with an invoice. The old `atcud` /
+`efaturaRef` columns were dropped (ATCUD is a Portuguese concept; the Cabo Verde identifier is the
+IUD). `invoice_items` also gained `taxTypeCode`, `taxPercentage`, `taxExemptionReasonCode`: the tax
+treatment frozen when the document is prepared, so a credit note can mirror it.
+
+Integration settings live in the `settings` table: `integration_efatura` (non-secret) and
+`integration_efatura_secrets` (AES-GCM encrypted: client secret, refresh token, certificate and its
+password). Neither is returned by `GET /settings`.
 
 ### 6.5 `expenses` and `income`
 
@@ -672,15 +708,30 @@ Not in the original design at all. Honored by `getAvailability`/`create()` the s
 
 ---
 
-## 8. Clinical Records Module (M7) — not implemented
+## 8. Clinical Records Module (M7) — built
 
-**No `clinical_notes`, `prescriptions`, or `referrals` table exists.** `Docs/TODO.md` previously
-claimed these were "already in schema" — they are not (verified directly against
-`schema.prisma`). The only patient-notes storage is the generic `patient_notes` table (§3.2), which
-has none of SOAP structure, ICD-10 codes, a 24-hour edit lock, or role-gated visibility. Given the
-client is now a psychology clinic, this module's real shape (session notes, treatment plans)
-likely needs a fresh spec pass rather than resuming the original SOAP/ICD-10/prescription design
-written for a general medical clinic.
+`clinical_notes`, `prescriptions`, `prescription_items` and `referrals` exist (the field lists live in
+`schema.prisma`; behaviour is in `modules/M7-clinical-records-emr.md`). This replaces an earlier version of
+this section that said none of them existed. What matters at the database level:
+
+- **Encrypted columns** (AES-256-GCM, `@db.Text`): `clinical_notes.presentingConcerns/observations/assessment/plan/
+  riskNotes`, `prescriptions.notes`, `prescription_items.drugName/dosage/frequency/instructions`.
+  `referrals.reason` is plaintext (documented decision).
+- **Drafts:** `clinical_notes.finalizedAt` NULL = autosaved draft; the 24h edit lock counts from it.
+  A draft can be **deleted** (`DELETE /clinical-notes/:id`); a finalized note never is.
+- **One note per appointment per clinician:** `UNIQUE (appointmentId, authorStaffId)` — NULL `appointmentId`s
+  (ad-hoc notes) never conflict. Deleting a draft frees the slot.
+- **Foreign keys to a note are `ON DELETE RESTRICT`** (`prescriptions.clinicalNoteId`,
+  `referrals.clinicalNoteId`; migration `20261006000000_clinical_records_hardening`). They were the Prisma
+  default for optional relations, `SET NULL`, which silently detached a prescription/referral from a note that
+  was deleted. `clinical_notes.appointmentId` stays `SET NULL` (appointments are soft-deleted, never removed).
+  The patient/author/prescriber/referrer foreign keys are `RESTRICT` as before.
+- **Indexes** (all serve a bounded, newest-first page): `clinical_notes (patientId, createdAt)` and
+  `(authorStaffId, createdAt)` (replacing the single-column ones), `prescriptions (patientId, issuedAt)`,
+  `referrals (patientId, createdAt)`, plus `clinicalNoteId` on both `prescriptions` and `referrals` (the
+  RESTRICT check and the "has linked records" check look rows up by it; it had no index).
+- **Appointments** carry `checkedInByStaffId` / `completedByStaffId` (no FK) — the evidence for the "treating
+  today" read rule.
 
 ---
 
@@ -736,19 +787,27 @@ CREATE TABLE audit_log (
   "resourceId" VARCHAR(36),
   "ipAddress"  VARCHAR(45),
   "userAgent"  VARCHAR(300),
-  metadata     JSONB,                    -- includes { diff: { before, after } } for Patients + Financeiro mutations
+  metadata     JSONB,                    -- { url, diff?: { before, after } }. diff is set for Patients + Financeiro + clinical-note
+                                         -- mutations, and (after = { basis: "patient in treatment today", … }) marks a cross-author
+                                         -- clinical-note read — the admin's GET /clinical-notes/access-log filters on that path
   "createdAt"  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX ON audit_log("actorId");
 CREATE INDEX ON audit_log(resource, "resourceId");
 CREATE INDEX ON audit_log("createdAt");
+-- Partial, outside schema.prisma (Prisma can't express it and `migrate diff` ignores it): serves the admin's
+-- cross-author clinical-note read report. Migration 20261006000100_audit_log_cross_author_read_index.
+CREATE INDEX audit_log_cross_author_read_idx ON audit_log ("createdAt" DESC, id DESC)
+  WHERE (metadata #> '{diff,after,basis}'::text[]) = '"patient in treatment today"'::jsonb;
 ```
 
 Shape differs from the original design (`table_name`/`record_id`/`old_values`/`new_values`
 generic-diff columns) — the actual implementation logs at the HTTP-request level (one row per
 mutating request, or per `@AuditView()`-marked GET) with an optional before/after `diff` in
-`metadata`, not a per-column DB-trigger-style change record.
+`metadata`, not a per-column DB-trigger-style change record. `resource`/`resourceId` come from the URL *path*
+only (a query string used to leak into them — and, past the column width, silently voided the row); the full
+URL stays in `metadata.url`, and both are truncated to their column widths as a backstop.
 
 **Genuinely append-only at the database level**, not just by convention: a
 `BEFORE UPDATE OR DELETE` trigger rejects any attempt to modify or remove a row, enforced even
@@ -805,7 +864,10 @@ admin-configurable dropdown option lists.
 | payments | invoiceId; idempotencyKey (unique) |
 | efatura_submissions | status |
 | leave_requests | staffId |
-| audit_log | actorId, (resource, resourceId), createdAt |
+| clinical_notes | (appointmentId, authorStaffId) unique, (patientId, createdAt), (authorStaffId, createdAt) |
+| prescriptions | (patientId, issuedAt), clinicalNoteId |
+| referrals | (patientId, createdAt), clinicalNoteId |
+| audit_log | actorId, (resource, resourceId), createdAt; partial `audit_log_cross_author_read_idx` on (createdAt DESC, id DESC) WHERE the "patient in treatment today" mark is set (not in `schema.prisma`) |
 
 ---
 

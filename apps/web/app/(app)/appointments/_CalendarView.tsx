@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -54,12 +55,30 @@ export default function CalendarView({
   durationEditable?: boolean;
   selectable?: boolean;
 }) {
+  // Seven day columns don't fit a phone: show one day at a time below 768px (and follow the screen if it
+  // is rotated or resized across that line). The month view stays available from the toolbar.
+  const ref = useRef<FullCalendar>(null);
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setNarrow(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  useEffect(() => {
+    const api = ref.current?.getApi();
+    if (api && narrow && api.view.type === "timeGridWeek") api.changeView("timeGridDay");
+  }, [narrow]);
+
   return (
-    <div className="p-5 [&_.fc]:font-sans [&_.fc]:text-[13px] [&_.fc-button]:!bg-brand-600 [&_.fc-button]:!border-brand-600 [&_.fc-button]:!text-white [&_.fc-button:hover]:!bg-brand-700 [&_.fc-button-active]:!bg-brand-700 [&_.fc-today-button]:!bg-dim-100 [&_.fc-today-button]:!border-dim-200 [&_.fc-today-button]:!text-dim-700 [&_.fc-today-button:hover]:!bg-dim-200 [&_.fc-daygrid-day.fc-day-today]:!bg-brand-50 [&_.fc-timegrid-col.fc-day-today]:!bg-brand-50/40 [&_.fc-col-header-cell-cushion]:!text-dim-700 [&_.fc-col-header-cell-cushion]:!font-semibold [&_.fc-daygrid-day-number]:!text-dim-600 [&_.fc-event]:!rounded-lg [&_.fc-event]:!text-xs [&_.fc-toolbar-title]:!text-dim-900 [&_.fc-toolbar-title]:!font-bold [&_.fc-toolbar-title]:!text-[17px] [&_.fc-toolbar-title]:!font-display">
+    <div className="p-3 sm:p-5 [&_.fc]:font-sans [&_.fc]:text-[13px] [&_.fc-button]:!bg-brand-600 [&_.fc-button]:!border-brand-600 [&_.fc-button]:!text-white [&_.fc-button:hover]:!bg-brand-700 [&_.fc-button-active]:!bg-brand-700 [&_.fc-today-button]:!bg-dim-100 [&_.fc-today-button]:!border-dim-200 [&_.fc-today-button]:!text-dim-700 [&_.fc-today-button:hover]:!bg-dim-200 [&_.fc-daygrid-day.fc-day-today]:!bg-brand-50 [&_.fc-timegrid-col.fc-day-today]:!bg-brand-50/40 [&_.fc-col-header-cell-cushion]:!text-dim-700 [&_.fc-col-header-cell-cushion]:!font-semibold [&_.fc-daygrid-day-number]:!text-dim-600 [&_.fc-event]:!rounded-lg [&_.fc-event]:!text-xs [&_.fc-toolbar-title]:!text-dim-900 [&_.fc-toolbar-title]:!font-bold [&_.fc-toolbar-title]:!text-[17px] [&_.fc-toolbar-title]:!font-display">
       <FullCalendar
+        ref={ref}
         plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-        initialView="timeGridWeek"
-        headerToolbar={{ left: "prev,next today", center: "title", right: "dayGridMonth,timeGridWeek,timeGridDay" }}
+        initialView={narrow ? "timeGridDay" : "timeGridWeek"}
+        headerToolbar={narrow
+          ? { left: "prev,next", center: "title", right: "dayGridMonth,timeGridDay" }
+          : { left: "prev,next today", center: "title", right: "dayGridMonth,timeGridWeek,timeGridDay" }}
         locale={ptLocale}
         events={events}
         slotMinTime="07:00:00"

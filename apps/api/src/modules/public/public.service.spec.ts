@@ -8,7 +8,7 @@ import { StaffService } from "../staff/staff.service";
 const patientsService = { findOrCreateByPhone: jest.fn() };
 const appointmentsService = { getAvailability: jest.fn(), create: jest.fn() };
 const servicesService = { findAll: jest.fn() };
-const staffService = { findAll: jest.fn(), getPublicInvitation: jest.fn(), activateInvitation: jest.fn() };
+const staffService = { findAll: jest.fn() };
 
 describe("PublicService", () => {
   let service: PublicService;
@@ -46,16 +46,6 @@ describe("PublicService", () => {
     await expect(service.getStaff()).resolves.toEqual([
       { id: "st1", fullName: "Dra. Ana", specialtyCode: "PSY", availability: [{ dayOfWeek: 1 }] },
     ]);
-  });
-
-  it("getInvitation / activateInvitation delegate to StaffService", async () => {
-    staffService.getPublicInvitation.mockResolvedValue({ email: "x@cap.cv" });
-    await service.getInvitation("tok");
-    expect(staffService.getPublicInvitation).toHaveBeenCalledWith("tok");
-
-    staffService.activateInvitation.mockResolvedValue({ ok: true });
-    await service.activateInvitation("tok", { fullName: "X", password: "p" } as never);
-    expect(staffService.activateInvitation).toHaveBeenCalledWith("tok", { fullName: "X", password: "p" });
   });
 
   describe("createBooking", () => {

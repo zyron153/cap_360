@@ -9,6 +9,7 @@ describe("Billing — invoice creation and payment (integration)", () => {
   let patientId: string;
   let invoiceId: string;
   let total: number;
+  const gapInvoiceIds: string[] = []; // the numbering test's invoices (the middle one is deleted inside the test)
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -27,6 +28,9 @@ describe("Billing — invoice creation and payment (integration)", () => {
   });
 
   afterAll(async () => {
+    // (the middle one is already gone; deleteMany tolerates that)
+    await prisma.invoiceItem.deleteMany({ where: { invoiceId: { in: gapInvoiceIds } } });
+    await prisma.invoice.deleteMany({ where: { id: { in: gapInvoiceIds } } });
     if (invoiceId) {
       await prisma.payment.deleteMany({ where: { invoiceId } });
       await prisma.invoiceItem.deleteMany({ where: { invoiceId } });
@@ -86,5 +90,31 @@ describe("Billing — invoice creation and payment (integration)", () => {
       .post(`/v1/invoices/${invoiceId}/payments`)
       .send({ amount: 1, method: "cash" })
       .expect(400);
+  });
+
+  it("keeps numbering invoices after a gap: removing an invoice that isn't the newest must not make the next number collide", async () => {
+    // The number used to be COUNT(*) + 1, so one hole in the year's sequence (the dev DB's debris cleanup left one) made
+    // the next create land on a number that already existed: a unique-constraint 500 for every invoice from then on.
+    const service = await prisma.service.findUniqueOrThrow({ where: { code: "CONS-GERAL" } });
+    const create = async () => {
+      const res = await request(app.getHttpServer())
+        .post("/v1/invoices")
+        .send({ patientId, items: [{ serviceId: service.id, description: service.name, quantity: 1, unitPrice: Number(service.price) }] })
+        .expect(201);
+      gapInvoiceIds.push(res.body.id);
+      return res.body as { id: string; invoiceNumber: string };
+    };
+    const seq = (n: string) => Number(n.split("-")[2]);
+
+    const first = await create();
+    const middle = await create();
+    const last = await create();
+    await prisma.invoiceItem.deleteMany({ where: { invoiceId: middle.id } });
+    await prisma.invoice.delete({ where: { id: middle.id } }); // a hole in the sequence, below the newest
+
+    const next = await create(); // 500 (unique constraint on invoiceNumber) before the fix
+    expect(seq(next.invoiceNumber)).toBeGreaterThan(seq(last.invoiceNumber));
+    expect(seq(last.invoiceNumber)).toBeGreaterThan(seq(first.invoiceNumber));
+    expect(new Set([first, last, next].map((i) => i.invoiceNumber)).size).toBe(3);
   });
 });

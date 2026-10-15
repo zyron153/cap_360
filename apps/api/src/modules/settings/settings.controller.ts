@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch } from "@nestjs/common";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser, type JwtUser } from "../../common/decorators/current-user.decorator";
 import { SettingsService } from "./settings.service";
 
 @Controller("settings")
@@ -14,8 +15,8 @@ export class SettingsController {
 
   @Patch("clinic")
   @Roles("admin", "receptionist")
-  updateClinic(@Body() body: Record<string, unknown>) {
-    return this.service.upsert("clinic", body);
+  updateClinic(@Body() body: Record<string, unknown>, @CurrentUser() user: JwtUser) {
+    return this.service.updateClinic(body, user.roles);
   }
 
   @Patch("notifications")

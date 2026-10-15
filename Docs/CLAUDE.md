@@ -26,6 +26,7 @@ aspirational designs, several written for the pre-rebrand client.
 | Security posture, encryption, audit, LGPD | [SECURITY.md](SECURITY.md) |
 | Test strategy and what really exists | [TESTING.md](TESTING.md) |
 | Local dev / staging / prod, CI/CD | [DEPLOYMENT.md](DEPLOYMENT.md) |
+| First-VPS setup checklist (Hostinger, domain, TLS, backups, prod prep) | [VPS_CONFIG.md](VPS_CONFIG.md) |
 | Next.js route map | [FRONTEND-ROUTES.md](FRONTEND-ROUTES.md) |
 | Performance instrumentation + optimization passes | [PERFORMANCE_UPGRADES.md](PERFORMANCE_UPGRADES.md) |
 | Visual design system | [DESIGN-PHILOSOPHY.md](DESIGN-PHILOSOPHY.md) |
@@ -46,5 +47,7 @@ real, exports and materialised views not). UI mockup only, no backend: M5 Exams,
 - Monorepo: `apps/api` (NestJS), `apps/web` (Next.js 15), `packages/{database,types,config}`.
 - Auth is self-hosted (argon2id + Redis sessions); Keycloak was removed 2026-08-31.
 - `AUTH_BYPASS=true` for local dev; fails safe if unset.
-- Schema changes use `prisma db push`, not migrations.
+- Schema changes need a migration (`pnpm --filter @cap/database run db:migrate --name <x>`, commit the
+  folder); CI fails on drift between `schema.prisma` and `prisma/migrations`, and staging/prod run
+  `prisma migrate deploy` (never `db push`). Deploy/rollback flow: [DEPLOYMENT.md](DEPLOYMENT.md) §0.
 - After a session, overwrite [PROGRESS.md](PROGRESS.md).

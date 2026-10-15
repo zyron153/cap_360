@@ -146,15 +146,37 @@ coverage:
   forged POSTs rejected with nothing stored, a signed message stored as ciphertext and a retry
   deduplicated, thread served decrypted via the inbox API, resolve then reopen on the next inbound.
   Temporarily swaps in test credentials for the `integration_whatsapp` setting and restores it after.
-- **`staff-invitation.integration-spec.ts`** — the one spec that deliberately skips `AUTH_BYPASS`:
-  real admin login → invite → activation (token read straight from the DB row, the same way a real
-  invitee would read it from their inbox — the API never returns it) → the new hire's own real
-  login → session actually authenticates on a protected route with their real role.
+- **`staff-admin-password.integration-spec.ts`** — the one spec that deliberately skips
+  `AUTH_BYPASS`: real admin login → `POST /staff` with a policy-breaking or missing password is a
+  400 and creates nothing → with a valid one the user is created and only an argon2id hash is stored
+  (never in the response) → a duplicate email is a 409 → the new user logs in with that password and
+  goes straight into the app (no forced change) → `PATCH /staff/:id/password` with a weak password is
+  a 400 and leaves their session alone → with a valid one it returns `{ sessionsEnded: 1 }`, the
+  user's open session gets a 401, the old password no longer logs in and the new one does → an unknown
+  id is a 404 → a non-admin can't create users or change another user's password. Uses 4 logins on
+  purpose: `/auth/login` is throttled to 5/min per IP, so the spec reuses sessions rather than
+  logging in again. (Sparing an admin's own session is covered by the unit tests, since changing the
+  seeded admin's password here would break every other spec's login.)
 
 Note on the M1 §2.4 reminder-cancellation gap this section used to flag as unfixed: it was closed
 in the roadmap's Phase 1 (`appointments.service.ts`'s `cancelPendingReminders` now runs from both
 `reschedule()` and `updateStatus()`'s cancelled branch) — covered by unit tests, not (yet) one of
 the 4 integration specs above.
+
+- **`clinical-note-access.integration-spec.ts`** — `AUTH_BYPASS` off, three real logins (admin + two doctors it
+  creates). Doctor A's notes are invisible to doctor B (list empty, by-id 404) → a booked-but-not-arrived
+  appointment today opens nothing → once the patient is `checked_in` today B reads A's **finalized** note
+  but never A's draft (404) → still read-only: B's update of it is a 404 and B's "my notes" stays empty →
+  the cross-author read leaves an `audit_log` row marked `patient in treatment today` → `completed` today
+  still counts, `confirmed` does not, and a checked-in appointment from yesterday opens nothing. **No
+  self-unlock:** a doctor who checks the patient in and completes the appointment themself — or completes
+  straight from `confirmed` — still reads nothing; once someone else is involved (reception completes it) they
+  can; an appointment with an unknown actor (system / before actors were recorded) still qualifies. Then the
+  lost-update guard: a save with the version the caller saw lands, a stale one is a 409 `NOTE_CHANGED` carrying
+  the current note and nothing is overwritten; two saves racing on one version → exactly one 200 and one 409;
+  six simultaneous first-saves for one appointment → one 201 and five 409s, one row. (Run with
+  `pnpm --filter @cap/api test:integration -- clinical-note-access`; the dev machine can be slow enough to
+  want `--testTimeout=180000`.)
 
 ### 4.1 What's still fictional below
 
@@ -193,12 +215,97 @@ status-transition UI on `/appointments` (Confirmar → Check-in feito → Conclu
 call) to its auto-created invoice, then paying it off through the "Registar Pagamento" form itself
 rather than the API.
 
-#### Staff Invitation → Activation → Login — ✅ `apps/web/e2e/staff-invitation.spec.ts`
-Corrected: an earlier version of this doc said this flow was only covered by an integration spec
-because the activation token "only ever reaches a real invitee by email." That premise was
-already stale when written — `POST /staff/invite` returns the token directly in its response body
-(there's no separate email-delivery step gating it), so the real E2E spec reads it from the invite
-response and drives the activation form and login form through the browser like any other flow.
+#### Doctor's Clinical Note — ✅ `apps/web/e2e/clinical-note-draft.spec.ts`
+Drives the note editor (`/records/note`) through the real UI. Typing autosaves a draft linked to the
+appointment (and merely opening the page creates nothing), a reload resumes the same draft, quick
+phrases append, the footer lists what is still missing, and "Guardar e concluir consulta" finalizes the
+note and completes the appointment in one click. The Histórico tab shows state badges, filters by them,
+and pages past 50 notes with "Carregar mais" (the paging test creates 52 notes; notes have no delete
+endpoint, so a run leaves about 60 behind on the erased test patient). **Two tabs:** a save that loses to
+the other tab is stopped and the two versions are merged three ways (sections only one side changed join
+by themselves; sections both changed differently open the side-by-side "Juntar as duas versões da nota"
+dialog — see `M7` §2.1), and the API is checked to prove the stale write never landed; a second tab that opened before any draft existed
+gets the same banner instead of overwriting the first tab's draft. **Colleague's note:** another
+clinician's finalized note opens read-only with their name and no save buttons or quick phrases (the
+browser is made a different doctor by serving `/staff/me`, since the dev bypass makes every session the
+admin). **Checked in alone:** a doctor who is the only person recorded as having put the patient in
+treatment is told why a colleague's notes aren't shown (served as the same staff id the API check-in recorded). The paging test's first version raced the search box's 300ms debounce (a test bug — the filter
+correctly reset the list). The small setup helpers (booking, the API shim) are inlined in each spec — Playwright's loader can't import a sibling module under every Node version (it throws `context.conditions?.includes is not a function` on Node 24); `E2E_API`
+points the setup calls and the browser's `/api` traffic at another API instance, e.g. one built from the
+working tree.
+
+#### Note Editor Details — ✅ `apps/web/e2e/clinical-note-editor.spec.ts`
+The editor's failure and accessibility paths, each against the real API with the browser's traffic
+selectively stubbed: a failed save keeps the text, says so, offers a retry and asks before leaving; a failed
+save retries by itself when the browser comes back online; a duration typo can't stop the text from saving
+(it is flagged, left out and blocks finalizing); a note finalized >24h ago is read-only with a reason; the
+last session's moderate/high risk is quoted and the clinic's quick phrases replace the suggested ones; a
+phrase that would pass 3000 characters is refused with a message; keyboard-only use (one tab stop per
+phrase toolbar, arrows inside, radio-group arrows, Ctrl+Enter); the save status is one live region whose
+text changes in place; double-clicking "Guardar nota" finalizes once; leaving through "Voltar" inside the
+autosave pause still saves; at 390px the editor, the merge dialog and the discard dialog fit; and the day
+queue ("Em consulta") lists today's patient with a note state, "Registar" opens the editor and "Concluir"
+completes the consulta. Two of its tests were wrong the first time they ran (a locator filtered on text that
+the test itself changes), found by the first full run — the product was right.
+
+#### Prescriptions, Referrals, Access Report — ✅ `apps/web/e2e/clinical-extras.spec.ts`
+The patient profile's clinical tabs and the admin report. Prescriptions: empty state; a two-medicine
+prescription with duration, instructions and a link to the note (per-field Portuguese validation, focus
+moves to the first error); a half-written form asks before Escape/Cancelar discards it and ignores the
+backdrop; an API refusal shows inside the form without losing what was typed; a list that fails to load says
+so with a retry instead of reading as empty. Referrals: external (provider + reason required) and internal
+(a colleague picked from a list, not the referrer; a clear message when there is none); status buttons follow
+`REFERRAL_STATUS_TRANSITIONS`, a finished referral has none, an admin may correct any status, and a doctor who
+is neither referrer nor target gets no buttons (a 409 says someone else moved it first). "Carregar mais"
+pages notes, prescriptions and referrals 100 at a time; "Prescrever" on a note opens the form linked to it;
+a draft is discarded after a confirmation and a finalized note cannot be. Admin tab "Acessos entre
+clínicos": rows with Cabo Verde time, reader, patient link and basis, paged with "Carregar mais"; an empty
+or failed report explains itself; the tab strip is one tab stop with arrow keys; a doctor never sees the tab
+and the endpoint refuses them; one test runs against the real API. Note: the lists are fetched with a
+`?page=&limit=` query, so a stub of one must end its URL glob with `*`.
+
+#### Responsive Shell — ✅ `apps/web/e2e/responsive-shell.spec.ts`
+Read-only. On every main route **and every tab of it**, at 390px and 820px, asserts that nothing is
+**clipped** (content that starts inside an `overflow: hidden` container but runs past it — hidden clips, it
+does not scroll), **squeezed** (a growing pane in a side-by-side layout under 140px wide) or **scrolling
+sideways** inside `<main>`. It exists because the first version of this check only looked for
+overflow and treated `overflow: hidden` as safe: it reported "0" while 20 views were broken — data
+tables cut off by 100–800px, vertical-nav layouts leaving the content ~130px wide, and the dashboard's
+main column 2px wide. A tripwire test asserts `/exams` and `/visits` (mock-only, redirected by middleware)
+are still hidden, and fails with instructions to add them to the views above the moment either is
+un-hidden. Also asserts that the sidebar is an off-canvas drawer below `lg` (closed until the
+menu button opens it; closes on navigation and on Escape; out of the tab order while closed) and a plain
+column on a desktop.
+
+#### Topbar — ✅ `apps/web/e2e/topbar.spec.ts`
+The patient search finds a patient by name and opens the profile with the keyboard (combobox: type,
+arrow, Enter), says so when nobody matches, and — at phone width — hides the box behind a search icon that
+opens a bar over the topbar (result opens the profile; Cancelar closes it). The bell lists the unconfirmed appointment (a booking
+left `pending` 4+ days out, inside the 7-day window) as a link to Agendamentos. The "planos terminam"
+alert is covered only by its logic (no spec books a plan ending this week).
+
+#### Dashboard for a restricted role — ✅ `apps/web/e2e/dashboard-restricted-role.spec.ts`
+A doctor/nurse/lab_tech gets 403 from `/api/health-plans` and `/api/invoices`, which the dashboard asks for
+unconditionally. The spec serves those two 403s (`AUTH_BYPASS` makes every dev session the admin, so the real API
+would answer 200) and asserts the dashboard still renders — no "Página não encontrada" card — instead of
+`healthPlans.filter is not a function` landing in `(app)/error.tsx`. It must **wait for the 403 and let React render
+it** before asserting: the card renders from its `[]` default first, so an assertion right after `goto` passes on the
+broken page (the first version did). Verified to fail on the old code and pass on the fix.
+
+#### Admin Sets a User's Password → Login → "Alterar senha" — ✅ `apps/web/e2e/staff-admin-password.spec.ts`
+Replaced `staff-invitation.spec.ts` (and the short-lived temporary-password spec) when the
+email-invitation flow was removed. Drives Gestão de Acesso through the real UI: the Add User form
+lists the password rules up front (all unmet), "Gerar" fills a policy-compliant password, reveals it
+and ticks the rules, and creating the user adds the row; the new user then logs in from a separate
+browser context and lands straight on `/dashboard`; the admin's "Alterar senha" modal rejects a weak
+password, accepts a valid one and reports it; finally the old password is rejected on the login page
+and the new one works. The dev stack runs with `AUTH_BYPASS`, which treats a browser with no session
+as the seeded admin (so `page` is the admin) — and since a revoked session would just fall back to
+that admin, the 401 on the user's open session after a password change is asserted in
+`staff-admin-password.integration-spec.ts` (§4), which runs without the bypass. The spec's first
+incarnation caught a real bug: the bypass used to ignore the login cookie, so a freshly created user's
+"change my password" was checked against the admin's password (fixed in `SessionAuthGuard`, which now
+prefers a valid session over the bypass).
 
 #### Manual Invoice Creation + Payment — ✅ `apps/web/e2e/manual-invoice-payment.spec.ts`
 The one invoice-lifecycle path the other two Financeiro specs don't touch: creating an invoice by
@@ -223,10 +330,13 @@ The other missing Financeiro state transition: cancelling an `issued` invoice vi
 Fatura" — the two-step inline confirmation, the required-reason gate (confirm button stays
 disabled under 3 characters), the resulting "Cancelada" banner with reason/timestamp, and that a
 cancelled invoice no longer offers "Cancelar Fatura" or "Registar Pagamento". Also asserts the
-E-Factura panel on a freshly-issued invoice — deliberately narrow: this dev environment has no
-`integration_efatura` Setting configured, so `EFaturaProcessor.handleSubmit` always leaves the
-submission on `pending` (see `efatura.processor.ts`); that's the one E-Factura state this suite can
-assert on without a real (or sandbox) tax-authority endpoint.
+that the E-Factura panel stays out of the way on a freshly-issued invoice — deliberately narrow:
+this dev environment has the e-Fatura integration switched off, so an issued invoice gets no fiscal
+document and no panel; that's the one E-Factura state this suite can assert on without a real
+(or Homologação) tax-authority endpoint. The integration itself is covered by unit tests: documents
+are built, signed and validated against DNRE's XSD pack (`apps/api/test/fixtures/efatura-xsd`), the
+signature is verified independently, and the multipart request is checked over a real local HTTP
+server (`efatura-client.http.spec.ts`).
 
 #### Health-Plan Payment Method — ✅ `apps/web/e2e/health-plan-payment.spec.ts`
 Every other spec that records a payment leaves the method on its default (cash) — none exercised
@@ -251,7 +361,7 @@ same endpoint at the same moment worked instantly, which is what made it non-obv
 specs start timing out in `beforeAll` with no code changes to explain it, check for a duplicate API
 process before assuming a real regression.
 
-#### Doctor Clinical Note Flow — ❌ doesn't exist — M7 (EMR) was never built
+#### Doctor Clinical Note Flow — ✅ exists now — see "Doctor's Clinical Note" above
 
 #### Exam Result Delivery Flow — ❌ doesn't exist — M5 has no result/upload feature at all
 

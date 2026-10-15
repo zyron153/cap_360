@@ -123,9 +123,15 @@ Key routes:
   written onto `Appointment.durationMinutes` and drives the price of the draft invoice
   auto-generated on completion — see `Docs/modules/M6-billing-invoicing.md` §2.2
 - ✅ **Fixed.** Status transitions are now validated server-side (`pending → confirmed/cancelled`,
-  `confirmed → checked_in/completed/no_show/cancelled`, `checked_in → completed/no_show/cancelled`;
+  `confirmed → checked_in/completed/no_show/cancelled`, `checked_in → in_progress/completed/no_show/cancelled`,
+  `in_progress → completed/cancelled` (**"Em curso"**, 2026-10-14: reception checks in — `checked_in` is refused with 403 for anyone
+  but receptionist/admin — and the doctor starts the consultation, `in_progress`, doctor/admin only; `startedAt` is stamped);
   `completed`/`cancelled`/`no_show` are terminal — `PATCH /appointments/:id/status` returns 400
-  otherwise). There was previously no check at all: a retried or duplicate "completed" request on
+  otherwise). The endpoint also records **who** moved the appointment into `checked_in` /
+  `completed` (`checkedInByStaffId` / `completedByStaffId`, from the session; absent for system callers such
+  as the WhatsApp reply handler) — it is the evidence behind the clinical-note "treating today" rule
+  (`modules/M7-clinical-records-emr.md` §3.1: a doctor can't unlock a patient's notes by checking them in
+  themself). There was previously no check at all: a retried or duplicate "completed" request on
   an already-completed appointment silently re-ran the auto-invoice-draft and health-plan
   session-usage side effects (see `Docs/modules/M6-billing-invoicing.md` §2.2) every time it
   replayed. A DB-level `invoices.appointmentId` unique constraint backs this up even if the
@@ -143,7 +149,7 @@ Key routes:
 | My Schedule | Doctor | Own upcoming appointments only |
 | Appointment Detail | All | Patient info, service, notes, status actions — completing prompts for actual duration before generating the draft invoice |
 | Waitlist Manager | Receptionist/Admin | Active waitlist entries with notify button |
-| Registos Clínicos — "Check-in Feito" tab | Admin/Doctor | Second entry point for the same completion flow: today's `checked_in` appointments, with an inline "Concluir" that confirms duration and calls the same `PATCH /appointments/:id/status` used by Appointment Detail. See `Docs/modules/M7-clinical-records-emr.md` §6. |
+| Registos Clínicos — "Agenda" tab | Admin/Doctor | The doctor's list for today or the week (Hoje / Semana; own patients, "Todos" to cover) of *confirmed, checked-in, em curso and concluded* appointments, each with a status badge. **Iniciar consulta** appears only on `checked_in` rows (it moves them to `in_progress` and opens the note); **Registar / Concluir** only on `in_progress` rows — a second entry point for the same completion flow: the clinical-note state, a one-tap link to write the note, and an inline "Concluir" that confirms duration and calls the same `PATCH /appointments/:id/status` used by Appointment Detail. The note editor can also complete the consulta in the same click ("Guardar e concluir consulta"). See `Docs/modules/M7-clinical-records-emr.md` §6. |
 
 ---
 

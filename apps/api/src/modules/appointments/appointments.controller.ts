@@ -7,10 +7,12 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  ForbiddenException,
 } from "@nestjs/common";
 import { AppointmentsService } from "./appointments.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { CurrentUser, JwtUser } from "../../common/decorators/current-user.decorator";
 import {
   CreateAppointmentSchema,
   CreateAppointmentSeriesSchema,
@@ -95,9 +97,18 @@ export class AppointmentsController {
   updateStatus(
     @Param("id", ParseUUIDPipe) id: string,
     @Body(new ZodValidationPipe(UpdateAppointmentStatusSchema))
-    dto: UpdateAppointmentStatusDto
+    dto: UpdateAppointmentStatusDto,
+    @CurrentUser() user: JwtUser
   ) {
-    return this.service.updateStatus(id, dto);
+    // Reception checks the patient in; the doctor starts the consultation. (Admin may do either.)
+    const isAdmin = user.roles.includes("admin");
+    if (dto.status === "checked_in" && !isAdmin && !user.roles.includes("receptionist")) {
+      throw new ForbiddenException("Only reception can check a patient in");
+    }
+    if (dto.status === "in_progress" && !isAdmin && !user.roles.includes("doctor")) {
+      throw new ForbiddenException("Only the doctor can start a consultation");
+    }
+    return this.service.updateStatus(id, dto, user.sub);
   }
 
   @Post(":id/invoice")

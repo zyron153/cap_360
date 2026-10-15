@@ -304,8 +304,8 @@ export function DespesasTab() {
       </div>
 
       <Modal open={newOpen} onClose={() => setNewOpen(false)} title="Nova Despesa" description="Regista uma nova despesa para aprovação" size="md">
-        <div className="px-6 py-5 grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="px-6 py-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Descrição *</label>
             <input value={form.description} onChange={(e) => set("description", e.target.value)} placeholder="Ex: Material de escritório" className={inputCls} />
           </div>
@@ -338,7 +338,7 @@ export function DespesasTab() {
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Referência</label>
             <input value={form.reference} onChange={(e) => set("reference", e.target.value)} placeholder="Nº fatura/recibo" className={inputCls} />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="block text-[12px] font-semibold text-dim-700 mb-1.5">Notas</label>
             <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={2} placeholder="Observações opcionais…" className={`${inputCls} resize-none`} />
           </div>
