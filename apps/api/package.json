@@ -27,7 +27,7 @@
     "@nestjs/terminus": "^10.2.3",
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/websockets": "^10.4.15",
-    "@sentry/node": "^10.73.0",
+    "@sentry/node": "^11.7.0",
     "@types/nodemailer": "^8.0.1",
     "@xmldom/xmldom": "^0.8.15",
     "argon2": "^0.41.1",
