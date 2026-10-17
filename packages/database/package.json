@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@cap/config": "workspace:*",
-    "prisma": "^6.0.0",
+    "prisma": "^7.10.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
   }
