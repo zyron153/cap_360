@@ -176,6 +176,26 @@ describe("Clinical notes: authorship, the 'treating today' read exception, and t
       expect((await notesFor(cookieB, p).expect(200)).body).toHaveLength(0);
     });
 
+    it("'Em curso': a doctor starts a consultation reception checked in; it still counts as in treatment and can't be started twice", async () => {
+      const p = await patientWithANote("emcurso");
+      const appt = await bookFor(p, "confirmed");
+      const status = (cookie: string, s: string) => http().patch(`/v1/appointments/${appt}/status`).set("Cookie", cookie).send({ status: s });
+
+      await status(adminCookie, "checked_in").expect(200); // reception/admin put the patient in treatment
+      await status(cookieA, "in_progress").expect(200); // the doctor starts it; the check-in actor is untouched
+      expect((await prisma.appointment.findUniqueOrThrow({ where: { id: appt } })).startedAt).not.toBeNull();
+      await status(cookieA, "in_progress").expect(400); // already started: not a valid transition
+      expect((await notesFor(cookieB, p).expect(200)).body).toHaveLength(1); // in_progress still counts as "in treatment today"
+
+      await status(cookieA, "completed").expect(200); // the doctor concludes it
+    });
+
+    it("a consultation that was never checked in can't be started", async () => {
+      const p = await patientWithANote("emcurso2");
+      const appt = await bookFor(p, "confirmed");
+      await http().patch(`/v1/appointments/${appt}/status`).set("Cookie", cookieA).send({ status: "in_progress" }).expect(400);
+    });
+
     it("an appointment whose actor is unknown (a system action, or from before actors were recorded) still qualifies", async () => {
       const p = await patientWithANote("legacy");
       await bookFor(p, "checked_in"); // created straight in the DB: no actor columns

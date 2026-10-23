@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  StreamableFile,
 } from "@nestjs/common";
 import { BillingService } from "./billing.service";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -47,8 +48,9 @@ export class BillingController {
   }
 
   @Get(":id/receipt")
-  getReceipt(@Param("id", ParseUUIDPipe) id: string) {
-    return this.service.getReceiptUrl(id);
+  async getReceipt(@Param("id", ParseUUIDPipe) id: string) {
+    const { pdf, filename } = await this.service.getReceiptPdf(id);
+    return new StreamableFile(pdf, { type: "application/pdf", disposition: `attachment; filename="${filename}"` });
   }
 
   // Nova Fatura's "sem preço definido" flow — see CreateDraftServiceSchema. Deliberately not a

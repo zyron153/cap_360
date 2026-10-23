@@ -42,10 +42,18 @@ async function recordPayment(id: string, data: RecordPaymentDto) {
   return res.json();
 }
 
-async function getReceiptUrl(id: string) {
+async function downloadReceipt(id: string, invoiceNumber: string) {
   const res = await fetch(`/api/invoices/${id}/receipt`);
-  if (!res.ok) throw new Error("Erro ao obter recibo");
-  return res.json() as Promise<{ url: string }>;
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.message ?? "Erro ao obter recibo");
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `recibo-${invoiceNumber}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function fetchEFaturaDocuments(id: string) {
@@ -324,8 +332,7 @@ export function InvoiceDetailBody({ id }: { id: string }) {
   });
 
   const receiptMutation = useMutation({
-    mutationFn: () => getReceiptUrl(id),
-    onSuccess: ({ url }) => window.open(url, "_blank"),
+    mutationFn: (invoiceNumber: string) => downloadReceipt(id, invoiceNumber),
   });
 
   const [cancelConfirm, setCancelConfirm] = useState(false);
@@ -380,14 +387,18 @@ export function InvoiceDetailBody({ id }: { id: string }) {
           </button>
         )}
         <button
-          onClick={() => receiptMutation.mutate()}
-          disabled={receiptMutation.isPending}
+          onClick={() => receiptMutation.mutate(invoice.invoiceNumber)}
+          disabled={receiptMutation.isPending || Number(invoice.amountPaid) <= 0}
+          title={Number(invoice.amountPaid) <= 0 ? "Disponível depois de registado um pagamento" : undefined}
           className="flex items-center gap-2 border border-dim-200 bg-white hover:bg-dim-50 text-dim-700 text-[13px] font-medium px-4 py-2 rounded-[10px] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-colors cursor-pointer disabled:opacity-60"
         >
           <Download className="w-3.5 h-3.5" />
           {receiptMutation.isPending ? "A obter…" : "Recibo PDF"}
         </button>
       </div>
+      {receiptMutation.error && (
+        <p className="text-[11px] text-red-600 text-right -mt-3">{(receiptMutation.error as Error).message}</p>
+      )}
 
       {/* Cancel invoice — two-step inline confirmation with a required reason */}
       {cancelConfirm && (

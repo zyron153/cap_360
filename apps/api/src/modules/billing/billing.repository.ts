@@ -146,9 +146,8 @@ export class BillingRepository {
 
       const updated = await tx.invoice.update({
         where: { id: invoiceId },
-        // pdfR2Key: null invalidates any previously-cached receipt — getReceiptUrl only
-        // regenerates when it's unset, so a stale receipt showing the pre-payment balance would
-        // otherwise keep being served after this payment changes amountPaid/status.
+        // pdfR2Key: null clears the legacy cached-receipt key (receipts are now generated per
+        // request, see getReceiptPdf) so it can never serve a pre-payment balance.
         // markIssued stamps issuedAt the first time a draft (appointment auto-invoice) receives
         // money — draft invoices are never issued at creation time the way create() issues one.
         data: { amountPaid: totalPaid, status, pdfR2Key: null, ...(markIssued ? { issuedAt: new Date() } : {}) },

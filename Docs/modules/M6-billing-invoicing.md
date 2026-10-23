@@ -125,10 +125,9 @@ detail page's payment history.
 
 - 🟡 PDF receipt generated server-side using **PDFKit** (not Puppeteer), on-demand via
   `GET /invoices/:id/receipt` — not automatically "on full payment". It renders whatever the
-  invoice's status/amountPaid is at request time, uploads to R2, and **caches the R2 key on the
-  invoice** — ✅ the staleness gap once described here is fixed: `recordPaymentAtomic` nulls
-  `pdfR2Key` on every payment (`billing.repository.ts`), so a receipt generated after a partial
-  payment gets regenerated the next time it's requested rather than staying stale
+  invoice's status/amountPaid is at request time and **streams the PDF straight back** (no R2, no
+  cache — so it is never stale and works on staging). Refused with 400 until a payment exists; the
+  "Recibo PDF" button is disabled until then. `pdfR2Key` is a legacy column, still nulled on payment
 - ❌ No automatic delivery — nothing sends the receipt via WhatsApp or email; a staff member must
   open the invoice and fetch the receipt URL themselves
 

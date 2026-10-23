@@ -6,7 +6,6 @@ import {
   ForbiddenException,
 } from "@nestjs/common";
 import { BillingRepository } from "./billing.repository";
-import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
 import { ServicesService } from "../services/services.service";
@@ -30,7 +29,6 @@ export class BillingService {
 
   constructor(
     private readonly repo: BillingRepository,
-    private readonly r2: R2Service,
     private readonly prisma: PrismaService,
     private readonly healthPlansService: HealthPlansService,
     private readonly servicesService: ServicesService,
@@ -420,16 +418,13 @@ export class BillingService {
     };
   }
 
-  async getReceiptUrl(invoiceId: string): Promise<{ url: string }> {
+  // Generated on every call and streamed back as-is: no R2 dependency (staging has none, and the
+  // old placeholder URL it fell back to was a dead link) and it always shows the current balance.
+  async getReceiptPdf(invoiceId: string): Promise<{ pdf: Buffer; filename: string }> {
     const invoice = await this.repo.findById(invoiceId);
     if (!invoice) throw new NotFoundException(`Invoice ${invoiceId} not found`);
-
-    if (!this.r2.isConfigured()) {
-      return { url: `https://files.cap.cv/receipts/${invoice.invoiceNumber}.pdf` };
-    }
-
-    if (invoice.pdfR2Key) {
-      return { url: await this.r2.signedUrl(invoice.pdfR2Key) };
+    if (Number(invoice.amountPaid) <= 0) {
+      throw new BadRequestException("O recibo só fica disponível depois de registado um pagamento");
     }
 
     const clinic = await this.getClinicInfo();
@@ -456,10 +451,6 @@ export class BillingService {
       status: invoice.status,
     });
 
-    const key = `receipts/${invoice.invoiceNumber}.pdf`;
-    await this.r2.upload(key, pdf, "application/pdf");
-    await this.repo.update(invoiceId, { pdfR2Key: key });
-
-    return { url: await this.r2.signedUrl(key) };
+    return { pdf, filename: `recibo-${invoice.invoiceNumber}.pdf` };
   }
 }

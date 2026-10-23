@@ -315,10 +315,10 @@ through the "Registar Pagamento" form, and finally exercising the "Recibo PDF" b
 spec surfaced and fixed a real bug: `/billing/new` sent `unitPrice` as a string (services' `price`
 comes back from the API as a Prisma-Decimal string, and the form never coerced it), so every manual
 invoice creation attempt failed its `400` Zod validation — the form was completely broken before
-this pass. The receipt assertion checks the `GET .../receipt` JSON response the button's own click
-handler consumes, not the popup's final loaded page — in dev (no R2 configured) that URL is a
-non-resolving placeholder domain (`files.cap.cv`), so following it in a real browser always dead-ends
-on Chrome's own error page regardless of whether the feature works.
+this pass. The receipt assertion waits for the browser download the button triggers and checks the
+file is a real PDF (`%PDF-` header). (Until 2026-10-23 the endpoint returned an R2 URL — a dead
+`files.cap.cv` placeholder wherever R2 wasn't configured, e.g. staging — and the button opened it in a
+new tab; it now streams the PDF itself.)
 
 #### Expense (Despesa) Approval — ✅ `apps/web/e2e/expense-approval.spec.ts`
 Nothing else in the suite touched the Financeiro → Despesas tab at all. Covers registering a new

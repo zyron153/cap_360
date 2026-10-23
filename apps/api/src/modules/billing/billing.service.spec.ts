@@ -2,7 +2,6 @@ import { Test } from "@nestjs/testing";
 import { NotFoundException, BadRequestException, ForbiddenException, Logger } from "@nestjs/common";
 import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
-import { R2Service } from "../../common/services/r2.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { HealthPlansService } from "../health-plans/health-plans.service";
 import { ServicesService } from "../services/services.service";
@@ -29,7 +28,6 @@ const repo = {
   updateItemAtomic: jest.fn(),
   cancelAtomic: jest.fn(),
 };
-const r2 = { isConfigured: jest.fn(), upload: jest.fn(), signedUrl: jest.fn() };
 const prisma = {
   setting: { findUnique: jest.fn() },
 };
@@ -61,7 +59,6 @@ describe("BillingService", () => {
       providers: [
         BillingService,
         { provide: BillingRepository, useValue: repo },
-        { provide: R2Service, useValue: r2 },
         { provide: PrismaService, useValue: prisma },
         { provide: HealthPlansService, useValue: healthPlansService },
         { provide: ServicesService, useValue: servicesService },
@@ -71,7 +68,6 @@ describe("BillingService", () => {
     }).compile();
     service = mod.get(BillingService);
     jest.clearAllMocks();
-    r2.isConfigured.mockReturnValue(false);
     // No active health plan by default — individual tests below override this to exercise the
     // discount path. Without this default, every pre-existing create()/createDraft() test would
     // need its own mock just to avoid a hanging jest.fn() promise.
@@ -760,12 +756,11 @@ describe("BillingService", () => {
     });
   });
 
-  describe("getReceiptUrl — clinic data on generated receipts", () => {
+  describe("getReceiptPdf — clinic data on generated receipts", () => {
     const FULL_INVOICE = {
       id: "inv-1",
       invoiceNumber: "INV-2026-0001",
       issuedAt: new Date("2026-08-01T00:00:00Z"),
-      pdfR2Key: null,
       patient: { fullName: "Maria Silva", phone: "+2389912345" },
       items: [{ description: "Consulta Geral", quantity: 1, unitPrice: "1500", total: "1500" }],
       subtotal: "1500",
@@ -777,16 +772,24 @@ describe("BillingService", () => {
 
     beforeEach(() => {
       repo.findById.mockResolvedValue(FULL_INVOICE);
-      r2.isConfigured.mockReturnValue(true);
-      r2.upload.mockResolvedValue(undefined);
-      r2.signedUrl.mockResolvedValue("https://signed.url/receipt.pdf");
-      repo.update.mockResolvedValue({});
       generateReceiptPdfMock.mockResolvedValue(Buffer.from("pdf"));
+    });
+
+    it("returns the PDF bytes directly — no R2 involved, so it works when storage is unconfigured", async () => {
+      prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
+      const result = await service.getReceiptPdf("inv-1");
+      expect(result).toEqual({ pdf: Buffer.from("pdf"), filename: "recibo-INV-2026-0001.pdf" });
+    });
+
+    it("refuses an invoice with no payment yet", async () => {
+      repo.findById.mockResolvedValue({ ...FULL_INVOICE, amountPaid: "0", status: "draft" });
+      await expect(service.getReceiptPdf("inv-1")).rejects.toThrow(BadRequestException);
+      expect(generateReceiptPdfMock).not.toHaveBeenCalled();
     });
 
     it("fetches the clinic setting and passes it into generateReceiptPdf", async () => {
       prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
-      await service.getReceiptUrl("inv-1");
+      await service.getReceiptPdf("inv-1");
       expect(generateReceiptPdfMock).toHaveBeenCalledWith(
         expect.objectContaining({ clinic: expect.objectContaining(CLINIC) })
       );
@@ -794,16 +797,10 @@ describe("BillingService", () => {
 
     it("falls back to sensible defaults when the clinic setting is not configured", async () => {
       prisma.setting.findUnique.mockResolvedValue(null);
-      await service.getReceiptUrl("inv-1");
+      await service.getReceiptPdf("inv-1");
       const call = generateReceiptPdfMock.mock.calls[0][0];
       expect(call.clinic.name).toBeTruthy();
       expect(typeof call.clinic.name).toBe("string");
-    });
-
-    it("does not call generateReceiptPdf again when a pdfR2Key already exists", async () => {
-      repo.findById.mockResolvedValue({ ...FULL_INVOICE, pdfR2Key: "receipts/existing.pdf" });
-      await service.getReceiptUrl("inv-1");
-      expect(generateReceiptPdfMock).not.toHaveBeenCalled();
     });
 
     it("passes the patient's NIF through to the receipt (already decrypted by the repository)", async () => {
@@ -812,7 +809,7 @@ describe("BillingService", () => {
         patient: { ...FULL_INVOICE.patient, nif: "289959195" },
       });
       prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
-      await service.getReceiptUrl("inv-1");
+      await service.getReceiptPdf("inv-1");
       expect(generateReceiptPdfMock).toHaveBeenCalledWith(
         expect.objectContaining({ patient: expect.objectContaining({ nif: "289959195" }) })
       );
@@ -820,7 +817,7 @@ describe("BillingService", () => {
 
     it("passes null NIF when the patient has none, instead of dropping the field", async () => {
       prisma.setting.findUnique.mockResolvedValue({ value: CLINIC });
-      await service.getReceiptUrl("inv-1");
+      await service.getReceiptPdf("inv-1");
       expect(generateReceiptPdfMock).toHaveBeenCalledWith(
         expect.objectContaining({ patient: expect.objectContaining({ nif: null }) })
       );
