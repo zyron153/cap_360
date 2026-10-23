@@ -283,7 +283,8 @@ Response 200: Invoice incl. items, payments, patient { fullName, nif } (nif decr
 
 #### GET `/invoices/:id/receipt`
 ```
-Response 200: { "url": "signed R2 URL, or a placeholder URL if R2 isn't configured" }
+Response 200: application/pdf (attachment, recibo-<invoiceNumber>.pdf), generated per request
+Response 400: invoice has no payment yet (amountPaid = 0)
 ```
 
 #### POST `/invoices`
@@ -377,8 +378,7 @@ POST   /efatura/oauth/disconnect
 ```
 
 There is still no standalone `POST /invoices/:id/issue` and no `GET /invoices/:id/pdf` — a receipt
-PDF is generated lazily by `GET /invoices/:id/receipt` and uploaded to R2 (or a placeholder URL if
-R2 isn't configured), not issued as a separate workflow step. A `draft` invoice now gets issued
+PDF is generated per request by `GET /invoices/:id/receipt` and streamed back (no R2), not issued as a separate workflow step. A `draft` invoice now gets issued
 implicitly, as a side effect of its first payment (see `POST /invoices/:id/payments` above) rather
 than through any dedicated issue action.
 

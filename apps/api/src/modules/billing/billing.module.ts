@@ -3,7 +3,6 @@ import { BullModule } from "@nestjs/bull";
 import { BillingController } from "./billing.controller";
 import { BillingService } from "./billing.service";
 import { BillingRepository } from "./billing.repository";
-import { R2Service } from "../../common/services/r2.service";
 import { EncryptionService } from "../../common/services/encryption.service";
 import { EFaturaModule } from "../efatura/efatura.module";
 import { HealthPlansModule } from "../health-plans/health-plans.module";
@@ -20,7 +19,7 @@ import { ParametrizacaoModule } from "../parametrizacao/parametrizacao.module";
   ],
   controllers: [BillingController],
   // PrismaService comes from the global PrismaModule — no explicit import needed
-  providers: [BillingService, BillingRepository, R2Service, EncryptionService],
+  providers: [BillingService, BillingRepository, EncryptionService],
   exports: [BillingService],
 })
 export class BillingModule {}

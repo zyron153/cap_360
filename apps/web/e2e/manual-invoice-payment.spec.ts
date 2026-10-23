@@ -122,18 +122,18 @@ test("creating an invoice via the Nova Fatura form, then paying it off in two in
   await expect(page.locator("text=/\\+.*CVE/")).toHaveCount(2);
 });
 
-test("receipt PDF button opens a URL for the paid invoice", async ({ page }) => {
+test("receipt PDF button downloads a PDF for the paid invoice", async ({ page }) => {
   expect(invoiceId, "invoiceId must be set from previous test").toBeTruthy();
   await page.goto(`/billing/${invoiceId}`);
 
-  // Assert on the API response the button consumes rather than following the popup it opens —
-  // in dev (no R2 configured) that URL is a non-resolving placeholder domain
-  // (files.cap.cv, see billing.service.ts), so navigating to it always dead-ends on Chrome's
-  // own error page regardless of whether the feature itself works correctly.
-  const [response] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes(`/api/invoices/${invoiceId}/receipt`) && r.request().method() === "GET"),
+  // The API streams the PDF itself (no R2 / external URL), so the button saves a real file.
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
     page.getByRole("button", { name: "Recibo PDF" }).click(),
   ]);
-  const body = (await response.json()) as { url: string };
-  expect(body.url).toMatch(/^https?:\/\//);
+  expect(download.suggestedFilename()).toMatch(/^recibo-.*\.pdf$/);
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const c of stream) chunks.push(c as Buffer);
+  expect(Buffer.concat(chunks).subarray(0, 5).toString()).toBe("%PDF-");
 });
