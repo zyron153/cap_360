@@ -419,6 +419,6 @@ test("the agenda offers Iniciar consulta only on a checked-in row, and starting 
   await expect(page.getByRole("button", { name: "Concluir" })).toHaveCount(0); // nor can a checked-in one be concluded before it starts
 
   await page.getByRole("button", { name: "Iniciar consulta" }).click();
-  await expect(page).toHaveURL(new RegExp(`/records/note\?appointmentId=${queueApptId}`));
+  await expect(page).toHaveURL(new RegExp(`/records/note\\?appointmentId=${queueApptId}`));
   expect(patched).toEqual({ status: "in_progress" });
 });

@@ -1,9 +1,27 @@
 # PROGRESS
 
-> Snapshot overwritten each session. Última atualização: 2026-10-06.
+> Snapshot overwritten each session. Última atualização: 2026-10-23.
 > Detalhe completo em [REVIEW.md](REVIEW.md) e [TODO.md](TODO.md).
 
 ## Done
+
+- **Agenda do médico + estado "Em curso" + editor form-first — verificado e em staging, 2026-10-23.** Pedido: o
+  médico vê a lista de consultas confirmadas do dia/semana com o estado de cada uma; só a receção faz check-in; o médico
+  só pode **Iniciar consulta** numa marcação em check-in e conclui-a; registo de notas mais simples e interativo.
+  - **Feito.** Novo estado `in_progress` ("Em curso", `startedAt`; migração `20261014000000`): `checked_in →
+    in_progress → completed`. `checked_in` só para receção/admin e `in_progress` só para médico/admin (403 no controller).
+    Separador **Agenda** em Registos Clínicos (Hoje/Semana, "Só os meus/Todos", distintivo de estado, *Iniciar consulta*
+    só em check-in, *Registar/Concluir* só em curso). Editor: formulário primeiro em telemóvel/tablet com o contexto do
+    paciente recolhido, barra fixa com estado de gravação e chips por secção; botão *Registar nota* na marcação da agenda.
+  - **Verificação (dev, API e BD reais).** Migração aplicada à BD de dev; 2 specs de integração clínicos (38 testes, logins
+    reais, +2 novos para "Em curso"); Playwright: editor, check-in/pagamento, rascunho, responsivo e topo verdes; unitários
+    do módulo verdes. As falhas intermédias vieram da API em :4000 a reiniciar sob um `nest start --watch` de outra
+    sessão (ECONNREFUSED a meio), não do código; repetidas, passaram.
+  - **Staging.** Já em `staging` desde as 12:47Z (PR #29): enum com `in_progress`, coluna `startedAt`, `/health` e `/login`
+    200, 0 erros no log da API em 3 h. **Não** foi testado o fluxo do médico no staging (sem palavra-passe; a porta 8443 não
+    abre a partir deste PC).
+  - **Ramos.** Repo limpo para `master`, `staging` e `prod`; Dependabot de *version updates* desligado
+    (`open-pull-requests-limit: 0`). Estratégia de go-live do council em [COUNCIL_POV.md](COUNCIL_POV.md).
 
 - **Staging mostrava "404" depois do login — corrigido e implantado, 2026-10-06.** Pedido: depurar, corrigir e pôr no
   staging. **Causa:** não era uma rota em falta. O dashboard pede `/api/health-plans` e `/api/invoices` a todos os
