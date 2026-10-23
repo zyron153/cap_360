@@ -148,11 +148,11 @@ describe("Clinical notes: authorship, the 'treating today' read exception, and t
   });
 
   describe("who put the patient in treatment matters â€” a doctor can't unlock a patient by checking them in themself", () => {
-    it("B checking the patient in, and completing it, is not enough: B still can't read A's note", async () => {
+    it("B can't check the patient in at all (reception only), and completing it themself unlocks nothing", async () => {
       const p = await patientWithANote("self");
       const appt = await bookFor(p, "confirmed");
 
-      await setStatus(cookieB, appt, "checked_in");
+      await http().patch(`/v1/appointments/${appt}/status`).set("Cookie", cookieB).send({ status: "checked_in" }).expect(403);
       expect((await notesFor(cookieB, p).expect(200)).body).toHaveLength(0);
 
       await setStatus(cookieB, appt, "completed");
@@ -160,14 +160,12 @@ describe("Clinical notes: authorship, the 'treating today' read exception, and t
       expect((await notesFor(cookieA, p).expect(200)).body).toHaveLength(1); // the author is unaffected
     });
 
-    it("â€¦but once someone else is involved â€” reception completes it â€” B can read", async () => {
+    it("…but once someone else is involved — reception checks the patient in — B can read", async () => {
       const p = await patientWithANote("shared");
       const appt = await bookFor(p, "confirmed");
-
-      await setStatus(cookieB, appt, "checked_in");
       expect((await notesFor(cookieB, p).expect(200)).body).toHaveLength(0);
 
-      await setStatus(adminCookie, appt, "completed");
+      await setStatus(adminCookie, appt, "checked_in");
       expect((await notesFor(cookieB, p).expect(200)).body).toHaveLength(1);
     });
 

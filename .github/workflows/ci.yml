@@ -5,9 +5,9 @@ name: CI
 # listed under `push` — deploy-staging.yml already runs this on that push.
 on:
   push:
-    branches: [master, develop]
+    branches: [master]
   pull_request:
-    branches: [master, staging, develop]
+    branches: [master, staging]
   workflow_call:
 
 # Only PR runs are cancelled when superseded; a deploy's CI run must always finish.
@@ -28,13 +28,14 @@ jobs:
   quality:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # No `version:` — pnpm/action-setup reads package.json "packageManager" (setting both errors).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -59,16 +60,17 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       AUDIT_BASELINE_CRITICAL: 0
       AUDIT_BASELINE_HIGH: 32
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       # No `cache: pnpm`: this job never installs, so there is no store and the post-step fails.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -94,6 +96,7 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16-alpine
@@ -121,14 +124,18 @@ jobs:
     env:
       DATABASE_URL: postgresql://maissaude:maissaude@localhost:5432/maissaude_test
       REDIS_URL: redis://localhost:6379
+      # The integration specs boot the real AppModule, which reads these (not REDIS_URL).
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      FIELD_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
       NODE_ENV: test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -149,23 +156,32 @@ jobs:
       - name: Run tests
         run: pnpm turbo run test
 
+      # Real HTTP + DB round-trips (apps/api/test/integration). The specs look up seeded rows
+      # (CONS-GERAL, the admin login), so the DB is seeded first; throwaway CI DB, never prod.
+      - name: Seed test DB
+        run: pnpm --filter @cap/database run db:seed
+
+      - name: Integration tests (API)
+        run: pnpm --filter @cap/api run test:integration
+
   # ─── Docker build check (PRs only; deploy workflows build + push on their own) ─────────
   docker-check:
     name: Docker build check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
         service: [api, web]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # context is the repo root: the Dockerfiles COPY the whole workspace (packages/, apps/*).
       - name: Build ${{ matrix.service }} image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: infra/docker/${{ matrix.service }}.Dockerfile
