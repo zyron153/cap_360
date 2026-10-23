@@ -665,9 +665,9 @@ people get push access).
   Note `ci.yml` only runs its `pull_request` jobs for PRs targeting `master`/`staging`/`develop`, so those
   are the branches a required-checks rule can use.
 - [ ] **Vulnerability checks:**
-  - triage the dependency-audit baseline (0 critical / **32 high** prod findings at 2026-10-03, see PROGRESS.md):
+  - triage the dependency-audit baseline (0 critical / **29 high** prod findings at 2026-10-23, see PROGRESS.md):
     upgrade, replace, or write down why each is accepted; the CI `pnpm audit` step is already a ratchet (fails above
-    `AUDIT_BASELINE_HIGH`=32 / critical 0; the multer override took the real count to 27) — lower the baseline as
+    `AUDIT_BASELINE_HIGH`=29 / critical 0) — lower the baseline as
     advisories are fixed, down to 0
   - enable Dependabot alerts + security updates and keep `.github/dependabot.yml` (npm workspaces, GitHub Actions,
     Dockerfiles; version-update PRs currently off, see above)

@@ -55,7 +55,7 @@ jobs:
 
   # ─── Dependency audit ─────────────────────────────────────────────────────
   # Critical advisories in production deps are zero today, so that is a hard gate. High is gated
-  # on a baseline (32 when measured 2026-10-03) so it can only go down: lower
+  # on a baseline (29 when measured 2026-10-23) so it can only go down: lower
   # AUDIT_BASELINE_HIGH as advisories get fixed, and make it 0 to hard-gate High as well.
   audit:
     name: Dependency audit
@@ -63,7 +63,7 @@ jobs:
     timeout-minutes: 10
     env:
       AUDIT_BASELINE_CRITICAL: 0
-      AUDIT_BASELINE_HIGH: 32
+      AUDIT_BASELINE_HIGH: 29
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
