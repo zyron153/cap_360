@@ -1,16 +1,20 @@
 version: 2
+# Version-update PRs are OFF (open-pull-requests-limit: 0 on every ecosystem, 2026-10-19): they flooded the repo with
+# branches. Security-update PRs are unaffected. To turn them back on, remove the limit (npm: set it back to 5).
 updates:
   # Actions are pinned by commit SHA (workflows/*.yml); Dependabot bumps the SHA and the "# vN" comment.
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    open-pull-requests-limit: 0
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     groups:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: docker
     directory: /infra/docker
     schedule: { interval: weekly }
+    open-pull-requests-limit: 0

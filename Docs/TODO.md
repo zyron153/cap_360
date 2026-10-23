@@ -651,8 +651,9 @@ See `SECURITY.md` for the full, section-by-section implementation status.
 - [ ] Uptime monitoring
 
 ### Repository protection & vulnerability checks — TODO, not done yet (noted 2026-10-03)
-Nothing below is configured: GitHub has no branch protection, `.github/dependabot.yml` doesn't exist and
-CodeQL / secret scanning aren't set up. Do this before real patient data goes live (and before more
+Mostly not configured: GitHub has no branch protection and CodeQL / secret scanning aren't set up. `.github/dependabot.yml`
+exists, but **version-update PRs are switched off** (`open-pull-requests-limit: 0`, 2026-10-19 — they flooded the repo with
+branches); remove the limit to turn them back on. Do this before real patient data goes live (and before more
 people get push access).
 - [ ] **Branch protection / rulesets** (GitHub → Settings → Rules) on `master`: require a PR + at least one
   review, require the `ci.yml` checks to pass (`Lint & Typecheck`, `Unit Tests`, `Dependency audit`,
@@ -668,8 +669,8 @@ people get push access).
     upgrade, replace, or write down why each is accepted; the CI `pnpm audit` step is already a ratchet (fails above
     `AUDIT_BASELINE_HIGH`=32 / critical 0; the multer override took the real count to 27) — lower the baseline as
     advisories are fixed, down to 0
-  - enable Dependabot alerts + security updates and add `.github/dependabot.yml` (npm workspaces, GitHub Actions,
-    Dockerfiles)
+  - enable Dependabot alerts + security updates and keep `.github/dependabot.yml` (npm workspaces, GitHub Actions,
+    Dockerfiles; version-update PRs currently off, see above)
   - enable GitHub secret scanning + push protection, and run a one-off history scan (gitleaks/trufflehog)
     for anything that was ever committed (`.env*`, keys, certificates)
   - enable CodeQL code scanning (JS/TS) and add an image scan (Trivy/Grype) to the Docker build check
