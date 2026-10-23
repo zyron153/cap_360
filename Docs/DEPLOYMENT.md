@@ -240,6 +240,10 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
   `express`) failed the gate (critical 1/0) and skipped build + deploy. Fixed the same way — `proxy-addr: ">=2.0.8"` in
   both override blocks, critical 1 → 0, high 29. Check a lockfile change under pnpm 9 in a scratch copy of the manifests
   (`npx pnpm@9 install --frozen-lockfile --lockfile-only`), never in the repo: pnpm 9 offers to wipe `node_modules`.
+  Again on 2026-10-23: two new **criticals** in `apps/web` (`next` ≤15.5.27, unauthenticated RCE in the image-optimization
+  API with SVGs; `@sentry/nextjs` <10.75.2, tunnel-route middleware bypass) failed the gate (critical 2/0). Fixed by plain
+  bumps — `next` ^15.5.28, `@sentry/nextjs` ^10.75.2, no override needed; critical 0, high 29, and `AUDIT_BASELINE_HIGH`
+  lowered 32 → 29.
 
 ### 0.7 Domain and HTTPS — `cap360.tech` (prod)
 Domain `cap360.tech` was claimed on 2026-10-03; **prod = `https://cap360.tech`**, staging stays on
@@ -443,7 +447,7 @@ Three workflows (details, secrets and commands in §0):
 ci.yml                 PR to master/staging, push to master, and workflow_call
   quality              Lint & Typecheck  — pnpm install, turbo typecheck + lint
   audit                Dependency audit  — pnpm audit --prod; critical must stay 0, high must not
-                       exceed AUDIT_BASELINE_HIGH (32 on 2026-10-03; lower it as advisories are fixed)
+                       exceed AUDIT_BASELINE_HIGH (29 on 2026-10-23; lower it as advisories are fixed)
   test                 Unit Tests        — postgres:16 + redis:7 services, migrate deploy, migration
                        drift check against schema.prisma, then turbo test
   docker-check         Docker build check — PRs only: builds api + web (no push), fails if the image

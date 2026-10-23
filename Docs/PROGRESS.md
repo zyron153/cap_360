@@ -207,7 +207,7 @@
 
 - **Nota para mais tarde — proteção do repositório e verificação de vulnerabilidades, 2026-10-03.**
   Ainda **não** está configurado: branch protection/rulesets, Dependabot (`.github/dependabot.yml`),
-  secret scanning, CodeQL e scan de imagens; o `pnpm audit` do CI é um gate com baseline (falha acima de 0 critical / 32 high; bloqueou um
+  secret scanning, CodeQL e scan de imagens; o `pnpm audit` do CI é um gate com baseline (falha acima de 0 critical / 29 high; bloqueou um
   deploy em 2026-10-03 até o override do `multer` baixar para 27 high) e há highs por tratar. Proteger só a `master` não afeta o deploy de staging (corre num push
   a `staging` ou manualmente); proteger a própria `staging` obriga a que o deploy venha de um PR.
   Checklist em `TODO.md` → DevOps → «Repository protection & vulnerability checks».
@@ -286,7 +286,7 @@
     deploys falhavam nesse passo.
   - **Outros:** nginx com `Host $http_host` (os redirects do Next perdiam a porta 8080), healthchecks em
     `127.0.0.1` + healthcheck do web, CI em Node 22 (pnpm 11 exige ≥ 22.13; as imagens continuam em
-    Node 20), baseline do audit 0 critical / 32 high.
+    Node 20), baseline do audit 0 critical / 29 high.
   - **Verificação:** actionlint, shellcheck, `docker compose config`, typecheck, lint e testes unitários
     limpos; `deploy.sh` ensaiado localmente (sucesso + release com API doente → rollback, exit 1).
     **Por executar:** os workflows no GitHub, push/pull GHCR, SSH, aprovação `PRODUCTION`, backup — não
