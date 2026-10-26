@@ -10,7 +10,10 @@ import { CreateStaffAccountSchema, CreateStaffAccountDto, SetStaffPasswordSchema
 export class StaffController {
   constructor(private readonly service: StaffService) {}
 
+  // Every real StaffRole must be able to read its own profile: the web resolves the user's role from
+  // this call, and a 403 here (lab_tech, corporate_hr) made it fall back to "admin" and show admin UI.
   @Get("me")
+  @Roles("admin", "receptionist", "doctor", "nurse", "lab_tech", "corporate_hr")
   findMe(@Req() req: { user: { sub: string; email?: string } }) {
     return this.service.findById(req.user.sub);
   }

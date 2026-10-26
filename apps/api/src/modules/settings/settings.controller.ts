@@ -8,7 +8,10 @@ import { SettingsService } from "./settings.service";
 export class SettingsController {
   constructor(private readonly service: SettingsService) {}
 
+  // Secrets are masked and e-Fatura excluded, and the web needs `access_control` to resolve every role's
+  // permissions, so every real StaffRole may read it (not just the 4 listed above).
   @Get()
+  @Roles("admin", "receptionist", "doctor", "nurse", "lab_tech", "corporate_hr")
   getAll() {
     return this.service.getAll();
   }
