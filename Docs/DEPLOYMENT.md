@@ -168,6 +168,13 @@ copied without the `services` rows — the copy would leave dangling links (null
 preço definido" state). Name the columns in `COPY` (`services` has a different physical column order on dev and
 staging). The dev prices are now on staging. Prod has no such data yet — decide it with the clinic before go-live.
 
+**Health plans are not seeded in staging/prod either**, so `GET /health-plans` returns `[]` (correct, not a bug)
+until data exists. Staging got a one-off insert on 2026-11-10: the 3 insurers (IMPAR, BCA Saúde, Garantia), the 8
+seed products, and 3 plans (`IMPAR-IND-2026-0001` with the test patient "Paciente 01", `IMPAR-FAM-2026-0001` and
+`BCA-CORP-2026-0001` with no members), run as `ON CONFLICT DO NOTHING` inserts via `psql`. Table names are the
+`@@map` ones (`companies`, `health_plan_products`, `health_plans`, `health_plan_members`), not the model names.
+Demo data, not real contracts; prod has none.
+
 `.env.prod` is never written by the deploy and never in git. **Changing it needs a recreate, not a
 restart** (`restart` keeps the env from container creation time and silently ignores the edit):
 `docker compose … up -d --force-recreate api` (or `web`).
