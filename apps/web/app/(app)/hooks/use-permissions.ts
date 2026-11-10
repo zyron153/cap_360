@@ -3,6 +3,7 @@ import {
   defaultPerms,
   type AccessControl, type PageKey, type RolePerms,
 } from "../../../lib/access-control";
+import { getJson } from "../../../lib/get-json";
 
 type StaffMe = { id: string; fullName: string; role: string; email: string };
 
@@ -14,18 +15,19 @@ function getPreviewRole(): string | null {
 export function usePermissions() {
   const { data: me, isLoading: meLoading } = useQuery<StaffMe>({
     queryKey: ["staff-me"],
-    queryFn: () => fetch("/api/staff/me").then(r => r.json()),
+    queryFn: () => getJson("/api/staff/me"),
     staleTime: 300_000,
   });
 
   const { data: settings, isLoading: settingsLoading } = useQuery<Record<string, unknown>>({
     queryKey: ["settings-all"],
-    queryFn: () => fetch("/api/settings").then(r => r.json()),
+    queryFn: () => getJson("/api/settings"),
     staleTime: 60_000,
   });
 
   const previewRole = getPreviewRole();
-  const role = previewRole ?? me?.role ?? "admin";
+  // Fail closed: an unknown role gets defaultPerms' no-access default, never admin.
+  const role = previewRole ?? me?.role ?? "";
   const isAdmin = role === "admin";
   const ac = settings?.access_control as AccessControl | undefined;
   const perms: RolePerms = isAdmin ? defaultPerms("admin") : (ac?.[role] ?? defaultPerms(role));

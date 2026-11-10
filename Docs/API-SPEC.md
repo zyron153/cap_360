@@ -512,7 +512,7 @@ DELETE /services/:id       roles: admin
 **Controller roles (default):** admin, receptionist, doctor, nurse
 
 ```
-GET    /staff/me                                    — resolves the caller's own staff record from the session
+GET    /staff/me                                    — resolves the caller's own staff record from the session; roles: all 6 StaffRole values (the web derives the user's role from it)
 PATCH  /staff/me/password                           — change own password; body: { currentPassword, newPassword }; roles: all 6 StaffRole values, overriding the controller default below; 400 if newPassword === currentPassword
 GET    /staff                                       — active staff list
 GET    /staff/:id
@@ -616,7 +616,7 @@ Response 201: the created Appointment (patient found-or-created by phone; consen
 
 ### `/settings` — roles: admin, receptionist, doctor, nurse (mutations narrower, see below)
 ```
-GET   /settings                                                 — all settings keyed by name
+GET   /settings                         roles: all 6 StaffRole values — all settings keyed by name (secrets masked, e-Fatura excluded)
 PATCH /settings/clinic              roles: admin, receptionist  — validated; only an admin may change `name` and `nif` (they are the emitter of every fiscal document)
 PATCH /settings/notifications       roles: admin, receptionist  — feature toggles (wa_confirm, wa_cancel, wa_reminder, email_daily, email_overdue)
 PATCH /settings/access-control      roles: admin
