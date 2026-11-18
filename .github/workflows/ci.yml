@@ -1,7 +1,7 @@
 name: CI
 
 # PR checks + the gate for deploys: deploy-staging.yml / deploy-production.yml call this workflow
-# first (workflow_call) and only build/deploy if it passes. A push to `staging` is therefore NOT
+# first (workflow_call) and only build/deploy if it passes (except the advisory-feed audit, see below). A push to `staging` is therefore NOT
 # listed under `push` — deploy-staging.yml already runs this on that push.
 on:
   push:
@@ -9,6 +9,9 @@ on:
   pull_request:
     branches: [master, staging]
   workflow_call:
+  # Weekly audit so a new advisory shows up as a red run even when nobody is pushing.
+  schedule:
+    - cron: "0 7 * * 1"
 
 # Only PR runs are cancelled when superseded; a deploy's CI run must always finish.
 concurrency:
@@ -57,10 +60,16 @@ jobs:
   # Critical advisories in production deps are zero today, so that is a hard gate. High is gated
   # on a baseline (29 when measured 2026-10-23) so it can only go down: lower
   # AUDIT_BASELINE_HIGH as advisories get fixed, and make it 0 to hard-gate High as well.
+  #
+  # It must NOT gate deploys: the advisory feed moves with no commit (it broke a deploy on 2026-10-03,
+  # 10-06, 10-23, 11-10 and 11-18), and a hotfix must never be blocked by a new advisory. So it is red
+  # on PRs and on the weekly schedule (the signal), but non-blocking when called by a deploy
+  # workflow (event push/workflow_dispatch): the job still runs and annotates, it just reports success.
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    continue-on-error: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     env:
       AUDIT_BASELINE_CRITICAL: 0
       AUDIT_BASELINE_HIGH: 29

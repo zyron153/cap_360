@@ -53,7 +53,7 @@ containers. Containers are never published except nginx; service health is read 
 
 Deploys are gated on CI: `ci.yml` is also a reusable workflow (`workflow_call`) that both deploy
 workflows run first, so a red CI blocks the deploy and a deploy only ever ships a commit that
-passed. A push to `staging` is not in `ci.yml`'s own `push` list because `deploy-staging.yml`
+passed (**except** `Dependency audit`, which is non-blocking on deploys, see §0.6). A push to `staging` is not in `ci.yml`'s own `push` list because `deploy-staging.yml`
 already runs it. Production ships the **`prod`** branch: release with `git push origin master:prod` (fast-forward from a green
 `master`) or "Run workflow" on `prod`. The `guard` job refuses any other ref, the `PRODUCTION` environment only
 allows deployments from `prod`, and its required reviewer approves every run. `prod` is not in `ci.yml`'s own
@@ -234,7 +234,12 @@ migrations. To redeploy an older commit through the pipeline instead, "Run workf
 - No `COMPOSE_PARALLEL_LIMIT` / build retry: nothing is built on the VPS (the Prisma engine download
   happens in the GitHub runner's `docker build`; re-run the workflow if it flakes).
 - CI runs Node 22 (pnpm 11 in `package.json` needs ≥ 22.13) while the Docker images run Node 20.
-- **The `Dependency audit` gate drifts with the advisory feed**, and it blocks deploys (they gate on `ci`): on
+- **The `Dependency audit` no longer gates deploys (2026-11-18).** It blocked deploys on 10-03, 10-06, 10-23, 11-10 and
+  11-18 because the advisory feed moves with no commit (high 39/29 on 11-18 skipped build + deploy). `ci.yml` now sets
+  `continue-on-error` on the job when the event is `push`/`workflow_dispatch` (i.e. when a deploy workflow called it): it
+  still runs and annotates but reports success. It stays red on PRs and on a weekly `schedule` (Mon 07:00 UTC), which is
+  the signal to fix advisories (overrides below, or major bumps); the numbers are no longer a deploy emergency. If you
+  want the gate back for production only, drop that `continue-on-error` in a prod-specific input. History: on
   2026-10-03 the first staging run passed at 32 high and the next one, an hour later, failed at 33. Fixed by
   pinning `multer: ">=2.3.0"` in **both** `pnpm-workspace.yaml` (`overrides:`, read by pnpm 11) and `package.json`
   (`pnpm.overrides`, read by pnpm 9 — the Dockerfiles install with pnpm 9 and fail `--frozen-lockfile` with
@@ -451,10 +456,11 @@ pnpm db:push                               # throwaway local experiments only (p
 Three workflows (details, secrets and commands in §0):
 
 ```
-ci.yml                 PR to master/staging, push to master, and workflow_call
+ci.yml                 PR to master/staging, push to master, weekly cron, and workflow_call
   quality              Lint & Typecheck  — pnpm install, turbo typecheck + lint
   audit                Dependency audit  — pnpm audit --prod; critical must stay 0, high must not
-                       exceed AUDIT_BASELINE_HIGH (29 on 2026-10-23; lower it as advisories are fixed)
+                       exceed AUDIT_BASELINE_HIGH (29 on 2026-10-23; lower it as advisories are fixed).
+                       Red on PRs + weekly cron; non-blocking when called by a deploy workflow
   test                 Unit Tests        — postgres:16 + redis:7 services, migrate deploy, migration
                        drift check against schema.prisma, then turbo test
   docker-check         Docker build check — PRs only: builds api + web (no push), fails if the image
